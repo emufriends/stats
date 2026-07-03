@@ -716,10 +716,15 @@ function compareRowsForCurrentSort(a, b) {
 
 // Assigns globally sorted rank indices for stable, non-filtered indexing in standard lists.
 function assignGlobalRanks() {
-  // Global rank is assigned across all loaded cards BEFORE search/type filtering.
+  // Global rank is assigned across cards that pass Minimum keeps, but BEFORE
+  // search/type/attribute filtering.
   // This is intentional: when searching "goat" or filtering to Sponsors, the # column
-  // still shows the card's overall rank in the current full sorted dataset.
-  const globallySorted = [...allData].sort(compareRowsForCurrentSort);
+  // still shows the card's overall rank among all minimum-qualified cards.
+  const rankingUniverse = minPlayedThreshold == null
+    ? allData
+    : allData.filter(row => Number(row.n_played || 0) >= minPlayedThreshold);
+  const globallySorted = [...rankingUniverse].sort(compareRowsForCurrentSort);
+  allData.forEach(row => { row.global_rank = null; });
   globallySorted.forEach((row, index) => {
     row.global_rank = index + 1;
   });
@@ -2016,7 +2021,6 @@ const PAGE_WINDOW_HANDLERS = {
 function bindWindowHandlers() {
   Object.assign(window, PAGE_WINDOW_HANDLERS);
 }
-
 
 
 

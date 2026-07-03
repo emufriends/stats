@@ -396,6 +396,7 @@ function mergeCardCatalogueFromRows(sourceRows) {
 
 function applyClientFilters({ preserveHead = false } = {}) {
   const minimum = Math.max(0, Number(document.getElementById('minPlayedInput')?.value || 0));
+  assignGlobalRanks(minimum);
   const candidatesBeforeMinimum = allData.filter(row => {
     const normalizedPairType = String(row.pair_type || '').replace(' vs. ', ' + ');
     if (activeView === 'card_card' && !selectedTypes.has(normalizedPairType)) return false;
@@ -434,20 +435,42 @@ function applyClientFilters({ preserveHead = false } = {}) {
 }
 
 function sortFilteredData() {
+  filteredData.sort(compareCombinationRows);
+}
+
+function compareCombinationRows(a, b) {
   const direction = sortState.dir === 'asc' ? 1 : -1;
-  filteredData.sort((a, b) => {
-    const av = a[sortState.col];
-    const bv = b[sortState.col];
-    if (typeof av === 'string' || typeof bv === 'string') {
-      return String(av || '').localeCompare(String(bv || '')) * direction;
-    }
+  const av = a[sortState.col];
+  const bv = b[sortState.col];
+  let result = 0;
+  if (typeof av === 'string' || typeof bv === 'string') {
+    result = String(av || '').localeCompare(String(bv || '')) * direction;
+  } else {
     const an = Number(av);
     const bn = Number(bv);
-    if (!Number.isFinite(an) && !Number.isFinite(bn)) return 0;
-    if (!Number.isFinite(an)) return 1;
-    if (!Number.isFinite(bn)) return -1;
-    return (an - bn) * direction;
-  });
+    if (!Number.isFinite(an) && !Number.isFinite(bn)) result = 0;
+    else if (!Number.isFinite(an)) result = 1;
+    else if (!Number.isFinite(bn)) result = -1;
+    else result = (an - bn) * direction;
+  }
+  if (result !== 0) return result;
+
+  const stableFields = activeView === 'card_card'
+    ? ['card_1', 'card_2', 'pair_type']
+    : ['card_name', activeView === 'card_map' ? 'map_name' : 'round_name', 'card_type'];
+  for (const field of stableFields) {
+    const stableResult = String(a[field] || '').localeCompare(String(b[field] || ''));
+    if (stableResult !== 0) return stableResult;
+  }
+  return 0;
+}
+
+function assignGlobalRanks(minimum) {
+  allData.forEach(row => { row.global_rank = null; });
+  const rankingUniverse = allData
+    .filter(row => Number(row.n_played) >= minimum)
+    .sort(compareCombinationRows);
+  rankingUniverse.forEach((row, index) => { row.global_rank = index + 1; });
 }
 
 function sortCombinations(col) {
@@ -472,8 +495,8 @@ function renderTable(preserveHead = false) {
   if (!tbody) return;
   const pageRows = filteredData.slice(start ? start - 1 : 0, end);
   tbody.innerHTML = pageRows.length
-    ? pageRows.map((row, index) => rowHtml(row, start + index)).join('')
-    : '<tr><td colspan="9"><div class="state-overlay"><div class="state-title">No combinations found</div></div></td></tr>';
+    ? pageRows.map(row => rowHtml(row, row.global_rank ?? '\u2014')).join('')
+    : `<tr><td colspan="${activeView === 'card_card' ? 9 : 8}"><div class="state-overlay"><div class="state-title">No combinations found</div></div></td></tr>`;
   renderPagination();
 }
 
@@ -486,26 +509,26 @@ function renderHead() {
   if (activeView === 'card_map' || activeView === 'card_round') {
     const isMap = activeView === 'card_map';
     const contextLabel = isMap ? 'Map' : 'Round';
-    const cardWidth = isMap ? '16%' : '20%';
-    const contextWidth = isMap ? '18%' : '11%';
-    const deltaCardWidth = isMap ? '11%' : '12%';
-    const contextDeltaWidth = isMap ? '11%' : '12%';
-    const eloWidth = isMap ? '7%' : '8%';
+    const cardWidth = '25%';
+    const contextWidth = isMap ? '18%' : '13%';
+    const contextDeltaWidth = isMap ? '12%' : '13%';
+    const synergyWidth = isMap ? '12%' : '13%';
+    const eloWidth = isMap ? '8%' : '11%';
+    const playedWidth = isMap ? '10%' : '9%';
+    const typeWidth = isMap ? '10%' : '11%';
     const contextDeltaLabel = isMap ? '\u0394 (On Map)' : '\u0394 (Round)';
     thead.innerHTML = `<tr>
       <th style="width:5%">#</th>
       ${cardFilterHeader('card_name', 'Card', 1, cardWidth)}
       ${isMap ? mapFilterHeader(contextWidth) : roundFilterHeader(contextWidth)}
-      ${header('delta_general', '\u0394 (Card)',
-        'average elo gain when this card was played overall', deltaCardWidth)}
       ${header(isMap ? 'delta_map' : 'delta_round', contextDeltaLabel,
         `average elo gain when played in this specific ${contextLabel.toLowerCase()}`, contextDeltaWidth)}
-      ${header('interaction', 'Synergy', `${contextDeltaLabel} - \u0394 (Card)`, '12%')}
+      ${header('interaction', 'Synergy', `${contextDeltaLabel} - \u0394 (Card)`, synergyWidth)}
       ${header('avg_elo', 'Elo',
         `average player elo when the card was played in this specific ${contextLabel.toLowerCase()}`, eloWidth)}
       ${header('n_played', 'Played',
-        `n (card played in this specific ${contextLabel.toLowerCase()})`, '10%')}
-      ${singleCardTypeFilterHeader('10%')}
+        `n (card played in this specific ${contextLabel.toLowerCase()})`, playedWidth)}
+      ${singleCardTypeFilterHeader(typeWidth)}
     </tr>`;
     return;
   }
@@ -651,9 +674,9 @@ function rowHtml(row, rank) {
     const isMap = activeView === 'card_map';
     return `<tr>
       <td class="rank-cell">${rank}</td>
-      <td class="combination-card-cell">${escapeHtml(titleCase(row.card_name))}</td>
+      ${combinedCardTd(row.card_name, row.delta_general)}
       <td>${escapeHtml(isMap ? formatMapName(row.map_name) : row.round_name)}</td>
-      ${deltaTd(row.delta_general)}${deltaTd(
+      ${deltaTd(
         isMap ? row.delta_map : row.delta_round,
         row,
         isMap ? 'delta_map' : 'delta_round'
@@ -1222,13 +1245,13 @@ function renderLoading() {
   });
   hidePagination();
   const body = document.getElementById('tableBody');
-  if (body) body.innerHTML = '<tr><td colspan="9"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching combinations...</div></div></td></tr>';
+  if (body) body.innerHTML = `<tr><td colspan="${activeView === 'card_card' ? 9 : 8}"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching combinations...</div></div></td></tr>`;
 }
 
 function renderError(error) {
   hidePagination();
   const body = document.getElementById('tableBody');
-  if (body) body.innerHTML = `<tr><td colspan="9"><div class="state-overlay"><div class="state-title">Could not load combinations</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div></td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="${activeView === 'card_card' ? 9 : 8}"><div class="state-overlay"><div class="state-title">Could not load combinations</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div></td></tr>`;
 }
 
 function deltaColor(value) {

@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260703-3';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260703-4';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
   closeSidebarIfOpen,
@@ -191,16 +191,30 @@ function renderDeltaCiTooltip(cell) {
   const count = cell.dataset.ciN === '' ? Number.NaN : Number(cell.dataset.ciN);
   const low = cell.dataset.ciLow === '' ? Number.NaN : Number(cell.dataset.ciLow);
   const high = cell.dataset.ciHigh === '' ? Number.NaN : Number(cell.dataset.ciHigh);
-  const countText = Number.isFinite(count) ? Math.max(0, Math.trunc(count)).toLocaleString('en-US') : 'unknown';
   if (!Number.isFinite(low) || !Number.isFinite(high) || !Number.isFinite(count) || count < 2) {
-    tooltip.innerHTML = `<strong>95% confidence interval unavailable</strong><br>n = ${countText}`;
+    tooltip.innerHTML = '<strong>95% confidence interval unavailable</strong>';
     return;
   }
   const signed = value => `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
-  const warning = count < 30
-    ? '<div class="ci-tooltip-warning">Low sample size; interpret cautiously.</div>'
-    : '';
-  tooltip.innerHTML = `<strong>95% confidence interval</strong><br>${signed(low)} to ${signed(high)}<br>n = ${countText}${warning}`;
+  const color = value => {
+    if (value >= 0.6) return 'var(--pos-strong)';
+    if (value >= 0.3) return 'var(--pos-mid)';
+    if (value >= 0.05) return 'var(--pos-weak)';
+    if (value >= -0.05) return 'var(--neutral)';
+    if (value >= -0.3) return 'var(--neg-weak)';
+    if (value >= -0.6) return 'var(--neg-mid)';
+    return 'var(--neg-strong)';
+  };
+  tooltip.innerHTML = `
+    <div class="ci-tooltip-title">95% confidence interval</div>
+    <div class="ci-tooltip-visual">
+      <div class="ci-tooltip-line"
+           style="--ci-low-color:${color(low)};--ci-high-color:${color(high)}"></div>
+      <div class="ci-tooltip-bounds">
+        <span>${signed(low)}</span>
+        <span>${signed(high)}</span>
+      </div>
+    </div>`;
 }
 
 function positionDeltaCiTooltip(event) {

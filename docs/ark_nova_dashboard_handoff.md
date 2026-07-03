@@ -335,6 +335,9 @@ Filters:
 - Minimum plays, client-side
 - Attributes bar, client-side
 
+The `#` rank is global across every loaded card that meets the current Minimum
+plays threshold. Search, Type, and Attributes filters do not renumber ranks.
+
 Round filtering is Cards-only. When fewer than all rounds are selected:
 
 - Backend aggregation changes.
@@ -580,11 +583,11 @@ Tournament H2H:
 - `card_map`: card/map rows for the 15 standard maps. Synergy is map-specific delta minus the card's general delta.
 - `card_round`: card/round rows for rounds `1` through `5` and a `6+` bucket. Synergy is round-specific delta minus the card's general delta.
 
-Played cards are deduplicated per table/player/card/round before aggregation. All six type combinations are supported for Card + Card; self-pairs and unobserved pairs are omitted, and individual baselines use the same active filters as interaction rows. Frontend defaults to minimum 1000 plays and Synergy descending. Card + Card puts the individual card delta beneath each card name and supports one-card or exact unordered-pair header filtering.
+Played cards are deduplicated per table/player/card/round before aggregation. All six type combinations are supported for Card + Card; self-pairs and unobserved pairs are omitted, and individual baselines use the same active filters as interaction rows. Frontend defaults to minimum 1000 plays and Synergy descending. All three views put the individual card delta beneath each card name. Card + Card supports one-card or exact unordered-pair header filtering.
 
 Sidebar filters are view-aware: Card + Card shows Map and Round, Card + Map hides Map and shows Round, and Card + Round shows Map and hides Round. Card + Map and Card + Round provide multi-select header filters for their represented dimension. Card + Map's Map header is filter-only; a narrowed selection replaces its filter icon with an `N/15` chip, and popup map chips expose styled full-name tooltips. Card selectors search both display names and aliases from `cards_altnames.csv`. Card + Map displays map names as `Observation Tower (1a)` while retaining raw full names for matching. Card + Card's six-value Type popup includes all/none controls and spans the Played plus Type columns exactly. Fixed-position Type popups are flush with their headers, follow layout/scroll changes, and close only after the complete popup leaves the viewport. Empty Type, Map, or Round selections return no rows, and `6+` means round 6 or later.
 
-All three tables use 100%-total desktop column allocations and a `1080px` readability floor. Normal 1280px desktop layouts do not scroll; narrower desktop/tablet layouts scroll horizontally instead of allowing headers, names, or badges to overlap. Cards and Endgames similarly use `950px` and `900px` desktop/tablet width floors; existing mobile table sizing remains authoritative. Card + Map and Card + Round use the Cards-style single-card Type filter. Active sortable headers use the shared bright-green `sorted` state; narrowed filters use the paler filter accent. Loading, error, and empty states hide pagination and span all nine columns.
+All three tables use 100%-total desktop column allocations and a `1080px` readability floor. Card + Card has nine columns; Card + Map and Card + Round have eight because their general card delta is integrated into the Card cell. Normal 1280px desktop layouts do not scroll; narrower desktop/tablet layouts scroll horizontally instead of allowing headers, names, or badges to overlap. Cards and Endgames similarly use `950px` and `900px` desktop/tablet width floors; existing mobile table sizing remains authoritative. Card + Map and Card + Round use the Cards-style single-card Type filter. Active sortable headers use the shared bright-green `sorted` state; narrowed filters use the paler filter accent. Loading, error, and empty states hide pagination and span the active view's complete column count.
 
 Default snapshots:
 
@@ -599,6 +602,10 @@ card-stats/combinations/card-round/default-{mw|base}.json
 `app.js` observes rendered `.rank-cell` elements and reduces only overflowing rank text, down to a legible minimum; page modules do not need their own four-digit-rank handling. Card-header search buttons keep their compact glyph but use a larger invisible hit target extending mainly to the left. Sortable tables should add the shared `sorted` class to the active `<th>`; narrowed filters use `--accent-filter` instead.
 
 Default sort highlighting is hidden during loading and applied only after data has loaded. Cards, Opening Hand, and Combos distinguish a genuine empty filter result from a Minimum plays/keeps threshold that removed otherwise-valid rows; only the latter temporarily pulses the minimum input, stopping after five seconds or immediately on focus.
+
+Cards, Opening Hand, and all Combo views calculate `#` globally among rows that
+meet the current Minimum plays/keeps threshold. Secondary client-side filters
+preserve those global ranks and therefore intentionally leave gaps.
 
 On phones, the navigation rail overlays rather than resizes the main content and collapses after selecting a route. Maps and Combos do not freeze left-side data columns on phones; their full tables scroll horizontally.
 
@@ -1392,7 +1399,10 @@ unrounded mean +/- t(0.975, n - 1) * sample_sd / sqrt(n)
 The backend uses `STDDEV_SAMP` and `COUNT(elo_delta)` on the exact rows used by
 the corresponding `AVG(elo_delta)`. It uses Student's t critical values through
 200 degrees of freedom and the normal limit `1.959963984540054` above that.
-Intervals require at least two non-null observations. Tooltips warn when `n < 30`.
+Intervals require at least two non-null observations. CI tooltips display a fixed-width
+gradient line whose endpoint colors use the same seven thresholds as visible delta
+values, with signed lower/upper labels beneath it. The fixed line length does not encode
+interval width. Tooltips do not display the internal `n` or a low-sample warning.
 
 The CI count is deliberately separate from visible table counts:
 

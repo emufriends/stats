@@ -1972,10 +1972,37 @@
       cursor: help;
     }
 
-    #col-tooltip .ci-tooltip-warning {
-      margin-top: 5px;
+    #col-tooltip .ci-tooltip-title {
+      font-weight: 600;
+      text-align: center;
+    }
+
+    #col-tooltip .ci-tooltip-visual {
+      width: 176px;
+      margin-top: 8px;
+    }
+
+    #col-tooltip .ci-tooltip-line {
+      width: 100%;
+      height: 7px;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        var(--ci-low-color),
+        var(--ci-high-color)
+      );
+      box-shadow: 0 0 8px color-mix(in srgb, var(--ci-high-color) 24%, transparent);
+    }
+
+    #col-tooltip .ci-tooltip-bounds {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      margin-top: 4px;
       color: var(--text-muted);
       font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
     }
 
     /* Playrate bar */
