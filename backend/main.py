@@ -4,9 +4,11 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import time
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 
 from google.cloud import bigquery
 from google.cloud import storage
@@ -48,7 +50,7 @@ VALID_ROUNDS = {"1", "2", "3", "4", "5", "6+"}
 
 CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 CACHE_PREFIX = os.environ.get("CACHE_PREFIX", "card-stats")
-FILTER_CACHE_VERSION = "v3"
+FILTER_CACHE_VERSION = "v4"
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -183,6 +185,134 @@ def _json_default(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _beta_continued_fraction(a, b, x):
+    """Numerical Recipes continued fraction for the incomplete beta function."""
+    max_iterations = 200
+    epsilon = 3e-14
+    fp_min = 1e-300
+    qab = a + b
+    qap = a + 1.0
+    qam = a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < fp_min:
+        d = fp_min
+    d = 1.0 / d
+    result = d
+    for iteration in range(1, max_iterations + 1):
+        m2 = 2 * iteration
+        aa = iteration * (b - iteration) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < fp_min:
+            d = fp_min
+        c = 1.0 + aa / c
+        if abs(c) < fp_min:
+            c = fp_min
+        d = 1.0 / d
+        result *= d * c
+
+        aa = -(a + iteration) * (qab + iteration) * x / (
+            (a + m2) * (qap + m2)
+        )
+        d = 1.0 + aa * d
+        if abs(d) < fp_min:
+            d = fp_min
+        c = 1.0 + aa / c
+        if abs(c) < fp_min:
+            c = fp_min
+        d = 1.0 / d
+        delta = d * c
+        result *= delta
+        if abs(delta - 1.0) < epsilon:
+            break
+    return result
+
+
+def _regularized_incomplete_beta(a, b, x):
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    log_beta_term = (
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+        + a * math.log(x) + b * math.log1p(-x)
+    )
+    beta_term = math.exp(log_beta_term)
+    if x < (a + 1.0) / (a + b + 2.0):
+        return beta_term * _beta_continued_fraction(a, b, x) / a
+    return 1.0 - beta_term * _beta_continued_fraction(b, a, 1.0 - x) / b
+
+
+def _student_t_cdf(value, degrees_freedom):
+    if value == 0:
+        return 0.5
+    x = degrees_freedom / (degrees_freedom + value * value)
+    tail = 0.5 * _regularized_incomplete_beta(
+        degrees_freedom / 2.0, 0.5, x
+    )
+    return 1.0 - tail if value > 0 else tail
+
+
+@lru_cache(maxsize=200)
+def _t_critical_95(degrees_freedom):
+    """Two-sided 95% t critical value; normal limit above 200 df."""
+    degrees_freedom = int(degrees_freedom)
+    if degrees_freedom < 1:
+        return None
+    if degrees_freedom > 200:
+        return 1.959963984540054
+    low = 0.0
+    high = 16.0
+    for _ in range(70):
+        midpoint = (low + high) / 2.0
+        if _student_t_cdf(midpoint, degrees_freedom) < 0.975:
+            low = midpoint
+        else:
+            high = midpoint
+    return (low + high) / 2.0
+
+
+def _ci95_fields(prefix, mean, sample_sd, observation_count):
+    """Return public CI fields while keeping raw mean/SD internal."""
+    try:
+        count = int(observation_count or 0)
+    except (TypeError, ValueError):
+        count = 0
+    result = {
+        f"{prefix}_ci95_low": None,
+        f"{prefix}_ci95_high": None,
+        f"{prefix}_ci95_n": count,
+    }
+    if count < 2 or mean is None or sample_sd is None:
+        return result
+    try:
+        mean_value = float(mean)
+        sd_value = float(sample_sd)
+    except (TypeError, ValueError):
+        return result
+    if not math.isfinite(mean_value) or not math.isfinite(sd_value) or sd_value < 0:
+        return result
+    critical = _t_critical_95(count - 1)
+    margin = critical * sd_value / math.sqrt(count)
+    result[f"{prefix}_ci95_low"] = round(mean_value - margin, 3)
+    result[f"{prefix}_ci95_high"] = round(mean_value + margin, 3)
+    return result
+
+
+def _attach_ci95(item, row, schema_field_names, prefix):
+    mean_field = f"{prefix}_ci_mean"
+    sd_field = f"{prefix}_ci_sd"
+    n_field = f"{prefix}_ci_n"
+    if n_field not in schema_field_names:
+        return
+    item.update(_ci95_fields(
+        prefix,
+        getattr(row, mean_field, None),
+        getattr(row, sd_field, None),
+        getattr(row, n_field, None),
+    ))
 
 
 def _sql_string(value):
@@ -944,6 +1074,9 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
             card_type,
             COUNT(DISTINCT table_id) AS n_played,
             ROUND(AVG(elo_delta), 3) AS delta_played,
+            AVG(elo_delta) AS delta_played_ci_mean,
+            STDDEV_SAMP(elo_delta) AS delta_played_ci_sd,
+            COUNT(elo_delta) AS delta_played_ci_n,
             ROUND(AVG(elo), 0) AS avg_elo
           FROM all_played
           GROUP BY card_name, card_type
@@ -953,6 +1086,12 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
           card_name,
           delta_played,
           CAST(NULL AS FLOAT64) AS delta_in_hand,
+          delta_played_ci_mean,
+          delta_played_ci_sd,
+          delta_played_ci_n,
+          CAST(NULL AS FLOAT64) AS delta_in_hand_ci_mean,
+          CAST(NULL AS FLOAT64) AS delta_in_hand_ci_sd,
+          CAST(0 AS INT64) AS delta_in_hand_ci_n,
           avg_elo,
           n_played,
           CAST(NULL AS INT64) AS n_seen,
@@ -1028,6 +1167,9 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
         card_type,
         COUNT(DISTINCT table_id) AS n_played,
         ROUND(AVG(elo_delta), 3) AS delta_played,
+        AVG(elo_delta) AS delta_played_ci_mean,
+        STDDEV_SAMP(elo_delta) AS delta_played_ci_sd,
+        COUNT(elo_delta) AS delta_played_ci_n,
         ROUND(AVG(elo), 0) AS avg_elo
       FROM all_played
       GROUP BY card_name, card_type
@@ -1035,7 +1177,10 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
     in_hand_agg AS (
       SELECT
         card_name,
-        ROUND(AVG(elo_delta), 3) AS delta_in_hand
+        ROUND(AVG(elo_delta), 3) AS delta_in_hand,
+        AVG(elo_delta) AS delta_in_hand_ci_mean,
+        STDDEV_SAMP(elo_delta) AS delta_in_hand_ci_sd,
+        COUNT(elo_delta) AS delta_in_hand_ci_n
       FROM in_hand
       GROUP BY card_name
     ),
@@ -1051,6 +1196,12 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
       p.card_name,
       p.delta_played,
       h.delta_in_hand,
+      p.delta_played_ci_mean,
+      p.delta_played_ci_sd,
+      p.delta_played_ci_n,
+      h.delta_in_hand_ci_mean,
+      h.delta_in_hand_ci_sd,
+      COALESCE(h.delta_in_hand_ci_n, 0) AS delta_in_hand_ci_n,
       p.avg_elo,
       p.n_played,
       s.n_seen,
@@ -1104,7 +1255,10 @@ def _build_opening_hand_stats_query(where_sql):
       SELECT
         TRIM(card) AS card_name,
         COUNT(*) AS n_dealt,
-        ROUND(AVG(elo_delta), 3) AS delta_dealt
+        ROUND(AVG(elo_delta), 3) AS delta_dealt,
+        AVG(elo_delta) AS delta_dealt_ci_mean,
+        STDDEV_SAMP(elo_delta) AS delta_dealt_ci_sd,
+        COUNT(elo_delta) AS delta_dealt_ci_n
       FROM log_filtered
       CROSS JOIN UNNEST(IFNULL(opening_cards, [])) AS card
       WHERE TRIM(card) != ''
@@ -1116,6 +1270,9 @@ def _build_opening_hand_stats_query(where_sql):
         TRIM(card) AS card_name,
         COUNT(*) AS n_kept,
         ROUND(AVG(elo_delta), 3) AS delta_kept,
+        AVG(elo_delta) AS delta_kept_ci_mean,
+        STDDEV_SAMP(elo_delta) AS delta_kept_ci_sd,
+        COUNT(elo_delta) AS delta_kept_ci_n,
         ROUND(AVG(elo), 0) AS avg_elo
       FROM log_filtered
       CROSS JOIN UNNEST(IFNULL(opening_keep, [])) AS card
@@ -1128,6 +1285,12 @@ def _build_opening_hand_stats_query(where_sql):
       u.card_name,
       COALESCE(d.delta_dealt, 0) AS delta_played,
       COALESCE(k.delta_kept, 0) AS delta_in_hand,
+      d.delta_dealt_ci_mean AS delta_played_ci_mean,
+      d.delta_dealt_ci_sd AS delta_played_ci_sd,
+      COALESCE(d.delta_dealt_ci_n, 0) AS delta_played_ci_n,
+      k.delta_kept_ci_mean AS delta_in_hand_ci_mean,
+      k.delta_kept_ci_sd AS delta_in_hand_ci_sd,
+      COALESCE(k.delta_kept_ci_n, 0) AS delta_in_hand_ci_n,
       COALESCE(k.avg_elo, 0) AS avg_elo,
       COALESCE(k.n_kept, 0) AS n_played,
       COALESCE(d.n_dealt, 0) AS n_seen,
@@ -1203,7 +1366,10 @@ def _build_endgames_general_query(where_sql):
     dealt_delta AS (
       SELECT
         TRIM(card) AS card_name,
-        ROUND(AVG(sf.elo_delta), 3) AS delta_dealt
+        ROUND(AVG(sf.elo_delta), 3) AS delta_dealt,
+        AVG(sf.elo_delta) AS delta_dealt_ci_mean,
+        STDDEV_SAMP(sf.elo_delta) AS delta_dealt_ci_sd,
+        COUNT(sf.elo_delta) AS delta_dealt_ci_n
       FROM scored_filtered sf
       LEFT JOIN non_adapt_rows nr
         ON sf.table_id = nr.table_id AND sf.player = nr.player
@@ -1217,6 +1383,9 @@ def _build_endgames_general_query(where_sql):
         TRIM(score.endgame) AS card_name,
         COUNT(*) AS n_scored,
         ROUND(AVG(elo_delta), 3) AS delta_scored,
+        AVG(elo_delta) AS delta_scored_ci_mean,
+        STDDEV_SAMP(elo_delta) AS delta_scored_ci_sd,
+        COUNT(elo_delta) AS delta_scored_ci_n,
         ROUND(AVG(elo), 0) AS avg_elo,
         ROUND(AVG(SAFE_CAST(score.cp AS FLOAT64)), 2) AS avg_cp
       FROM scored_filtered
@@ -1234,6 +1403,12 @@ def _build_endgames_general_query(where_sql):
       u.card_name,
       dd.delta_dealt AS delta_played,
       s.delta_scored AS delta_in_hand,
+      dd.delta_dealt_ci_mean AS delta_played_ci_mean,
+      dd.delta_dealt_ci_sd AS delta_played_ci_sd,
+      COALESCE(dd.delta_dealt_ci_n, 0) AS delta_played_ci_n,
+      s.delta_scored_ci_mean AS delta_in_hand_ci_mean,
+      s.delta_scored_ci_sd AS delta_in_hand_ci_sd,
+      COALESCE(s.delta_scored_ci_n, 0) AS delta_in_hand_ci_n,
       s.avg_elo,
       COALESCE(s.n_scored, 0) AS n_played,
       COALESCE(dc.n_dealt, 0) AS n_seen,
@@ -1858,28 +2033,37 @@ def _build_sponsor_endgames_query(where_sql, sponsor_endgames_view):
         config_sql = _sponsor_appeal_config_sql()
         value_expr = "SAFE_CAST(event.appeal AS INT64)"
         avg_alias = "avg_appeal"
-        delta_selects = ",\n      ".join(
-            f"ROUND(AVG(IF(value = {v} AND {v} IN UNNEST(possible_values), elo_delta, NULL)), 3) AS delta_{v}"
-            for v in range(7)
-        )
-        count_selects = ",\n      ".join(
-            f"COUNTIF(value = {v} AND {v} IN UNNEST(possible_values)) AS count_{v}"
-            for v in range(7)
-        )
+        bucket_conditions = [
+            (f"delta_{value}", f"value = {value} AND {value} IN UNNEST(possible_values)")
+            for value in range(7)
+        ]
     else:
         config_sql = _sponsor_cp_config_sql()
         value_expr = "SAFE_CAST(event.cp AS INT64)"
         avg_alias = "avg_cp"
-        delta_selects = """
-      ROUND(AVG(IF(value = 0 AND 0 IN UNNEST(possible_values), elo_delta, NULL)), 3) AS delta_0,
-      ROUND(AVG(IF(value = 1 AND 1 IN UNNEST(possible_values), elo_delta, NULL)), 3) AS delta_1,
-      ROUND(AVG(IF(value = 2 AND 2 IN UNNEST(possible_values), elo_delta, NULL)), 3) AS delta_2,
-      ROUND(AVG(IF(value >= 3 AND 3 IN UNNEST(possible_values), elo_delta, NULL)), 3) AS delta_3_plus"""
-        count_selects = """
-      COUNTIF(value = 0 AND 0 IN UNNEST(possible_values)) AS count_0,
-      COUNTIF(value = 1 AND 1 IN UNNEST(possible_values)) AS count_1,
-      COUNTIF(value = 2 AND 2 IN UNNEST(possible_values)) AS count_2,
-      COUNTIF(value >= 3 AND 3 IN UNNEST(possible_values)) AS count_3_plus"""
+        bucket_conditions = [
+            ("delta_0", "value = 0 AND 0 IN UNNEST(possible_values)"),
+            ("delta_1", "value = 1 AND 1 IN UNNEST(possible_values)"),
+            ("delta_2", "value = 2 AND 2 IN UNNEST(possible_values)"),
+            ("delta_3_plus", "value >= 3 AND 3 IN UNNEST(possible_values)"),
+        ]
+
+    delta_selects = ",\n      ".join(
+        f"ROUND(AVG(IF({condition}, elo_delta, NULL)), 3) AS {field}"
+        for field, condition in bucket_conditions
+    )
+    count_selects = ",\n      ".join(
+        f"COUNTIF({condition}) AS {field.replace('delta_', 'count_')}"
+        for field, condition in bucket_conditions
+    )
+    ci_selects = ",\n      ".join(
+        (
+            f"AVG(IF({condition}, elo_delta, NULL)) AS {field}_ci_mean,\n"
+            f"      STDDEV_SAMP(IF({condition}, elo_delta, NULL)) AS {field}_ci_sd,\n"
+            f"      COUNTIF(({condition}) AND elo_delta IS NOT NULL) AS {field}_ci_n"
+        )
+        for field, condition in bucket_conditions
+    )
 
     return f"""
     WITH configured AS (
@@ -1954,7 +2138,8 @@ def _build_sponsor_endgames_query(where_sql, sponsor_endgames_view):
         ROUND(AVG(o.elo), 0) AS avg_elo,
         COUNT(o.sponsor) AS n_played,
         {delta_selects},
-        {count_selects}
+        {count_selects},
+        {ci_selects}
       FROM configured c
       LEFT JOIN observations o
         ON c.sponsor = o.sponsor
@@ -2052,6 +2237,8 @@ def _build_combinations_query(
             ANY_VALUE(card_type) AS card_type,
             Map AS map_name,
             AVG(elo_delta) AS map_delta,
+            STDDEV_SAMP(elo_delta) AS map_delta_ci_sd,
+            COUNT(elo_delta) AS map_delta_ci_n,
             AVG(elo) AS avg_elo,
             COUNT(*) AS n_played
           FROM played
@@ -2064,6 +2251,9 @@ def _build_combinations_query(
           p.map_name,
           ROUND(i.individual_delta, 3) AS delta_general,
           ROUND(p.map_delta, 3) AS delta_map,
+          p.map_delta AS delta_map_ci_mean,
+          p.map_delta_ci_sd AS delta_map_ci_sd,
+          p.map_delta_ci_n AS delta_map_ci_n,
           ROUND(p.map_delta - i.individual_delta, 3) AS interaction,
           ROUND(p.avg_elo, 0) AS avg_elo,
           p.n_played
@@ -2082,6 +2272,8 @@ def _build_combinations_query(
             ANY_VALUE(card_type) AS card_type,
             IF(played_round >= 6, '6+', CAST(played_round AS STRING)) AS round_name,
             AVG(elo_delta) AS round_delta,
+            STDDEV_SAMP(elo_delta) AS round_delta_ci_sd,
+            COUNT(elo_delta) AS round_delta_ci_n,
             AVG(elo) AS avg_elo,
             COUNT(*) AS n_played
           FROM played
@@ -2094,6 +2286,9 @@ def _build_combinations_query(
           p.round_name,
           ROUND(i.individual_delta, 3) AS delta_general,
           ROUND(p.round_delta, 3) AS delta_round,
+          p.round_delta AS delta_round_ci_mean,
+          p.round_delta_ci_sd AS delta_round_ci_sd,
+          p.round_delta_ci_n AS delta_round_ci_n,
           ROUND(p.round_delta - i.individual_delta, 3) AS interaction,
           ROUND(p.avg_elo, 0) AS avg_elo,
           p.n_played
@@ -2119,6 +2314,8 @@ def _build_combinations_query(
         card_2,
         ANY_VALUE(type_2) AS type_2,
         AVG(elo_delta) AS delta_actual,
+        STDDEV_SAMP(elo_delta) AS delta_actual_ci_sd,
+        COUNT(elo_delta) AS delta_actual_ci_n,
         AVG(elo) AS avg_elo,
         COUNT(*) AS n_played
       FROM pair_observations
@@ -2133,6 +2330,9 @@ def _build_combinations_query(
       ROUND(i2.individual_delta, 3) AS delta_2,
       ROUND(i1.individual_delta + i2.individual_delta, 3) AS delta_combined,
       ROUND(p.delta_actual, 3) AS delta_actual,
+      p.delta_actual AS delta_actual_ci_mean,
+      p.delta_actual_ci_sd AS delta_actual_ci_sd,
+      p.delta_actual_ci_n AS delta_actual_ci_n,
       ROUND(p.delta_actual - (i1.individual_delta + i2.individual_delta), 3) AS interaction,
       ROUND(p.avg_elo, 0) AS avg_elo,
       p.n_played,
@@ -2332,6 +2532,11 @@ def _query_card_stats(
             ):
                 if field_name in schema_field_names:
                     item[field_name] = getattr(row, field_name, None)
+            for prefix in (
+                "delta_0", "delta_1", "delta_2", "delta_3",
+                "delta_4", "delta_5", "delta_6", "delta_3_plus",
+            ):
+                _attach_ci95(item, row, schema_field_names, prefix)
             rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
@@ -2350,9 +2555,10 @@ def _query_card_stats(
         return rows, timing
 
     if stats_page == STATS_PAGE_COMBINATIONS:
+        schema_field_names = {field.name for field in results.schema}
         for row in results:
             if combinations_view == COMBINATIONS_VIEW_CARD_MAP:
-                rows.append({
+                item = {
                     "card_name": row.card_name,
                     "card_type": row.card_type,
                     "map_name": row.map_name,
@@ -2361,9 +2567,10 @@ def _query_card_stats(
                     "interaction": row.interaction,
                     "avg_elo": row.avg_elo,
                     "n_played": row.n_played,
-                })
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_map")
             elif combinations_view == COMBINATIONS_VIEW_CARD_ROUND:
-                rows.append({
+                item = {
                     "card_name": row.card_name,
                     "card_type": row.card_type,
                     "round_name": row.round_name,
@@ -2372,9 +2579,10 @@ def _query_card_stats(
                     "interaction": row.interaction,
                     "avg_elo": row.avg_elo,
                     "n_played": row.n_played,
-                })
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_round")
             else:
-                rows.append({
+                item = {
                     "card_1": row.card_1,
                     "type_1": row.type_1,
                     "delta_1": row.delta_1,
@@ -2387,7 +2595,9 @@ def _query_card_stats(
                     "avg_elo": row.avg_elo,
                     "n_played": row.n_played,
                     "pair_type": row.pair_type,
-                })
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_actual")
+            rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
             "client_ms": client_ms,
@@ -2421,6 +2631,8 @@ def _query_card_stats(
                 "playrate_pct": row.playrate_pct,
                 "avg_cp": getattr(row, "avg_cp", None),
             }
+            _attach_ci95(item, row, schema_field_names, "delta_played")
+            _attach_ci95(item, row, schema_field_names, "delta_in_hand")
             for field_name in (
                 "cp_0_pct", "cp_1_pct", "cp_2_pct", "cp_3_pct", "cp_4_pct",
                 "map_1a", "map_2a", "map_3a", "map_4a", "map_5a",
