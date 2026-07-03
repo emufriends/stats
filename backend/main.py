@@ -50,7 +50,7 @@ VALID_ROUNDS = {"1", "2", "3", "4", "5", "6+"}
 
 CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 CACHE_PREFIX = os.environ.get("CACHE_PREFIX", "card-stats")
-FILTER_CACHE_VERSION = "v4"
+FILTER_CACHE_VERSION = "v5"
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -1344,38 +1344,147 @@ def _build_endgames_general_query(where_sql):
       FROM log_filtered lf
       JOIN non_conceded_tables n USING(table_id)
     ),
+    orientation_source AS (
+      SELECT
+        p.table_id,
+        p.player,
+        p.endgame,
+        p.endgame_scores
+      FROM `{PREPARED_LOGS_TABLE}` p
+      JOIN non_conceded_tables n USING(table_id)
+    ),
+    orientation_players AS (
+      SELECT DISTINCT table_id, player
+      FROM orientation_source
+    ),
+    orientation_dealt AS (
+      SELECT
+        os.table_id,
+        os.player AS dealt_row_player,
+        TRIM(card) AS card_name
+      FROM orientation_source os
+      CROSS JOIN UNNEST(IFNULL(os.endgame, [])) AS card
+      WHERE TRIM(card) != ''
+    ),
+    orientation_scored AS (
+      SELECT
+        os.table_id,
+        os.player,
+        TRIM(score.endgame) AS card_name
+      FROM orientation_source os
+      CROSS JOIN UNNEST(IFNULL(os.endgame_scores, [])) AS score
+      WHERE TRIM(score.endgame) != ''
+    ),
+    orientation_flags AS (
+      SELECT
+        op.table_id,
+        op.player,
+        EXISTS (
+          SELECT 1
+          FROM orientation_dealt od
+          JOIN orientation_scored osc
+            ON od.table_id = osc.table_id
+           AND od.dealt_row_player = osc.player
+           AND od.card_name = osc.card_name
+          WHERE od.table_id = op.table_id
+            AND od.dealt_row_player = op.player
+        ) AS own_match,
+        EXISTS (
+          SELECT 1
+          FROM orientation_dealt od
+          JOIN orientation_scored osc
+            ON od.table_id = osc.table_id
+           AND od.dealt_row_player != osc.player
+           AND od.card_name = osc.card_name
+          WHERE od.table_id = op.table_id
+            AND od.dealt_row_player = op.player
+        ) AS swapped_match
+      FROM orientation_players op
+    ),
+    table_orientation AS (
+      SELECT
+        table_id,
+        CASE
+          WHEN COUNT(*) = 2 AND COUNTIF(own_match) > COUNTIF(swapped_match) THEN 'same'
+          WHEN COUNT(*) = 2 AND COUNTIF(swapped_match) > COUNTIF(own_match) THEN 'swapped'
+          ELSE 'ambiguous'
+        END AS orientation
+      FROM orientation_flags
+      GROUP BY table_id
+    ),
+    assigned_mw_dealt AS (
+      SELECT
+        od.table_id,
+        od.dealt_row_player AS player,
+        od.card_name
+      FROM orientation_dealt od
+      JOIN table_orientation tor USING(table_id)
+      WHERE tor.orientation = 'same'
+
+      UNION ALL
+
+      SELECT
+        od.table_id,
+        other_player.player,
+        od.card_name
+      FROM orientation_dealt od
+      JOIN table_orientation tor USING(table_id)
+      JOIN orientation_players other_player
+        ON od.table_id = other_player.table_id
+       AND od.dealt_row_player != other_player.player
+      WHERE tor.orientation = 'swapped'
+    ),
+    corrected_dealt AS (
+      SELECT
+        sf.table_id,
+        sf.player,
+        TRIM(card) AS card_name,
+        sf.elo_delta
+      FROM scored_filtered sf
+      CROSS JOIN UNNEST(IFNULL(sf.endgame, [])) AS card
+      WHERE @is_mw = 0
+        AND TRIM(card) != ''
+
+      UNION ALL
+
+      SELECT
+        sf.table_id,
+        sf.player,
+        amd.card_name,
+        sf.elo_delta
+      FROM scored_filtered sf
+      JOIN assigned_mw_dealt amd USING(table_id, player)
+      WHERE @is_mw = 1
+    ),
     dealt_counts AS (
       SELECT
         TRIM(card) AS card_name,
         COUNT(*) AS n_dealt
-      FROM log_filtered
+      FROM scored_filtered
       CROSS JOIN UNNEST(IFNULL(endgame, [])) AS card
       WHERE TRIM(card) != ''
       GROUP BY card_name
     ),
     non_adapt_rows AS (
       SELECT DISTINCT
-        sf.table_id,
-        sf.player
-      FROM scored_filtered sf
-      CROSS JOIN UNNEST(IFNULL(sf.endgame, [])) AS dealt_card
+        cd.table_id,
+        cd.player
+      FROM corrected_dealt cd
+      JOIN scored_filtered sf USING(table_id, player)
       CROSS JOIN UNNEST(IFNULL(sf.endgame_scores, [])) AS score
-      WHERE TRIM(dealt_card) != ''
-        AND TRIM(score.endgame) = TRIM(dealt_card)
+      WHERE TRIM(score.endgame) = cd.card_name
     ),
     dealt_delta AS (
       SELECT
-        TRIM(card) AS card_name,
-        ROUND(AVG(sf.elo_delta), 3) AS delta_dealt,
-        AVG(sf.elo_delta) AS delta_dealt_ci_mean,
-        STDDEV_SAMP(sf.elo_delta) AS delta_dealt_ci_sd,
-        COUNT(sf.elo_delta) AS delta_dealt_ci_n
-      FROM scored_filtered sf
+        cd.card_name,
+        ROUND(AVG(cd.elo_delta), 3) AS delta_dealt,
+        AVG(cd.elo_delta) AS delta_dealt_ci_mean,
+        STDDEV_SAMP(cd.elo_delta) AS delta_dealt_ci_sd,
+        COUNT(cd.elo_delta) AS delta_dealt_ci_n
+      FROM corrected_dealt cd
       LEFT JOIN non_adapt_rows nr
-        ON sf.table_id = nr.table_id AND sf.player = nr.player
-      CROSS JOIN UNNEST(IFNULL(sf.endgame, [])) AS card
-      WHERE TRIM(card) != ''
-        AND (@is_mw = 0 OR nr.table_id IS NOT NULL)
+        ON cd.table_id = nr.table_id AND cd.player = nr.player
+      WHERE @is_mw = 0 OR nr.table_id IS NOT NULL
       GROUP BY card_name
     ),
     scored AS (
