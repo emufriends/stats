@@ -29,7 +29,7 @@ export const PAGES = {
     id: 'maps',
     title: 'Maps',
     navLabel: 'Maps',
-    load: () => import('./pages/maps.js?v=20260702-3'),
+    load: () => import('./pages/maps.js?v=20260703-1'),
   },
   combos: {
     id: 'combos',

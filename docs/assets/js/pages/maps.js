@@ -134,6 +134,8 @@ const PAGE_WINDOW_HANDLERS = {
   toggleLegacyMaps,
   sortMapsByHeader,
   sortMapsByMetric,
+  sortH2hByOverall,
+  sortH2hByMap,
 };
 
 let isMW = 1;
@@ -144,6 +146,7 @@ let mapMeta = FALLBACK_MAPS;
 let visibleMaps = FALLBACK_MAPS;
 let activeView = METRICS_VIEW;
 let h2hMode = 'win';
+let h2hSortByOverall = false;
 let currentSortMetric = 'Turns';
 let useNaturalMapOrder = false;
 let includeLegacyMaps = false;
@@ -161,6 +164,7 @@ export function mount({ dataset = 1 } = {}) {
   isMW = Number(dataset) === 0 ? 0 : 1;
   activeView = METRICS_VIEW;
   h2hMode = 'win';
+  h2hSortByOverall = false;
   currentSortMetric = 'Turns';
   useNaturalMapOrder = false;
   includeLegacyMaps = false;
@@ -637,7 +641,8 @@ function renderH2h() {
   const matrix = buildH2hMatrix();
   const totalGames = totalH2hGames(matrix);
   renderH2hMeta(totalGames);
-  tbody.innerHTML = visibleMaps.map(rowMap => `
+  const rowMaps = sortedMapsForH2h(matrix);
+  tbody.innerHTML = rowMaps.map(rowMap => `
     <tr>
       <td class="maps-h2h-row-head maps-custom-tip" data-tip="${escapeAttr(rowMap.full)}">${escapeHtml(rowMap.code)}</td>
       ${visibleMaps.map(colMap => h2hCellHtml(matrix.matchups.get(h2hKey(rowMap.full, colMap.full)), rowMap.full === colMap.full)).join('')}
@@ -647,14 +652,53 @@ function renderH2h() {
   ensureH2hResizeObserver();
 }
 
+// Row order. Natural order (default) always follows visibleMaps, which is
+// already 1a, 2a, ..., T1. Sorting by Overall ranks rows by whichever metric
+// is currently active (Win% or Elo delta), best record first; rows with no
+// Overall data sort to the bottom rather than being dropped.
+function sortedMapsForH2h(matrix) {
+  if (!h2hSortByOverall) return [...visibleMaps];
+  return visibleMaps
+    .map((map, naturalIndex) => ({
+      map,
+      naturalIndex,
+      value: h2hOverallSortValue(matrix, map),
+    }))
+    .sort((a, b) => {
+      if (a.value === b.value) return a.naturalIndex - b.naturalIndex;
+      if (a.value === -Infinity) return 1;
+      if (b.value === -Infinity) return -1;
+      return b.value - a.value;
+    })
+    .map(item => item.map);
+}
+
+function h2hOverallSortValue(matrix, map) {
+  const row = matrix.overall.get(map.full);
+  const raw = row ? (h2hMode === 'win' ? row.win_pct : row.elo_delta) : null;
+  if (raw === null || raw === undefined || raw === '') return -Infinity;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : -Infinity;
+}
+
+function sortH2hByOverall() {
+  h2hSortByOverall = true;
+  renderH2h();
+}
+
+function sortH2hByMap() {
+  h2hSortByOverall = false;
+  renderH2h();
+}
+
 function renderH2hHead() {
   const thead = document.getElementById('tableHead');
   if (!thead) return;
   thead.innerHTML = `
     <tr>
-      <th class="maps-h2h-corner">You \\ Opp</th>
+      <th class="maps-h2h-corner" onclick="sortH2hByMap()">You \\ Opp${!h2hSortByOverall ? '<span class="maps-sort-indicator">&#8595;</span>' : ''}</th>
       ${visibleMaps.map(map => `<th class="maps-h2h-map-head maps-custom-tip" data-tip="${escapeAttr(map.full)}">${escapeHtml(map.code)}</th>`).join('')}
-      <th class="maps-h2h-overall-head">Overall</th>
+      <th class="maps-h2h-overall-head" onclick="sortH2hByOverall()">Overall${h2hSortByOverall ? '<span class="maps-sort-indicator">&#8595;</span>' : ''}</th>
     </tr>`;
 }
 
@@ -678,10 +722,13 @@ function syncH2hRowHeight() {
 function ensureH2hResizeObserver() {
   if (typeof ResizeObserver === 'undefined') return;
   const table = document.getElementById('statsTable');
-  if (!table) return;
+  const sampleCell = table?.querySelector('.maps-h2h-map-head');
+  if (!sampleCell) return;
   if (h2hResizeObserver) h2hResizeObserver.disconnect();
   h2hResizeObserver = new ResizeObserver(() => syncH2hRowHeight());
-  h2hResizeObserver.observe(table);
+  // Observe the measured column itself. Watching the whole table also reacts
+  // to row-height changes caused by this callback and adds a redundant cycle.
+  h2hResizeObserver.observe(sampleCell);
 }
 
 function buildH2hMatrix() {

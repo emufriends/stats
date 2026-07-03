@@ -2481,6 +2481,7 @@
       width: 5.6%;
       color: var(--text-muted);
       white-space: nowrap;
+      cursor: default;
     }
 
     .maps-h2h-row-head {

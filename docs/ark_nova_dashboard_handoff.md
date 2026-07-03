@@ -493,6 +493,8 @@ Endgames filters:
 
 The daily refresh also publishes `card-stats/home/defaults.js`, containing both MW and Base payloads in `window.__ARK_NOVA_HOME_DEFAULTS__`. `index.html` loads this small asset before the app so default Home and MW/Base switching render immediately. Filtered requests still use the API, while the JSON snapshots remain the fallback.
 
+On phones, Home keeps the navigation rail expanded and reserves its width in the layout. Leaving Home automatically unlocks and collapses the rail so it returns to overlay behavior on other pages.
+
 ### Sponsor Endgames Page
 
 `assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to non-conceded games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points, Elo, and delta buckets all use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. Delta headers use the shared `#col-tooltip`, and map chips use the same isolate-then-toggle behavior as other filter bars. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
@@ -563,6 +565,7 @@ Tournament H2H:
 - Toggle modes are Win% and Elo delta.
 - Win% cells show percentage plus exact `wins-losses`; Elo cells show signed average delta plus `n = X`.
 - The rightmost Overall column is wider and separated with a double border.
+- Rows default to natural map order and can be ranked descending by the active Overall metric; missing Overall values remain last. H2H row height tracks the rendered map-column width through a scoped `ResizeObserver`.
 
 ### Combos Page
 

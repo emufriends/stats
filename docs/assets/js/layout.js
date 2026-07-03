@@ -118,7 +118,7 @@ export function closeSidebarIfOpen() {
   if (overlay) overlay.classList.remove('active');
 }
 
-// Desktop-only nav rail collapse state. Mobile/tablet sizing is CSS-driven.
+// Shared nav collapse state. CSS controls the rail's dimensions at each breakpoint.
 export function toggleNavCollapse() {
   if (isNavHomeLocked) return;
   const nav = document.getElementById('sideNav');
@@ -136,11 +136,18 @@ export function toggleNavCollapse() {
 let isNavHomeLocked = false;
 
 export function setNavHomeLock(isHome) {
+  const wasHomeLocked = isNavHomeLocked;
   isNavHomeLocked = Boolean(isHome);
   const nav = document.getElementById('sideNav');
   if (!nav) return;
   nav.classList.toggle('nav-home-locked', isNavHomeLocked);
-  if (isNavHomeLocked) setNavCollapsed(false);
+  if (isNavHomeLocked) {
+    setNavCollapsed(false);
+  } else if (wasHomeLocked && window.matchMedia('(max-width: 600px)').matches) {
+    // The route-link click happens while Home is still locked, so its normal
+    // mobile auto-collapse is skipped. Collapse once the new route unlocks it.
+    setNavCollapsed(true);
+  }
 }
 
 function setNavCollapsed(isCollapsed) {
@@ -154,7 +161,6 @@ function setNavCollapsed(isCollapsed) {
   } else {
     document.documentElement.style.removeProperty('--side-nav-width');
   }
-  btn.textContent = isCollapsed ? '\u203a' : '\u2039';
   updateSideNavScrollState();
 }
 
