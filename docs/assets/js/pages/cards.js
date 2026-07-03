@@ -836,6 +836,14 @@ function appendCell(rowEl, className, text, color) {
   return cell;
 }
 
+function appendDeltaCiCell(rowEl, row, prefix, text, color) {
+  const cell = appendCell(rowEl, 'delta delta-ci-cell', text, color);
+  cell.dataset.ciLow = row[`${prefix}_ci95_low`] ?? '';
+  cell.dataset.ciHigh = row[`${prefix}_ci95_high`] ?? '';
+  cell.dataset.ciN = row[`${prefix}_ci95_n`] ?? '';
+  return cell;
+}
+
 function appendUnavailableCell(rowEl) {
   appendCell(rowEl, 'unavailable-cell', '\u2014');
 }
@@ -926,9 +934,9 @@ function renderTable(data) {
     const tr = document.createElement('tr');
     appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
     appendCell(tr, 'card-name', titleCase(row.card_name));
-    appendCell(tr, 'delta', dp, deltaColor(row.delta_played));
+    appendDeltaCiCell(tr, row, 'delta_played', dp, deltaColor(row.delta_played));
     if (roundFilterActive) appendUnavailableCell(tr);
-    else appendCell(tr, 'delta', dh, deltaColor(row.delta_in_hand));
+    else appendDeltaCiCell(tr, row, 'delta_in_hand', dh, deltaColor(row.delta_in_hand));
     appendCell(tr, 'n-cell', eloDisplay, eloCol);
     if (roundFilterActive) appendUnavailableCell(tr);
     else appendPlayrateCell(tr, pr, prVal, barWidth, barColor);
@@ -1122,6 +1130,7 @@ document.addEventListener('mouseover', e => {
 document.addEventListener('mousemove', e => {
   if (!isPageMounted) return;
   if (_colTip.style.display === 'none') return;
+  if (e.target.closest('.delta-ci-cell')) return;
   const th = e.target.closest('th');
   if (!th || !th.querySelector('.col-tip')) { _colTip.style.display = 'none'; return; }
   positionColTip(e);
@@ -1129,6 +1138,7 @@ document.addEventListener('mousemove', e => {
 
 document.addEventListener('mouseout', e => {
   if (!isPageMounted) return;
+  if (e.target.closest('.delta-ci-cell') || e.relatedTarget?.closest('.delta-ci-cell')) return;
   const th = e.target.closest('th');
   if (!th || !e.relatedTarget?.closest('th') || e.relatedTarget.closest('th') !== th) {
     _colTip.style.display = 'none';
@@ -2085,8 +2095,6 @@ const PAGE_WINDOW_HANDLERS = {
 function bindWindowHandlers() {
   Object.assign(window, PAGE_WINDOW_HANDLERS);
 }
-
-
 
 
 

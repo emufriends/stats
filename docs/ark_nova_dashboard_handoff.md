@@ -1,7 +1,7 @@
 # Ark Nova Statistics Dashboard Handoff
 
 Date: 2026-06-21  
-Last updated: 2026-06-28  
+Last updated: 2026-07-03  
 Project owner: pr0paganda-panda / Panda  
 Current active development repo: https://github.com/emufriends/arknova-stats  
 Public frozen repo: pr0paganda-panda/ark-nova-stats, maintained manually by the user
@@ -498,7 +498,7 @@ On phones, Home keeps the navigation rail expanded and reserves its width in the
 ### Sponsor Endgames Page
 
 `assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to non-conceded games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points, Elo, and delta buckets all use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. Delta headers use the shared `#col-tooltip`, and map chips use the same isolate-then-toggle behavior as other filter bars. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
-- Valid delta body cells also expose prevalence tooltips as `X.X%` plus `count/n played`; impossible and unavailable buckets remain tooltip-free dashes.
+- Valid delta body cells expose their 95% Elo-delta confidence interval on hover; impossible and unavailable buckets remain tooltip-free dashes.
 - No Round filter
 - No Completed games toggle exposed to the user
 - No attributes bar
@@ -972,7 +972,7 @@ card-stats/data-version.json
 Filter cache version:
 
 ```text
-v3
+v4
 ```
 
 Default snapshots are public gzip-encoded JSON files loaded directly by the frontend for fast initial page loads; versioned frontend requests may use normal browser caching. The backend reads the same compressed objects transparently when serving cache fallbacks. Home additionally has a generated JavaScript bootstrap containing both default datasets so its first paint has no loading state. Non-default filter requests go through the Cloud Function and may use compressed Cloud Storage filter-cache blobs. The filter cache key includes the explicit data-version marker, so daily refresh invalidates old filter results.
@@ -1360,6 +1360,57 @@ Do not abstract too early if the next page has unique needs, but the duplication
 - Frontend has no build step and no automated browser test suite.
 - There are global document listeners in page modules for popups/tooltips. They have not caused data bugs, but a future cleanup could centralize or guard them.
 - CSS is large and monolithic.
+- Elo-delta confidence intervals currently use observation-level Student's t
+  intervals. A future statistical review may replace them with game-clustered
+  or bootstrap intervals to account for within-game dependence.
+
+## Elo Delta Confidence Intervals
+
+The dashboard exposes two-sided 95% confidence intervals for only these displayed
+Elo-delta means:
+
+- Cards: delta played and delta in hand
+- Opening Hand: delta kept and delta dealt
+- Endgames General: delta scored and delta dealt
+- Combos: delta actual (Card + Card), delta on map, and delta round
+- Sponsor Endgames: every valid CP/Appeal delta bucket
+
+Maps, Synergy, combo component/general deltas, and all other statistics do not
+have confidence intervals.
+
+Each interval is:
+
+```text
+unrounded mean +/- t(0.975, n - 1) * sample_sd / sqrt(n)
+```
+
+The backend uses `STDDEV_SAMP` and `COUNT(elo_delta)` on the exact rows used by
+the corresponding `AVG(elo_delta)`. It uses Student's t critical values through
+200 degrees of freedom and the normal limit `1.959963984540054` above that.
+Intervals require at least two non-null observations. Tooltips warn when `n < 30`.
+
+The CI count is deliberately separate from visible table counts:
+
+- Cards played: non-null played-row deltas, not distinct-table `Played`.
+- Cards in hand: distinct table/player/card in-hand rows, not `Seen`.
+- Opening Hand: non-null dealt or kept entries, respectively.
+- Endgames scored: scored events from non-conceded games.
+- Endgames dealt: the exact non-conceded dealt-delta population, including the
+  MW no-Adapt restriction; this can differ from visible `Dealt`.
+- Combos: the exact pair, card/map, or card/round observations for the displayed mean.
+- Sponsor Endgames: distinct sponsor-play observations in that exact valid bucket.
+
+Public payload field names use:
+
+```text
+<delta_field>_ci95_low
+<delta_field>_ci95_high
+<delta_field>_ci95_n
+```
+
+All MW/Base default snapshots include these fields. Filtered requests recompute
+mean, sample SD, count, and interval after applying the active filters; cached
+filtered responses are keyed by that complete filter set and data version.
 
 ## Important Bugs Fixed Recently
 

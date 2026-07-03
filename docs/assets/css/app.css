@@ -1968,6 +1968,16 @@
       font-variant-numeric: tabular-nums;
     }
 
+    .delta-ci-cell {
+      cursor: help;
+    }
+
+    #col-tooltip .ci-tooltip-warning {
+      margin-top: 5px;
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
     /* Playrate bar */
     .playrate-cell {
       display: flex;

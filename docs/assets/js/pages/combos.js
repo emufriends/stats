@@ -653,7 +653,11 @@ function rowHtml(row, rank) {
       <td class="rank-cell">${rank}</td>
       <td class="combination-card-cell">${escapeHtml(titleCase(row.card_name))}</td>
       <td>${escapeHtml(isMap ? formatMapName(row.map_name) : row.round_name)}</td>
-      ${deltaTd(row.delta_general)}${deltaTd(isMap ? row.delta_map : row.delta_round)}
+      ${deltaTd(row.delta_general)}${deltaTd(
+        isMap ? row.delta_map : row.delta_round,
+        row,
+        isMap ? 'delta_map' : 'delta_round'
+      )}
       ${interactionTd(row.interaction)}
       <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
       <td class="n-cell">${formatInteger(row.n_played)}</td>
@@ -664,7 +668,7 @@ function rowHtml(row, rank) {
     <td class="rank-cell">${rank}</td>
     ${combinedCardTd(row.card_1, row.delta_1)}
     ${combinedCardTd(row.card_2, row.delta_2)}
-    ${deltaTd(row.delta_combined)}${deltaTd(row.delta_actual)}
+    ${deltaTd(row.delta_combined)}${deltaTd(row.delta_actual, row, 'delta_actual')}
     ${interactionTd(row.interaction)}
     <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
     <td class="n-cell">${formatInteger(row.n_played)}</td>
@@ -700,9 +704,13 @@ function pairTypeBadge(rawTypeOne, rawTypeTwo) {
   </span>`;
 }
 
-function deltaTd(raw) {
+function deltaTd(raw, row = null, prefix = '') {
   const value = Number(raw);
-  return `<td class="delta" style="color:${deltaColor(value)}">${formatSigned(value)}</td>`;
+  const ciClass = row && prefix ? ' delta-ci-cell' : '';
+  const ciAttrs = row && prefix
+    ? ` data-ci-low="${escapeAttr(row[`${prefix}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${prefix}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${prefix}_ci95_n`] ?? '')}"`
+    : '';
+  return `<td class="delta${ciClass}"${ciAttrs} style="color:${deltaColor(value)}">${formatSigned(value)}</td>`;
 }
 
 function interactionTd(raw) {
@@ -1376,6 +1384,7 @@ document.addEventListener('mouseover', event => {
 document.addEventListener('mousemove', event => {
   const tooltip = getCombinationColTooltip();
   if (!mounted || !tooltip || tooltip.style.display === 'none') return;
+  if (event.target.closest('.delta-ci-cell')) return;
   if (!event.target.closest('.col-tip')) return hideTooltip();
   positionTooltip(event);
 });

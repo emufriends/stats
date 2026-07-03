@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260703-1';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260703-2';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
   closeSidebarIfOpen,
@@ -183,6 +183,62 @@ function setMinimumPlaysWarning(input, shouldWarn) {
 document.addEventListener('focusin', event => {
   if (!event.target.matches('.min-plays-input')) return;
   setMinimumPlaysWarning(event.target, false);
+});
+
+function renderDeltaCiTooltip(cell) {
+  const tooltip = document.getElementById('col-tooltip');
+  if (!tooltip) return;
+  const count = cell.dataset.ciN === '' ? Number.NaN : Number(cell.dataset.ciN);
+  const low = cell.dataset.ciLow === '' ? Number.NaN : Number(cell.dataset.ciLow);
+  const high = cell.dataset.ciHigh === '' ? Number.NaN : Number(cell.dataset.ciHigh);
+  const countText = Number.isFinite(count) ? Math.max(0, Math.trunc(count)).toLocaleString('en-US') : 'unknown';
+  if (!Number.isFinite(low) || !Number.isFinite(high) || !Number.isFinite(count) || count < 2) {
+    tooltip.innerHTML = `<strong>95% confidence interval unavailable</strong><br>n = ${countText}`;
+    return;
+  }
+  const signed = value => `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+  const warning = count < 30
+    ? '<div class="ci-tooltip-warning">Low sample size; interpret cautiously.</div>'
+    : '';
+  tooltip.innerHTML = `<strong>95% confidence interval</strong><br>${signed(low)} to ${signed(high)}<br>n = ${countText}${warning}`;
+}
+
+function positionDeltaCiTooltip(event) {
+  const tooltip = document.getElementById('col-tooltip');
+  if (!tooltip) return;
+  const margin = 8;
+  const width = tooltip.offsetWidth;
+  const height = tooltip.offsetHeight;
+  let left = event.clientX - width / 2;
+  let top = event.clientY + 18;
+  left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+  if (top + height > window.innerHeight - margin) top = event.clientY - height - 10;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+document.addEventListener('mouseover', event => {
+  const cell = event.target.closest?.('#pageMain .delta-ci-cell');
+  const tooltip = document.getElementById('col-tooltip');
+  if (!cell || !tooltip) return;
+  renderDeltaCiTooltip(cell);
+  tooltip.style.display = 'block';
+  positionDeltaCiTooltip(event);
+});
+
+document.addEventListener('mousemove', event => {
+  const tooltip = document.getElementById('col-tooltip');
+  if (!tooltip || tooltip.style.display === 'none') return;
+  const cell = event.target.closest?.('#pageMain .delta-ci-cell');
+  if (!cell) return;
+  positionDeltaCiTooltip(event);
+});
+
+document.addEventListener('mouseout', event => {
+  const cell = event.target.closest?.('#pageMain .delta-ci-cell');
+  if (!cell || cell.contains(event.relatedTarget)) return;
+  const tooltip = document.getElementById('col-tooltip');
+  if (tooltip) tooltip.style.display = 'none';
 });
 
 // Header controls live in layout.js markup, so they are intentionally global.

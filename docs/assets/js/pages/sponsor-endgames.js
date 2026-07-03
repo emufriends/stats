@@ -351,13 +351,8 @@ function deltaCell(row, field, value) {
   const raw = row[field];
   const n = Number(raw);
   if (!Number.isFinite(n)) return '<td class="unavailable-cell">-</td>';
-  const countField = field.replace(/^delta_/, 'count_');
-  const count = Number(row[countField]);
-  const total = Number(row.n_played);
-  const prevalenceAttrs = Number.isFinite(count) && Number.isFinite(total) && total > 0
-    ? ` class="delta sponsor-delta-prevalence" data-prevalence-count="${count}" data-prevalence-total="${total}"`
-    : ' class="delta"';
-  return `<td${prevalenceAttrs} style="color:${deltaColor(n)}">${formatSigned(n)}</td>`;
+  const ciAttrs = ` data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}"`;
+  return `<td class="delta delta-ci-cell"${ciAttrs} style="color:${deltaColor(n)}">${formatSigned(n)}</td>`;
 }
 
 function sortRows(source) {
@@ -539,13 +534,6 @@ const _colTip = document.getElementById('col-tooltip');
 
 document.addEventListener('mouseover', event => {
   if (!isPageMounted || !_colTip) return;
-  const prevalenceCell = event.target.closest('.sponsor-delta-prevalence');
-  if (prevalenceCell) {
-    renderPrevalenceTip(prevalenceCell);
-    _colTip.style.display = 'block';
-    positionColTip(event);
-    return;
-  }
   const tipEl = event.target.closest('th')?.querySelector('.col-tip');
   if (!tipEl) return;
   _colTip.textContent = tipEl.dataset.tip || '';
@@ -555,8 +543,8 @@ document.addEventListener('mouseover', event => {
 
 document.addEventListener('mousemove', event => {
   if (!isPageMounted || !_colTip || _colTip.style.display === 'none') return;
-  const hasTip = event.target.closest('.sponsor-delta-prevalence')
-    || event.target.closest('th')?.querySelector('.col-tip');
+  if (event.target.closest('.delta-ci-cell')) return;
+  const hasTip = event.target.closest('th')?.querySelector('.col-tip');
   if (!hasTip) {
     _colTip.style.display = 'none';
     return;
@@ -566,20 +554,13 @@ document.addEventListener('mousemove', event => {
 
 document.addEventListener('mouseout', event => {
   if (!isPageMounted || !_colTip) return;
-  const source = event.target.closest('.sponsor-delta-prevalence') || event.target.closest('th');
-  const destination = event.relatedTarget?.closest('.sponsor-delta-prevalence')
-    || event.relatedTarget?.closest('th');
+  if (event.target.closest('.delta-ci-cell') || event.relatedTarget?.closest('.delta-ci-cell')) return;
+  const source = event.target.closest('th');
+  const destination = event.relatedTarget?.closest('th');
   if (!source || destination !== source) {
     _colTip.style.display = 'none';
   }
 });
-
-function renderPrevalenceTip(cell) {
-  const count = Number(cell.dataset.prevalenceCount);
-  const total = Number(cell.dataset.prevalenceTotal);
-  const percentage = total > 0 ? 100 * count / total : 0;
-  _colTip.innerHTML = `${percentage.toFixed(1)}%<br>${count}/${total}`;
-}
 
 function positionColTip(event) {
   const margin = 8;

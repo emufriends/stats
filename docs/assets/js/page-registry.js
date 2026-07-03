@@ -17,13 +17,13 @@ export const PAGES = {
     id: 'cards',
     title: 'Cards',
     navLabel: 'Cards',
-    load: () => import('./pages/cards.js?v=20260629-13'),
+    load: () => import('./pages/cards.js?v=20260703-2'),
   },
   'opening-hand': {
     id: 'opening-hand',
     title: 'Opening Hand',
     navLabel: 'Opening Hand',
-    load: () => import('./pages/opening-hand.js?v=20260629-13'),
+    load: () => import('./pages/opening-hand.js?v=20260703-2'),
   },
   maps: {
     id: 'maps',
@@ -35,18 +35,18 @@ export const PAGES = {
     id: 'combos',
     title: 'Combos',
     navLabel: 'Combos',
-    load: () => import('./pages/combos.js?v=20260629-13'),
+    load: () => import('./pages/combos.js?v=20260703-2'),
   },
   endgames: {
     id: 'endgames',
     title: 'Endgames',
     navLabel: 'Endgames',
-    load: () => import('./pages/endgames.js?v=20260629-13'),
+    load: () => import('./pages/endgames.js?v=20260703-2'),
   },
   'sponsor-endgames': {
     id: 'sponsor-endgames',
     title: 'Sponsor Endgames',
     navLabel: 'Sponsor Endgames',
-    load: () => import('./pages/sponsor-endgames.js?v=20260629-13'),
+    load: () => import('./pages/sponsor-endgames.js?v=20260703-2'),
   },
 };

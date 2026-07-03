@@ -625,6 +625,14 @@ function appendCell(rowEl, className, text, color) {
   return cell;
 }
 
+function appendDeltaCiCell(rowEl, row, prefix, text, color) {
+  const cell = appendCell(rowEl, 'delta delta-ci-cell', text, color);
+  cell.dataset.ciLow = row[`${prefix}_ci95_low`] ?? '';
+  cell.dataset.ciHigh = row[`${prefix}_ci95_high`] ?? '';
+  cell.dataset.ciN = row[`${prefix}_ci95_n`] ?? '';
+  return cell;
+}
+
 function appendPlayrateCell(rowEl, pr, prVal, barWidth, barColor) {
   const cell = document.createElement('td');
   const wrap = document.createElement('div');
@@ -706,8 +714,8 @@ function renderGeneralRow(tr, row, maxPR, minElo, maxElo) {
   const cpVal = row.avg_cp;
   appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
   appendCell(tr, 'card-name', titleCase(row.card_name || ''));
-  appendCell(tr, 'delta', fmtDelta(row.delta_in_hand), deltaColor(row.delta_in_hand));
-  appendCell(tr, 'delta', fmtDelta(row.delta_played), deltaColor(row.delta_played));
+  appendDeltaCiCell(tr, row, 'delta_in_hand', fmtDelta(row.delta_in_hand), deltaColor(row.delta_in_hand));
+  appendDeltaCiCell(tr, row, 'delta_played', fmtDelta(row.delta_played), deltaColor(row.delta_played));
   appendCell(tr, 'n-cell', row.avg_elo != null ? Math.round(row.avg_elo).toLocaleString('en-US') : '\u2014', eloColor(row.avg_elo, minElo, maxElo));
   appendPlayrateCell(tr, row.playrate_pct != null ? `${row.playrate_pct.toFixed(2)}%` : '\u2014', prVal, Math.min(prVal, maxPR) / maxPR * 100, prColor(prVal));
   appendCell(tr, 'n-cell', fmtN(row.n_played));
@@ -1133,6 +1141,7 @@ document.addEventListener('mouseover', e => {
 
 document.addEventListener('mousemove', e => {
   if (!isPageMounted || !_colTip || _colTip.style.display === 'none') return;
+  if (e.target.closest('.delta-ci-cell')) return;
   const th = e.target.closest('th');
   if (!th || !th.querySelector('.col-tip')) {
     _colTip.style.display = 'none';
@@ -1143,6 +1152,7 @@ document.addEventListener('mousemove', e => {
 
 document.addEventListener('mouseout', e => {
   if (!isPageMounted || !_colTip) return;
+  if (e.target.closest('.delta-ci-cell') || e.relatedTarget?.closest('.delta-ci-cell')) return;
   const th = e.target.closest('th');
   if (!th || !e.relatedTarget?.closest('th') || e.relatedTarget.closest('th') !== th) {
     _colTip.style.display = 'none';
