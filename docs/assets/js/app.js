@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260703-2';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260703-3';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
   closeSidebarIfOpen,

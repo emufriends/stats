@@ -684,7 +684,6 @@ function renderTable(data) {
   if (currentPage > totalPages) currentPage = totalPages;
   const start = (currentPage - 1) * rpp;
   const pageData = data.slice(start, start + rpp);
-  const maxPR = Math.max(...data.map(r => r.playrate_pct || 0), 1);
   const eloVals = data.map(r => r.avg_elo).filter(v => v != null);
   const minElo = eloVals.length ? Math.min(...eloVals) : 0;
   const maxElo = eloVals.length ? Math.max(...eloVals) : 0;
@@ -694,7 +693,7 @@ function renderTable(data) {
     const tr = document.createElement('tr');
     if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION) renderCpDistributionRow(tr, row);
     else if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP) renderCpByMapRow(tr, row);
-    else renderGeneralRow(tr, row, maxPR, minElo, maxElo);
+    else renderGeneralRow(tr, row, minElo, maxElo);
     tbody.appendChild(tr);
   });
 
@@ -709,7 +708,7 @@ function renderTable(data) {
   }
 }
 
-function renderGeneralRow(tr, row, maxPR, minElo, maxElo) {
+function renderGeneralRow(tr, row, minElo, maxElo) {
   const prVal = row.playrate_pct || 0;
   const cpVal = row.avg_cp;
   appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
@@ -717,7 +716,13 @@ function renderGeneralRow(tr, row, maxPR, minElo, maxElo) {
   appendDeltaCiCell(tr, row, 'delta_in_hand', fmtDelta(row.delta_in_hand), deltaColor(row.delta_in_hand));
   appendDeltaCiCell(tr, row, 'delta_played', fmtDelta(row.delta_played), deltaColor(row.delta_played));
   appendCell(tr, 'n-cell', row.avg_elo != null ? Math.round(row.avg_elo).toLocaleString('en-US') : '\u2014', eloColor(row.avg_elo, minElo, maxElo));
-  appendPlayrateCell(tr, row.playrate_pct != null ? `${row.playrate_pct.toFixed(2)}%` : '\u2014', prVal, Math.min(prVal, maxPR) / maxPR * 100, prColor(prVal));
+  appendPlayrateCell(
+    tr,
+    row.playrate_pct != null ? `${row.playrate_pct.toFixed(2)}%` : '\u2014',
+    prVal,
+    Math.min(Math.max(prVal, 0), 100),
+    prColor(prVal),
+  );
   appendCell(tr, 'n-cell', fmtN(row.n_played));
   appendCell(tr, 'n-cell', fmtN(row.n_seen));
   appendCell(tr, 'delta cp-cell', cpVal != null ? Number(cpVal).toFixed(2) : '\u2014', cpColor(cpVal));

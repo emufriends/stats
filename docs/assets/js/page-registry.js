@@ -41,7 +41,7 @@ export const PAGES = {
     id: 'endgames',
     title: 'Endgames',
     navLabel: 'Endgames',
-    load: () => import('./pages/endgames.js?v=20260703-2'),
+    load: () => import('./pages/endgames.js?v=20260703-3'),
   },
   'sponsor-endgames': {
     id: 'sponsor-endgames',

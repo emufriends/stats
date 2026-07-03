@@ -472,12 +472,17 @@ currentSort = { col: 'delta_played', dir: 'desc' };
 
 Important Endgames definitions:
 
-- `Dealt` counts appearances in the starting `endgame` array.
+- `Dealt` counts appearances in the starting `endgame` array from non-conceded games.
 - `Scored` counts appearances in `endgame_scores`.
 - `Keeprate` is `Scored / Dealt`, so it can exceed 100% due to effects such as Elephants and Adapt.
+- Keeprate's numeric value is not capped; only the blue bar width is capped at 100%.
 - Scored/CP stats use non-conceded games only.
 - `delta dealt` uses raw non-conceded dealt rows for Base.
-- `delta dealt` uses no-Adapt rows for MW, where at least one initially dealt endgame also appears in `endgame_scores`.
+- Some MW logs attach the two initial `endgame` arrays to the opposite player. For each complete table,
+  the backend chooses the same/swapped dealt-array orientation that produces more dealt/scored matches.
+  Tied/ambiguous tables are excluded from MW `delta dealt`.
+- After correcting MW dealt ownership, `delta dealt` uses no-Adapt rows where at least one initially
+  dealt endgame also appears in that player's `endgame_scores`.
 - `delta scored` is based on scored endgames, independent of whether the scored card was initially dealt.
 
 Endgames filters:
@@ -972,7 +977,7 @@ card-stats/data-version.json
 Filter cache version:
 
 ```text
-v4
+v5
 ```
 
 Default snapshots are public gzip-encoded JSON files loaded directly by the frontend for fast initial page loads; versioned frontend requests may use normal browser caching. The backend reads the same compressed objects transparently when serving cache fallbacks. Home additionally has a generated JavaScript bootstrap containing both default datasets so its first paint has no loading state. Non-default filter requests go through the Cloud Function and may use compressed Cloud Storage filter-cache blobs. The filter cache key includes the explicit data-version marker, so daily refresh invalidates old filter results.
@@ -1395,8 +1400,9 @@ The CI count is deliberately separate from visible table counts:
 - Cards in hand: distinct table/player/card in-hand rows, not `Seen`.
 - Opening Hand: non-null dealt or kept entries, respectively.
 - Endgames scored: scored events from non-conceded games.
-- Endgames dealt: the exact non-conceded dealt-delta population, including the
-  MW no-Adapt restriction; this can differ from visible `Dealt`.
+- Endgames dealt: the exact non-conceded dealt-delta population, including corrected
+  MW dealt-array ownership, ambiguous-table exclusion, and the MW no-Adapt restriction;
+  this can differ from visible `Dealt`.
 - Combos: the exact pair, card/map, or card/round observations for the displayed mean.
 - Sponsor Endgames: distinct sponsor-play observations in that exact valid bucket.
 
@@ -1496,11 +1502,15 @@ Endgames use the `endgame` array for initial dealt endgames and `endgame_scores`
 
 Definitions:
 
-- `Dealt` = count of appearances in the initial `endgame` array.
+- `Dealt` = count of appearances in the initial `endgame` array from non-conceded games.
 - `Scored` = count of appearances in `endgame_scores`.
 - `Keeprate` = scored / dealt; it can exceed 100% because extra/scored endgames can come from Adapt or Elephants.
+- The Keeprate number remains uncapped. Its blue visualization bar is clamped to 100%.
 - `Delta scored` = average elo delta when the endgame appeared in `endgame_scores`.
-- `Delta dealt` = average elo delta when the endgame was initially dealt. For MW, rows where no initially dealt endgame was scored are excluded to avoid Adapt-swapped games; Base uses raw dealt delta.
+- `Delta dealt` = average elo delta when the endgame was initially dealt. Base uses raw non-conceded
+  dealt rows. For MW, the backend first corrects table-level dealt-array ownership by choosing the
+  same/swapped player orientation with more dealt/scored matches, excludes tied/ambiguous tables,
+  then excludes players for whom none of their corrected initially dealt cards was scored.
 - `Elo` = average player Elo when scored.
 - `CP` = average conservation points from `endgame_scores.cp`.
 
