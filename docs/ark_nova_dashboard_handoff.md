@@ -252,7 +252,7 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, and Sponsor Endgames. Home has no rail item; the topbar logo links to it.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, and Icons. Home has no rail item; the topbar logo links to it. The remaining future-page placeholders are Actions, MW Action Cards, Predictors, Buildings, Projects, Workers, Records, and Players. They use lightweight inline SVG icons and normal hover styling, but have no links, routes, click actions, or active state.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Header topbar includes:
   - MW/Base switch
@@ -501,7 +501,7 @@ Endgames filters:
 
 ### Home Page
 
-`assets/js/pages/home.js` is the default route and renders 12 aggregate fact tiles. It uses MW/Base plus Elo, map, date, and Completed-only filters. Its defaults are intentionally unrestricted Elo, unrestricted dates, incomplete games included, and all 25 known maps. Map chips are grouped into current maps, original Maps 1-8, and beginner Maps A/0. When all maps are selected, clicking one isolates it; subsequent clicks toggle normally. Backend `stats_page` is `home`, with public snapshots under `card-stats/home/`.
+`assets/js/pages/home.js` is the default route and renders 12 aggregate fact tiles. It uses MW/Base plus Elo, map, date, and Completed-only filters. Its defaults are intentionally unrestricted Elo, unrestricted dates, incomplete games included, and all 25 known maps. Map chips are grouped into current maps, original Maps 1-8, and beginner Maps A/0. Backend `stats_page` is `home`, with public snapshots under `card-stats/home/`.
 
 The daily refresh also publishes `card-stats/home/defaults.js`, containing both MW and Base payloads in `window.__ARK_NOVA_HOME_DEFAULTS__`. `index.html` loads this small asset before the app so default Home and MW/Base switching render immediately. Filtered requests still use the API, while the JSON snapshots remain the fallback.
 
@@ -509,7 +509,19 @@ On phones, Home keeps the navigation rail expanded and reserves its width in the
 
 ### Sponsor Endgames Page
 
-`assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to non-conceded games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points, Elo, and delta buckets all use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. Delta headers use the shared `#col-tooltip`, and map chips use the same isolate-then-toggle behavior as other filter bars. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
+`assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to non-conceded games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points, Elo, and delta buckets all use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. Delta headers use the shared `#col-tooltip`. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
+
+### Icons Page
+
+`assets/js/pages/icons.js` is routed at `#/icons` and uses backend `stats_page: "icons"`. It reads only the prepared Full Sample and hard-filters to non-conceded tables. One observation is one table/player. The 16 rows are Birds, Herbivores, Predators, Primates, Reptiles, Sea Animals, Bears, Petting Zoo Animals, Africa, Americas, Asia, Australia, Europe, Rock, Water, and Science.
+
+Amount is the mean non-null final icon count. Buckets `0` through `6` are exact counts and `7+` includes every value at least seven. Null icon fields are excluded rather than converted to zero. Each bucket's displayed Delta, sample SD, CI count, and prevalence count come from the same filtered icon/player population; frequency divides the bucket count by that icon's non-null `n_total`. Delta buckets below 1,000 observations use the Sponsor Endgames insufficient-data presentation. Default order is Amount descending.
+
+The full-width icon chip bar is client-side, defaults to all 16 enabled, and preserves global Amount ranks when narrowed. The page supports MW/Base plus player/opponent Elo, maps, and date filters, with no Completed-only control. Default snapshots are `card-stats/icons/default-{mw|base}.json`.
+
+### Chip Selection
+
+Every chip UI uses independent toggling: clicking an active chip deselects only it, and clicking an inactive chip selects only it. There is no all-selected-to-isolated shortcut. This applies to sidebar Maps/Rounds, Home maps, table Type filters, Card/Open Hand attribute chips, Combo Type and header filters, Sponsor/Endgame maps, and Icons. Existing all/none controls, empty-selection behavior, and attribute/type dependency rules remain intact.
 - The right-aligned `Delta Elo / Frequency` switch is frontend-only, defaults to Delta Elo on mount, and retains its state across CP/Appeal, dataset, and filter changes.
 - Frequency mode changes bucket headers to `f (value)`, displays two-decimal percentages, and sorts bucket columns by the displayed frequency. Its denominator is the sum of the card's theoretically valid bucket counts, so impossible logged values are excluded and the displayed valid buckets total 100% apart from rounding. Hover shows the exact `bucket count / valid-bucket total`.
 - In Delta Elo mode, valid buckets with at least 1,000 occurrences expose their 95% Elo-delta confidence interval on hover. Values below 1,000 occurrences remain visible in grey parentheses and show `Insufficient data (fewer than 1,000 observations).` instead of a CI.
@@ -568,7 +580,7 @@ In-page views:
 Metrics:
 
 - Uses map codes as columns and metric names as rows.
-- Default visible map columns are 1a-8a, 9-14, and T1. `Include Legacy Maps` reveals Maps 1-8; `Include Beginner Maps` reveals A/0; `Only Map Pack 2` restricts the table to 11-14 and T1. Map Pack 2 mode is mutually exclusive with the Legacy/Beginner toggles. These are client-side controls because the backend payload already contains all 25 maps.
+- Maps General has three `- / O / +` segmented controls: Legacy Maps, Beginner Maps, and Map Pack 2. `-` excludes the category, `O` includes it with ordinary maps, and `+` shows only that category. Defaults are Legacy `-`, Beginner `-`, and Map Pack 2 `O`, producing columns 1a-8a, 9-14, and T1. Selecting `+` forces the other two controls to `-`; ordinary maps remain visible whenever no category is in `+` mode. Exclude/Include/Only labels use the shared dashboard tooltip, not native browser titles. These are client-side controls because the backend payload already contains all 25 maps.
 - Default sort is by `Turns` ascending. `Rounds` also sorts ascending because lower values are better; other metric rows sort descending.
 - Percentage metrics display one decimal. Body values have no hover detail; map headers and compact Games footer values use the dashboard tooltip, with Games showing the full comma-grouped integer.
 - Filters are MW/Base, Elo ranges, and date range only. No map filter, no round filter, no Completed games toggle.
@@ -605,10 +617,10 @@ Played cards are deduplicated per table/player/card/round before aggregation. Al
 Sidebar filters are view-aware: Card + Card shows Map and Round, Card + Map hides Map and shows Round, and Card + Round shows Map and hides Round. Card + Map and Card + Round provide multi-select header filters for their represented dimension. Card + Map's Map header is filter-only; a narrowed selection replaces its filter icon with an `N/15` chip, and popup map chips expose styled full-name tooltips. Card selectors search both display names and aliases from `cards_altnames.csv`; their single-choice popup uses the same Inter 12px typography and row spacing as Attributes/Abilities. A selected card leaves the header label unchanged and replaces only the search icon with a muted-red clear X. Card + Map displays map names as `Observation Tower (1a)` while retaining raw full names for matching. Card + Card's six-value Type popup includes all/none controls and spans the Played plus Type columns exactly. Fixed-position Type popups are flush with their headers, follow layout/scroll changes, and close only after the complete popup leaves the viewport. Empty Type, Map, or Round selections return no rows, and `6+` means round 6 or later.
 
 Card + Card rows remain canonical unordered alphabetical pairs in the payload. When a
-Card 1 or Card 2 header filter is selected, the frontend projects the matching card,
-individual Delta, and Card-header sort value into that chosen display slot. With no
-selection, body order remains alphabetical; global rank calculation continues to use
-canonical pair identity.
+Card 1 or Card 2 header filter is selected, the frontend projects the matching card
+and individual Delta into that chosen display slot. With no selection, body order
+remains alphabetical; global rank calculation continues to use canonical pair
+identity. Card/Card 1/Card 2 headers are filter-only and are deliberately not sortable.
 
 All three tables use 100%-total desktop column allocations and a `1080px` readability floor. Card + Card uses `5/18/18/11/11/11/7/9/10` percent for Rank/Card 1/Card 2/Delta Sum/Delta Actual/Synergy/Elo/Played/Type. Its Type header retains the filter icon when all six pair types are active. Narrowed states use one centered dot, horizontal rows of two or three, four die corners, or four corners plus center for five; zero selected retains active-filter styling without dots. Card + Map and Card + Round have eight columns because their general card delta is integrated into the Card cell. Normal 1280px desktop layouts do not scroll; narrower desktop/tablet layouts scroll horizontally instead of allowing headers, names, or badges to overlap. Cards and Endgames similarly use `950px` and `900px` desktop/tablet width floors; existing mobile table sizing remains authoritative. Card + Map and Card + Round use the Cards-style single-card Type filter. Active sortable headers use the shared bright-green `sorted` state; narrowed filters use the paler filter accent. Loading, error, and empty states hide pagination and span the active view's complete column count.
 
@@ -630,7 +642,7 @@ Cards, Opening Hand, and all Combo views calculate `#` globally among rows that
 meet the current Minimum plays/keeps threshold. Secondary client-side filters
 preserve those global ranks and therefore intentionally leave gaps.
 
-On phones, the navigation rail overlays rather than resizes the main content and collapses after selecting a route. Maps and Combos do not freeze left-side data columns on phones; their full tables scroll horizontally.
+On phones, the navigation rail overlays rather than resizes the main content and collapses after selecting a route. The rail remains `84px` wide. Only its attached collapse/expand control is enlarged: the button is `21px × 60px`, sits at `right: -21px`, and uses a `15px` arrow glyph. Maps and Combos do not freeze left-side data columns on phones; their full tables scroll horizontally. Maps Metrics receives a computed readable width (`110px` metric column plus `64px` per currently visible map), so enabling Legacy, Beginner, or Map Pack 2 expands the scrollable table rather than compressing columns. Maps H2H uses a fixed `1025px` mobile table width. Combo result metadata hides only the `Showing` prefix on phones.
 
 ## Shared Page Module Pitfalls
 
@@ -1340,6 +1352,7 @@ User is happy with the current look. Avoid unnecessary frontend changes.
 Important visual decisions:
 
 - Navigation rail on desktop is 112px.
+- Navigation rail on mobile remains 84px; only the attached toggle is enlarged to 21px by 60px with a 15px glyph.
 - Main content/filter button alignment was carefully tuned.
 - Filter button uses a funnel icon.
 - Filter sidebar closes automatically after Apply filters.
@@ -1454,20 +1467,64 @@ filtered responses are keyed by that complete filter set and data version.
 ### Continuous Numeric Color Scales
 
 `assets/js/color-scales.js` is the shared source for value-dependent frontend colors.
-All numeric scales use continuous RGB interpolation. Each Elo Delta statistic derives
-its own minimum and maximum from the complete filtered result before pagination after
-winsorizing observations to `[-2.0, +2.0]`; values and CI bounds outside that cap use
-the applicable endpoint color without expanding the range. CI cells carry their
-statistic's color-range endpoints so tooltip gradients match visible means. Sponsor
-bucket ranges exclude grey values below 1,000 observations. Every other value-dependent
-scale (Elo, playrate/keeprate and Sponsor frequency, CP, Synergy, Maps metrics, and
-Maps H2H Win%) derives its minimum and maximum from the complete currently filtered
-result before pagination. Each statistic column has its own range; Maps metrics remain
-row variables and normalize across the currently displayed maps. Equal endpoints use
-the midpoint color and missing values remain muted. Bar lengths remain absolute rather
-than range-normalized. This local render-time calculation adds no request or payload
-cost. Categorical colors such as card-type badges and graph-series identities are
-intentionally unchanged.
+All numeric scales use continuous RGB interpolation; categorical badges and graph-series
+identity colors remain discrete.
+
+Elo Delta is zero-anchored independently for every displayed Delta statistic. Its range
+comes from that statistic's complete backend payload after Filter-bar filters and before
+pagination. Observed endpoints, displayed means, and CI endpoints are clamped to
+`[-2.0, +2.0]`. Negative values interpolate from the statistic's negative minimum in
+red (`#c0432a`) through the original red/neutral/green palette to its neutral midpoint
+at zero (`#7a9e80`); positive values continue through the green half to the statistic's
+positive maximum (`#4caf72`). No yellow anchor is used. The two
+sides are independent, so a positive value can never become red merely because the
+positive and negative ranges are asymmetric. CI cells carry the corresponding mean
+column's range metadata and therefore use exactly the same scale in their fixed-width
+tooltip gradient. CI cells and Sponsor/Icons frequency values retain their hover
+tooltips but use the normal cursor rather than the browser's question-mark help cursor.
+
+Combo Synergy is likewise zero-anchored per Synergy column and clamped to `[-2, +2]`.
+Its negative endpoint is the existing orange (`#ff6027`), its positive endpoint the
+existing green (`#7cba43`), and zero uses their existing 50/50 blended midpoint
+(`#be8d35`). Negative and positive sides interpolate independently.
+
+Color ranges are tied to the fetched backend payload, not to rows left visible by
+frontend-only filtering. Filter-bar changes (Elo range, maps, rounds, dates, completed
+games, and other server filters) fetch a new payload and recalculate all relevant
+ranges. Search, Attributes, Type, Minimum plays/keeps, Combo card selection, and Combo
+header Map/Round filters only hide payload rows and do not recolor survivors. Cards and
+Opening Hand use their complete current page payload; each Combo view uses its complete
+active-view payload. Pagination never affects a range.
+
+There are deliberate exceptions:
+
+- Sponsor Endgames Delta bucket ranges exclude greyed buckets with fewer than 1,000
+  observations; those insufficient cells cannot distort the colors of valid buckets.
+- Maps Metrics treats each metric row as its own variable and recalculates across the
+  maps currently visible. The Legacy Maps, Beginner Maps, and Map Pack 2 three-state
+  controls therefore do recolor the remaining/added maps even though they are frontend
+  controls.
+- Maps H2H matchup cells and Overall cells have separate populations. Matchup Win%
+  uses its own continuous range; matchup Elo Delta uses the zero-anchored capped Delta
+  scale. Overall is normalized independently and uses the CP-style orange-to-green text
+  scale with no heatmap background.
+
+Other numeric scales use the minimum and maximum for that variable from the complete
+applicable payload: Elo uses `#2a5a5a` through `#2a8a7a` to `#4acfb0`;
+playrate/keeprate and Sponsor Frequency use `#2a4a6a` through `#3a7abf` to
+`#6bb5f0` (Sponsor bucket ranges are calculated in the same percentage units as their
+displayed values); CP and other orange-to-green measures use `#ff6027` to `#7cba43`;
+and CP-distribution prevalence uses `#628f72` to `#78e38f`. Maps metric/H2H
+scales retain their metric-specific endpoint colors. Equal minimum/maximum values use
+the scale midpoint, and null/missing values retain the muted fallback.
+
+Bars are different from text color normalization: playrate and keeprate bar lengths
+represent the absolute percentage, with values above 100% visually capped at a full
+track. This render-time color calculation adds no API request or payload cost.
+
+The Maps H2H and Sponsor mode switches use normal font weight; Sponsor labels its
+default mode `Elo Delta`. Combo Elo body cells use the standard Inter table typography,
+and Combo Card headers retain filtering/clearing controls without sorting behavior.
 
 ## Important Bugs Fixed Recently
 
@@ -1581,7 +1638,7 @@ Definitions:
 
 - Maps are columns; metrics are rows.
 - Backend returns standard maps plus hidden legacy maps `1`-`8`, `A`, and `0`.
-- Frontend defaults to standard maps. `Include Legacy Maps` reveals Maps 1-8, `Include Beginner Maps` reveals Maps A/0, and `Only Map Pack 2` restricts the table to Maps 11-14 and T1 without another API request.
+- Frontend defaults are Legacy Maps excluded, Beginner Maps excluded, and Map Pack 2 included. Each category uses `-` Exclude, `O` Include, and `+` Only; Only forces the other categories to Exclude and requires no new API request.
 - Extra maps retain the standard map-column width, so the table scrolls horizontally when either group is enabled.
 - Natural order is `1a`-`8a`, `9`-`14`, `T1`, `1`-`8`, `A`, `0`.
 - `Turns` and `Rounds` are lower-is-better and sort ascending; `Turns` is the default sort.

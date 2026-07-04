@@ -456,26 +456,14 @@
     }
 
     /* Fluid Micro-interactions */
-    .side-nav-link:hover:not(.disabled) {
+    .side-nav-link:hover {
       color: var(--text);
       transform: translateY(-2px);
     }
 
-    .side-nav-link:hover:not(.disabled) .nav-icon {
+    .side-nav-link:hover .nav-icon {
       stroke: var(--accent-bright);
       filter: drop-shadow(0 0 4px rgba(109, 245, 184, 0.2));
-    }
-
-    /* Muted and non-interactive disabled items */
-    .side-nav-link.disabled {
-      color: rgba(74, 94, 90, 0.3);
-      cursor: not-allowed;
-      pointer-events: none;
-    }
-
-    .side-nav-link.disabled .nav-icon {
-      stroke: currentColor;
-      opacity: 0.35;
     }
 
     .side-nav.nav-collapsed .side-nav-scroll-btn {
@@ -488,25 +476,18 @@
     .side-nav-link .nav-icon-emu,
     .side-nav-link.active .nav-icon-hand,
     .side-nav-link.active .nav-icon-emu,
-    .side-nav-link:hover:not(.disabled) .nav-icon-hand,
-    .side-nav-link:hover:not(.disabled) .nav-icon-emu,
-    .side-nav-link.disabled .nav-icon-hand,
-    .side-nav-link.disabled .nav-icon-emu {
+    .side-nav-link:hover .nav-icon-hand,
+    .side-nav-link:hover .nav-icon-emu {
       stroke: none;
     }
 
     .side-nav-link.active .nav-icon-hand,
     .side-nav-link.active .nav-icon-emu,
-    .side-nav-link:hover:not(.disabled) .nav-icon-hand,
-    .side-nav-link:hover:not(.disabled) .nav-icon-emu {
+    .side-nav-link:hover .nav-icon-hand,
+    .side-nav-link:hover .nav-icon-emu {
       color: var(--accent);
       fill: var(--accent);
       filter: drop-shadow(0 0 4px rgba(52, 211, 153, 0.22));
-    }
-
-    .side-nav-link.disabled .nav-icon-hand,
-    .side-nav-link.disabled .nav-icon-emu {
-      fill: currentColor;
     }
 
     .nav-label-coming {
@@ -1975,7 +1956,7 @@
     }
 
     .delta-ci-cell {
-      cursor: help;
+      cursor: default;
     }
 
     #col-tooltip .ci-tooltip-title {
@@ -2172,6 +2153,49 @@
 
     .maps-metrics-option .toggle {
       margin-left: 2px;
+    }
+
+    .maps-visibility-control {
+      display: inline-grid;
+      grid-template-columns: repeat(3, 25px);
+      overflow: hidden;
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      background: rgba(4, 17, 14, 0.65);
+    }
+
+    .maps-visibility-control button {
+      width: 25px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      border-right: 1px solid var(--border-light);
+      background: transparent;
+      color: var(--text-muted);
+      font: 500 12px/1 Inter, sans-serif;
+      cursor: pointer;
+    }
+
+    .maps-visibility-control button:last-child {
+      border-right: 0;
+    }
+
+    .maps-visibility-control button:hover {
+      color: var(--text);
+      background: rgba(52, 211, 153, 0.08);
+    }
+
+    .maps-visibility-control button.active {
+      color: var(--accent-bright);
+      background: rgba(52, 211, 153, 0.18);
+    }
+
+    .side-nav-link.nav-placeholder {
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      font-family: inherit;
     }
 
     /* ══════════════════════════════════════════════════════════════
@@ -2433,7 +2457,7 @@
     }
 
     .sponsor-endgames-table .sponsor-frequency-cell {
-      cursor: help;
+      cursor: default;
       font-variant-numeric: tabular-nums;
       text-align: center;
     }
@@ -2443,6 +2467,64 @@
       cursor: help;
       font-weight: 400;
       opacity: 0.7;
+    }
+
+    .icons-filter-bar {
+      min-height: 56px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 8px 14px;
+    }
+
+    .icons-filter-heading {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .icons-filter-scroll {
+      min-width: 0;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .icons-filter-chips {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: max-content;
+      min-width: 100%;
+    }
+
+    .icons-filter-chips .chip {
+      white-space: nowrap;
+    }
+
+    .icons-table {
+      min-width: 1080px;
+    }
+
+    .icons-table .icons-value-tooltip {
+      cursor: default;
+    }
+
+    @media (max-width: 600px) {
+      .icons-filter-bar {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .icons-filter-scroll {
+        width: 100%;
+      }
     }
 
     .maps-h2h-filter-note {
@@ -2489,7 +2571,7 @@
       color: var(--text-muted);
       font-family: 'Inter', sans-serif;
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 400;
       cursor: pointer;
     }
 
@@ -3083,6 +3165,14 @@
       font-variant-numeric: tabular-nums;
     }
     .combinations-table .combination-interaction { font-weight: 700; }
+    .combinations-table .elo-cell {
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 400;
+      font-variant-numeric: tabular-nums;
+      line-height: inherit;
+    }
+    .combination-card-filter-header { cursor: default; }
     .combination-type-header,
     .combination-map-filter-header,
     .combination-round-filter-header { cursor: pointer; }
@@ -3467,17 +3557,17 @@
         align-items: center;
         justify-content: center;
         position: absolute;
-        right: -14px;
+        right: -21px;
         top: 50%;
         transform: translateY(-50%);
-        width: 14px;
-        height: 40px;
+        width: 21px;
+        height: 60px;
         background: #050d0c;
         border: 1px solid rgba(52, 211, 153, 0.25);
         border-left: none;
         border-radius: 0 6px 6px 0;
         color: var(--accent);
-        font-size: 10px;
+        font-size: 15px;
         cursor: pointer;
         z-index: 96;
         transition: background 0.15s, color 0.15s;
@@ -3657,6 +3747,21 @@
       #statsTable {
         width: 755px;
         min-width: 755px;
+      }
+
+      /* Maps has 15-25 metric columns (or 15 H2H matchup columns), so the
+         generic phone width is not enough. JS updates this variable whenever
+         the visible map set or Maps tab changes. */
+      #statsTable.maps-table {
+        width: var(--maps-mobile-table-width) !important;
+        min-width: var(--maps-mobile-table-width) !important;
+        max-width: none !important;
+      }
+
+      #statsTable.icons-table {
+        width: 1080px !important;
+        min-width: 1080px !important;
+        max-width: none !important;
       }
 
       #statsTable th,

@@ -7,7 +7,7 @@ import {
   normalizeToRange,
   numericRange,
   orangeGreenRangeColor,
-} from '../color-scales.js?v=20260704-4';
+} from '../color-scales.js?v=20260704-8';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';
@@ -139,9 +139,7 @@ const PAGE_WINDOW_HANDLERS = {
   resetFilters,
   setMapsView,
   setMapsH2hMode,
-  toggleBeginnerMaps,
-  toggleMapPack2Only,
-  toggleLegacyMaps,
+  setMapVisibilityMode,
   sortMapsByHeader,
   sortMapsByMetric,
   sortH2hByOverall,
@@ -159,9 +157,11 @@ let h2hMode = 'win';
 let h2hSortByOverall = false;
 let currentSortMetric = 'Turns';
 let useNaturalMapOrder = false;
-let includeLegacyMaps = false;
-let includeBeginnerMaps = false;
-let onlyMapPack2 = false;
+let mapVisibilityModes = {
+  legacy: 'exclude',
+  beginner: 'exclude',
+  mapPack2: 'include',
+};
 const defaultSnapshotCache = {
   metrics: { 0: null, 1: null },
   tournament_h2h: { 0: null, 1: null },
@@ -177,9 +177,11 @@ export function mount({ dataset = 1 } = {}) {
   h2hSortByOverall = false;
   currentSortMetric = 'Turns';
   useNaturalMapOrder = false;
-  includeLegacyMaps = false;
-  includeBeginnerMaps = false;
-  onlyMapPack2 = false;
+  mapVisibilityModes = {
+    legacy: 'exclude',
+    beginner: 'exclude',
+    mapPack2: 'include',
+  };
   viewRows = { metrics: [], tournament_h2h: [] };
   mapMeta = FALLBACK_MAPS;
   visibleMaps = FALLBACK_MAPS;
@@ -228,25 +230,18 @@ function setMapsH2hMode(mode) {
   renderH2h();
 }
 
-function toggleLegacyMaps() {
-  includeLegacyMaps = !includeLegacyMaps;
-  if (includeLegacyMaps) onlyMapPack2 = false;
-  updateVisibleMaps();
-  renderActiveView();
-}
-
-function toggleBeginnerMaps() {
-  includeBeginnerMaps = !includeBeginnerMaps;
-  if (includeBeginnerMaps) onlyMapPack2 = false;
-  updateVisibleMaps();
-  renderActiveView();
-}
-
-function toggleMapPack2Only() {
-  onlyMapPack2 = !onlyMapPack2;
-  if (onlyMapPack2) {
-    includeLegacyMaps = false;
-    includeBeginnerMaps = false;
+function setMapVisibilityMode(category, mode) {
+  if (!['legacy', 'beginner', 'mapPack2'].includes(category)) return;
+  if (!['exclude', 'include', 'only'].includes(mode)) return;
+  if (mode === 'only') {
+    mapVisibilityModes = {
+      legacy: 'exclude',
+      beginner: 'exclude',
+      mapPack2: 'exclude',
+      [category]: 'only',
+    };
+  } else {
+    mapVisibilityModes = { ...mapVisibilityModes, [category]: mode };
   }
   updateVisibleMaps();
   renderActiveView();
@@ -394,6 +389,10 @@ function setTableModeClass() {
   const table = document.getElementById('statsTable');
   if (!table) return;
   table.className = activeView === H2H_VIEW ? 'maps-table maps-h2h-table' : 'maps-table';
+  const mobileWidth = activeView === H2H_VIEW
+    ? 1025
+    : 110 + Math.max(visibleMaps.length, 1) * 64;
+  table.style.setProperty('--maps-mobile-table-width', `${mobileWidth}px`);
   if (activeView === METRICS_VIEW) {
     const layout = metricsColumnLayout();
     table.style.width = `${layout.totalWidthPct}%`;
@@ -436,12 +435,21 @@ function updateVisibleMaps() {
     visibleMaps = mapMeta.filter(map => map.visible_default !== false);
     return;
   }
+  const onlyCategory = Object.entries(mapVisibilityModes)
+    .find(([, mode]) => mode === 'only')?.[0] || null;
   visibleMaps = mapMeta.filter(map => {
-    if (onlyMapPack2) return ['11', '12', '13', '14', 'T1'].includes(map.code);
-    if (map.visible_default !== false) return true;
-    if (/^Map [1-8]:/.test(map.full)) return includeLegacyMaps;
-    return includeBeginnerMaps && (map.full === 'Map A' || map.full === 'Map 0');
+    const category = mapVisibilityCategory(map);
+    if (onlyCategory) return category === onlyCategory;
+    if (!category) return true;
+    return mapVisibilityModes[category] === 'include';
   });
+}
+
+function mapVisibilityCategory(map) {
+  if (/^Map [1-8]:/.test(map.full)) return 'legacy';
+  if (map.full === 'Map A' || map.full === 'Map 0') return 'beginner';
+  if (['11', '12', '13', '14', 'T1'].includes(map.code)) return 'mapPack2';
+  return null;
 }
 
 function metricsColumnLayout() {
@@ -465,34 +473,39 @@ function renderMetricsControls() {
   meta.innerHTML = `
     <div class="maps-metrics-options">
       ${mapOptionToggle(
-        'Include Legacy Maps',
+        'Legacy Maps',
         'Maps 1-8 (non-alternate map version)',
-        includeLegacyMaps,
-        'toggleLegacyMaps()',
+        'legacy',
       )}
       ${mapOptionToggle(
-        'Include Beginner Maps',
+        'Beginner Maps',
         'Maps A & 0',
-        includeBeginnerMaps,
-        'toggleBeginnerMaps()',
+        'beginner',
       )}
       ${mapOptionToggle(
-        'Only Map Pack 2',
+        'Map Pack 2',
         'Maps 11-14 & T1',
-        onlyMapPack2,
-        'toggleMapPack2Only()',
+        'mapPack2',
       )}
     </div>`;
 }
 
-function mapOptionToggle(label, tooltip, checked, handler) {
+function mapOptionToggle(label, tooltip, category) {
+  const mode = mapVisibilityModes[category];
+  const options = [
+    ['exclude', '&minus;', 'Exclude'],
+    ['include', 'O', 'Include'],
+    ['only', '+', 'Only'],
+  ];
   return `
     <div class="maps-metrics-option">
       <span>${label}<span class="col-tip" data-tip="${escapeAttr(tooltip)}">?</span></span>
-      <label class="toggle">
-        <input type="checkbox" ${checked ? 'checked' : ''} onclick="${handler}" />
-        <span class="toggle-track"></span>
-      </label>
+      <div class="maps-visibility-control" role="group" aria-label="${escapeAttr(`${label} visibility`)}">
+        ${options.map(([value, symbol, description]) => `
+          <button type="button" class="maps-custom-tip ${mode === value ? 'active' : ''}"
+            aria-pressed="${mode === value}" data-tip="${description}"
+            onclick="setMapVisibilityMode('${category}', '${value}')">${symbol}</button>`).join('')}
+      </div>
     </div>`;
 }
 

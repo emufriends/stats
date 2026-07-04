@@ -14,16 +14,6 @@ const COLORS = {
   prHigh: '#6bb5f0',
 };
 
-const DELTA_STOPS = [
-  [-2, COLORS.negStrong],
-  [-1, COLORS.negMid],
-  [-1 / 6, COLORS.negWeak],
-  [0, COLORS.neutral],
-  [1 / 6, COLORS.posWeak],
-  [1, COLORS.posMid],
-  [2, COLORS.posStrong],
-];
-
 function clamp(value, min = 0, max = 1) {
   return Math.max(min, Math.min(max, value));
 }
@@ -60,7 +50,7 @@ export function colorFromStops(raw, stops, fallback = 'var(--text-muted)') {
 }
 
 export function deltaColor(value) {
-  return colorFromStops(value, DELTA_STOPS);
+  return zeroAnchoredDeltaColor(value, -2, 2);
 }
 
 export function cappedNumericRange(rows, valueForRow, floor = -2, ceiling = 2) {
@@ -137,9 +127,49 @@ export function divergingRangeColor(value, min, max, lowerIsBetter = false) {
 }
 
 export function deltaRangeColor(value, min, max) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return 'var(--text-muted)';
-  return divergingRangeColor(clamp(number, -2, 2), min, max);
+  return zeroAnchoredDeltaColor(value, min, max);
+}
+
+function zeroAnchoredDeltaColor(value, min, max) {
+  if ([value, min, max].some(item => item === null || item === undefined || item === '')) {
+    return 'var(--text-muted)';
+  }
+  const low = clamp(Number(min), -2, 2);
+  const high = clamp(Number(max), -2, 2);
+  const number = clamp(clamp(Number(value), -2, 2), low, high);
+  if (![number, low, high].every(Number.isFinite)) return 'var(--text-muted)';
+  if (number === 0 || low === high) return COLORS.neutral;
+  if (number < 0) {
+    const negativeEnd = Math.min(low, 0);
+    if (negativeEnd === 0) return COLORS.neutral;
+    return divergingColor(0.5 * ((number - negativeEnd) / -negativeEnd));
+  }
+  const positiveEnd = Math.max(high, 0);
+  if (positiveEnd === 0) return COLORS.neutral;
+  return divergingColor(0.5 + 0.5 * (number / positiveEnd));
+}
+
+function zeroAnchoredColor(value, min, max, lowColor, zeroColor, highColor) {
+  if ([value, min, max].some(item => item === null || item === undefined || item === '')) {
+    return 'var(--text-muted)';
+  }
+  const low = clamp(Number(min), -2, 2);
+  const high = clamp(Number(max), -2, 2);
+  const number = clamp(clamp(Number(value), -2, 2), low, high);
+  if (![number, low, high].every(Number.isFinite)) return 'var(--text-muted)';
+  if (number === 0 || low === high) return zeroColor;
+  if (number < 0) {
+    const negativeEnd = Math.min(low, 0);
+    if (negativeEnd === 0) return zeroColor;
+    return mixHex(lowColor, zeroColor, (number - negativeEnd) / -negativeEnd);
+  }
+  const positiveEnd = Math.max(high, 0);
+  if (positiveEnd === 0) return zeroColor;
+  return mixHex(zeroColor, highColor, number / positiveEnd);
+}
+
+export function synergyRangeColor(value, min, max) {
+  return zeroAnchoredColor(value, min, max, '#ff6027', '#be8d35', '#7cba43');
 }
 
 export function orangeGreenColor(normalized) {

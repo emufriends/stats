@@ -342,11 +342,6 @@ function renderMapChips() {
 }
 
 function toggleMapChip(mapName) {
-  if (selectedMaps.length === ALL_MAPS.length && selectedMaps.includes(mapName)) {
-    selectedMaps = [mapName];
-    renderMapChips();
-    return;
-  }
   if (selectedMaps.includes(mapName)) {
     selectedMaps = selectedMaps.filter(map => map !== mapName);
   } else {

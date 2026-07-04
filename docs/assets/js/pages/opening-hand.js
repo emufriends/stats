@@ -5,7 +5,7 @@ import {
   numericRange,
   playrateColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260704-4';
+} from '../color-scales.js?v=20260704-8';
 
 export const title = 'Opening Hand';
 export const navLabel = 'Opening Hand';
@@ -260,21 +260,7 @@ function selectNoneMaps() {
 
 // Toggle chip
 function toggleChip(btn, group) {
-// Maps use the "all selected -> clicked chip only" shortcut.
-  if (group === 'map' && isAllSelectedChipClick(btn, '#mapChips .chip')) return;
   btn.classList.toggle('active');
-}
-
-// Filter sidebar overlay
-function isAllSelectedChipClick(btn, selector) {
-// Shared DOM-only helper for chip groups. It intentionally runs only when
-  // every chip in the group is active. Once a group is narrowed, normal
-  // select/deselect toggling resumes so users can refine incrementally.
-  const chips = [...document.querySelectorAll(selector)];
-  if (!chips.length || chips.some(c => !c.classList.contains('active'))) return false;
-
-  chips.forEach(c => c.classList.toggle('active', c === btn));
-  return true;
 }
 
 // MW / Base tab
@@ -853,11 +839,13 @@ function renderTable(data) {
   const start = (currentPage - 1) * rpp;
   const pageData = data.slice(start, start + rpp);
 
-  // Color ranges use the complete filtered result, before pagination.
-  const playrateRange = numericRange(data, row => row.playrate_pct);
-  const eloRange = numericRange(data, row => row.avg_elo);
-  const deltaKeptRange = cappedNumericRange(data, row => row.delta_in_hand);
-  const deltaDealtRange = cappedNumericRange(data, row => row.delta_played);
+  // Frontend-only search, Type, Attributes, and minimum-keep filters do not
+  // recolor survivors; ranges belong to the complete current backend payload.
+  const colorUniverse = allData.length ? allData : data;
+  const playrateRange = numericRange(colorUniverse, row => row.playrate_pct);
+  const eloRange = numericRange(colorUniverse, row => row.avg_elo);
+  const deltaKeptRange = cappedNumericRange(colorUniverse, row => row.delta_in_hand);
+  const deltaDealtRange = cappedNumericRange(colorUniverse, row => row.delta_played);
 
   tbody.replaceChildren();
   pageData.forEach(row => {
@@ -1148,18 +1136,7 @@ function updateTypeFilterIndicator() {
 }
 
 function toggleTypeChip(btn) {
-  const allChips = [...document.querySelectorAll('#typeFilterPopup .chip')];
-  const activeChips = allChips.filter(c => c.classList.contains('active'));
-  const isDefaultAllSelected = activeChips.length === allChips.length;
-
-  // UX shortcut: from the default all-selected state, clicking one Type isolates it.
-  if (isDefaultAllSelected && btn.classList.contains('active')) {
-    allChips.forEach(chip => chip.classList.toggle('active', chip === btn));
-  } else {
-    // Don't allow deselecting all chips.
-    if (activeChips.length === 1 && btn.classList.contains('active')) return;
-    btn.classList.toggle('active');
-  }
+  btn.classList.toggle('active');
 
   updateTypeFilterIndicator();
   // Type changed: some Attribute groups may now be impossible (e.g. Strength
@@ -1303,21 +1280,10 @@ function buildChipGroup(containerId, values, selectedSet, kind) {
   });
 }
 
-// Shared toggle handler for Strength/Size/Species/Continent chips.
-// `values` is the full list for that group, used to detect "back to all-selected".
-// UX shortcut: from the default all-selected state, the first chip click means
-// "only this chip". After that, clicks behave as normal toggles. This mirrors
-// Maps/Rounds, but must also update the selected Set because Attribute chips
-// are rebuilt from state whenever their popup/group is re-rendered.
+// Shared independent toggle handler for Strength/Size/Species/Continent chips.
 function toggleAttributeChip(btn, selectedSet, values, kind) {
   const value = btn.dataset.value;
-  if (selectedSet.size === values.length) {
-    selectedSet.clear();
-    selectedSet.add(value);
-    btn.parentElement.querySelectorAll('.chip').forEach(c => {
-      c.classList.toggle('active', c === btn);
-    });
-  } else if (selectedSet.has(value)) {
+  if (selectedSet.has(value)) {
     selectedSet.delete(value);
     btn.classList.remove('active');
   } else {
@@ -2009,7 +1975,3 @@ const PAGE_WINDOW_HANDLERS = {
 function bindWindowHandlers() {
   Object.assign(window, PAGE_WINDOW_HANDLERS);
 }
-
-
-
-

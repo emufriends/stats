@@ -38,6 +38,76 @@ const sideNavContentHtml = `
       <svg class="nav-icon nav-icon-sponsor-endgames" viewBox="0 0 24 24" aria-hidden="true" fill="none"><rect x="6" y="3" width="12" height="18" rx="2" /><text x="12" y="14.4" text-anchor="middle" aria-hidden="true">@</text></svg>
       <span>Sponsor<br />endgames</span>
     </a>
+    <div class="nav-divider"></div>
+    <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon" viewBox="0 0 30 24" aria-hidden="true" fill="none">
+        <rect x="1" y="6" width="5" height="12" rx="1" /><rect x="7" y="5" width="5" height="13" rx="1" />
+        <rect x="13" y="4" width="5" height="14" rx="1" /><rect x="19" y="5" width="5" height="13" rx="1" />
+        <rect x="25" y="6" width="4" height="12" rx="1" />
+      </svg>
+      <span>Actions</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <rect x="5" y="2.5" width="14" height="19" rx="2" />
+        <path d="M8 12c2-3 5-3 7 0-2 3-5 3-7 0Zm7 0 2-2v4l-2-2Z" />
+        <circle cx="11" cy="11.5" r=".6" fill="currentColor" stroke="none" />
+      </svg>
+      <span>MW Action<br />Cards</span>
+    </button>
+    <div class="nav-divider"></div>
+    <a class="side-nav-link" href="#/icons" data-page-id="icons">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <circle cx="12" cy="12" r="9" /><path d="M8 14c0-3 2-5 4-5s4 2 4 5c-1 2-2.5 3-4 3s-3-1-4-3Z" />
+        <circle cx="10.5" cy="12" r=".6" fill="currentColor" stroke="none" /><circle cx="13.5" cy="12" r=".6" fill="currentColor" stroke="none" />
+      </svg>
+      <span>Icons</span>
+    </a>
+    <div class="nav-divider"></div>
+    <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <circle cx="12" cy="10" r="6.5" /><path d="M7 17h10l2 4H5l2-4Z" /><path d="M9 9c1.5-2 4-2.5 6-1" />
+      </svg>
+      <span>Predictors</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <path d="m7 3 10 10M15.5 11.5l3-3M5 19l6-6 3 3-6 6H5v-3Z" />
+      </svg>
+      <span>Buildings</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <path d="M12 2.5 20 6v5c0 5-3.2 8.3-8 10.5C7.2 19.3 4 16 4 11V6l8-3.5Z" />
+      </svg>
+      <span>Projects</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <circle cx="12" cy="7" r="3.5" /><path d="M5.5 21c.5-5 2.7-8 6.5-8s6 3 6.5 8" />
+      </svg>
+      <span>Workers</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <path d="M3 20h18M5 13h5v7H5v-7Zm9-3h5v10h-5V10Zm-7-2h10" />
+        <text x="12" y="7" text-anchor="middle" aria-hidden="true">1</text>
+      </svg>
+      <span>Records</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <circle cx="12" cy="7" r="2.5" /><circle cx="6" cy="9" r="2" /><circle cx="18" cy="9" r="2" />
+        <path d="M7 20c.3-4 2-7 5-7s4.7 3 5 7M1.5 20c.2-3.2 1.7-5.5 4.5-5.5 1 0 1.8.3 2.5.8M22.5 20c-.2-3.2-1.7-5.5-4.5-5.5-1 0-1.8.3-2.5.8" />
+      </svg>
+      <span>Players</span>
+    </button>
   </div>
   <button class="side-nav-scroll-btn side-nav-scroll-down" id="navScrollDown" onclick="scrollSideNav(1)" aria-label="Scroll navigation down"><span aria-hidden="true">&#9660;</span></button>`;
 

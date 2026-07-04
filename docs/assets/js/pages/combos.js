@@ -3,9 +3,9 @@ import {
   cappedNumericRange,
   deltaRangeColor,
   numericRange,
-  orangeGreenRangeColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260704-4';
+  synergyRangeColor,
+} from '../color-scales.js?v=20260704-8';
 
 export const title = 'Combos';
 export const navLabel = 'Combos';
@@ -434,9 +434,11 @@ function applyClientFilters({ preserveHead = false } = {}) {
     minimum > 0 && candidatesBeforeMinimum.length > 0 && filteredData.length === 0
   );
   sortFilteredData();
-  eloRange = numericRange(filteredData, row => row.avg_elo);
-  interactionRange = numericRange(filteredData, row => row.interaction);
-  deltaRanges = buildDeltaRanges(filteredData);
+  // Header filters, Type, card selection, and Minimum plays only hide rows.
+  // Numeric colors stay anchored to the complete active backend payload.
+  eloRange = numericRange(allData, row => row.avg_elo);
+  interactionRange = cappedNumericRange(allData, row => row.interaction);
+  deltaRanges = buildDeltaRanges(allData);
   const pages = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
   currentPage = Math.min(currentPage, pages);
   renderTable(preserveHead);
@@ -503,8 +505,8 @@ function projectPairRow(row) {
 function buildDeltaRanges(data) {
   if (activeView === 'card_card') {
     return {
-      delta_1: cappedNumericRange(data, row => projectPairRow(row).deltaOne),
-      delta_2: cappedNumericRange(data, row => projectPairRow(row).deltaTwo),
+      delta_1: cappedNumericRange(data, row => row.delta_1),
+      delta_2: cappedNumericRange(data, row => row.delta_2),
       delta_combined: cappedNumericRange(data, row => row.delta_combined),
       delta_actual: cappedNumericRange(data, row => row.delta_actual),
     };
@@ -541,7 +543,7 @@ function renderTable(preserveHead = false) {
   const meta = document.getElementById('tableMeta');
   const start = filteredData.length ? (currentPage - 1) * rowsPerPage + 1 : 0;
   const end = Math.min(currentPage * rowsPerPage, filteredData.length);
-  if (meta) meta.innerHTML = `Showing <strong>${start}-${end}</strong> of <strong>${filteredData.length}</strong> combinations`;
+  if (meta) meta.innerHTML = `<span class="meta-prefix">Showing </span><strong>${start}-${end}</strong> of <strong>${filteredData.length}</strong> combinations`;
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
   const pageRows = filteredData.slice(start ? start - 1 : 0, end);
@@ -570,7 +572,7 @@ function renderHead() {
     const contextDeltaLabel = isMap ? '\u0394 (On Map)' : '\u0394 (Round)';
     thead.innerHTML = `<tr>
       <th style="width:5%">#</th>
-      ${cardFilterHeader('card_name', 'Card', 1, cardWidth)}
+      ${cardFilterHeader('Card', 1, cardWidth)}
       ${isMap ? mapFilterHeader(contextWidth) : roundFilterHeader(contextWidth)}
       ${header(isMap ? 'delta_map' : 'delta_round', contextDeltaLabel,
         `average elo gain when played in this specific ${contextLabel.toLowerCase()}`, contextDeltaWidth)}
@@ -585,8 +587,8 @@ function renderHead() {
   }
   thead.innerHTML = `<tr>
     <th style="width:5%">#</th>
-    ${cardFilterHeader('card_1', 'Card 1', 1, '18%')}
-    ${cardFilterHeader('card_2', 'Card 2', 2, '18%')}
+    ${cardFilterHeader('Card 1', 1, '18%')}
+    ${cardFilterHeader('Card 2', 2, '18%')}
     ${header('delta_combined', '\u0394 (Sum)', '\u0394 (Card 1) + \u0394 (Card 2)', '11%')}
     ${header('delta_actual', '\u0394 (Actual)',
       'average elo gain when both cards were played in the same game by the same player', '11%')}
@@ -623,12 +625,9 @@ function header(field, label, tooltip = '', width = '') {
   return `<th class="${active ? 'sorted' : ''}" style="${width ? `width:${width};` : ''}" onclick="sortCombinations('${field}')">${labelHtml}<span class="sort-arrow ${active ? 'active' : ''}">${arrow}</span></th>`;
 }
 
-function cardFilterHeader(field, label, slot, width = '20%') {
+function cardFilterHeader(label, slot, width = '20%') {
   const selected = slot === 1 ? selectedOne : selectedTwo;
-  const active = sortState.col === field;
-  const arrow = active ? (sortState.dir === 'desc' ? '\u2193' : '\u2191') : '\u2195';
-  return `<th class="card-search-header combination-card-filter-header ${active ? 'sorted' : ''}" style="width:${width}"
-              onclick="sortCombinations('${field}')">
+  return `<th class="card-search-header combination-card-filter-header" style="width:${width}">
     <div class="card-header-content">
       <button class="card-search-btn ${selected ? 'search-active combination-filter-clear' : ''}"
         type="button" title="${selected ? `Clear ${label} filter` : `Filter ${label}`}"
@@ -637,7 +636,6 @@ function cardFilterHeader(field, label, slot, width = '20%') {
         ${selected ? '&#10005;' : '&#128269;'}
       </button>
       <span class="card-header-title">${escapeHtml(label)}</span>
-      <span class="sort-arrow ${active ? 'active' : ''}">${arrow}</span>
     </div>
     <div class="combination-header-popup combination-card-popup" id="combinationCardPopup${slot}"
          onclick="event.stopPropagation()">
@@ -867,8 +865,7 @@ function toggleCombinationTypePopup(event) {
 
 function toggleCombinationType(type, event) {
   event.stopPropagation();
-  if (selectedTypes.size === PAIR_TYPES.length && selectedTypes.has(type)) selectedTypes = new Set([type]);
-  else if (selectedTypes.has(type)) selectedTypes.delete(type);
+  if (selectedTypes.has(type)) selectedTypes.delete(type);
   else selectedTypes.add(type);
   currentPage = 1;
   updateCombinationTypeHeader();
@@ -929,11 +926,7 @@ function toggleCombinationSingleTypePopup(event) {
 function toggleCombinationSingleType(type, event) {
   if (event) event.stopPropagation();
   if (!CARD_TYPES.includes(type)) return;
-  if (selectedCardTypes.size === CARD_TYPES.length && selectedCardTypes.has(type)) {
-    selectedCardTypes = new Set([type]);
-  } else if (selectedCardTypes.size === 1 && selectedCardTypes.has(type)) {
-    return;
-  } else if (selectedCardTypes.has(type)) {
+  if (selectedCardTypes.has(type)) {
     selectedCardTypes.delete(type);
   } else {
     selectedCardTypes.add(type);
@@ -1010,9 +1003,7 @@ function toggleCombinationMapPopup(event) {
 
 function toggleCombinationHeaderMap(map, event) {
   if (event) event.stopPropagation();
-  if (selectedHeaderMaps.size === MAPS.length && selectedHeaderMaps.has(map)) {
-    selectedHeaderMaps = new Set([map]);
-  } else if (selectedHeaderMaps.has(map)) {
+  if (selectedHeaderMaps.has(map)) {
     selectedHeaderMaps.delete(map);
   } else {
     selectedHeaderMaps.add(map);
@@ -1066,9 +1057,7 @@ function toggleCombinationRoundPopup(event) {
 
 function toggleCombinationHeaderRound(round, event) {
   if (event) event.stopPropagation();
-  if (selectedHeaderRounds.size === ROUNDS.length && selectedHeaderRounds.has(round)) {
-    selectedHeaderRounds = new Set([round]);
-  } else if (selectedHeaderRounds.has(round)) {
+  if (selectedHeaderRounds.has(round)) {
     selectedHeaderRounds.delete(round);
   } else {
     selectedHeaderRounds.add(round);
@@ -1226,8 +1215,7 @@ function renderMapChips() {
 }
 
 function toggleMapChip(map) {
-  if (selectedMaps.length === MAPS.length && selectedMaps.includes(map)) selectedMaps = [map];
-  else if (selectedMaps.includes(map)) selectedMaps = selectedMaps.filter(item => item !== map);
+  if (selectedMaps.includes(map)) selectedMaps = selectedMaps.filter(item => item !== map);
   else selectedMaps.push(map);
   renderMapChips();
 }
@@ -1252,9 +1240,7 @@ function renderRoundChips() {
 }
 
 function toggleRoundChip(round) {
-  if (selectedRounds.size === ROUNDS.length && selectedRounds.has(round)) {
-    selectedRounds = new Set([round]);
-  } else if (selectedRounds.has(round)) {
+  if (selectedRounds.has(round)) {
     selectedRounds.delete(round);
   } else {
     selectedRounds.add(round);
@@ -1321,7 +1307,7 @@ function renderError(error) {
 
 function interactionColor(value) {
   if (!Number.isFinite(value)) return 'var(--text-muted)';
-  return orangeGreenRangeColor(value, interactionRange.min, interactionRange.max);
+  return synergyRangeColor(value, interactionRange.min, interactionRange.max);
 }
 
 function eloColor(raw) {

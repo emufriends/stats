@@ -8,7 +8,7 @@ import {
   orangeGreenRangeColor,
   playrateColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260704-4';
+} from '../color-scales.js?v=20260704-8';
 
 export const title = 'Endgames';
 export const navLabel = 'Endgames';
@@ -221,15 +221,7 @@ function buildMapChips() {
 }
 
 function toggleChip(btn, group) {
-  if (group === 'map' && isAllSelectedChipClick(btn, '#mapChips .chip')) return;
   btn.classList.toggle('active');
-}
-
-function isAllSelectedChipClick(btn, selector) {
-  const chips = [...document.querySelectorAll(selector)];
-  if (!chips.length || chips.some(c => !c.classList.contains('active'))) return false;
-  chips.forEach(c => c.classList.toggle('active', c === btn));
-  return true;
 }
 
 function setEndgamesView(view) {

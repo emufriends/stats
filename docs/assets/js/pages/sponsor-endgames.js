@@ -6,7 +6,7 @@ import {
   orangeGreenRangeColor,
   playrateColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260704-4';
+} from '../color-scales.js?v=20260704-8';
 
 export const title = 'Sponsor Endgames';
 export const navLabel = 'Sponsor Endgames';
@@ -15,7 +15,7 @@ export const mainHtml = `
   <div class="main-header sponsor-endgames-main-header">
     <div class="table-meta" id="tableMeta"></div>
     <div class="maps-h2h-mode sponsor-endgames-mode" role="group" aria-label="Sponsor endgames metric">
-      <button type="button" class="active" data-mode="delta" onclick="setSponsorEndgamesMode('delta')">&Delta; Elo</button>
+      <button type="button" class="active" data-mode="delta" onclick="setSponsorEndgamesMode('delta')">Elo &Delta;</button>
       <button type="button" data-mode="frequency" onclick="setSponsorEndgamesMode('frequency')">Frequency</button>
     </div>
   </div>
@@ -457,7 +457,7 @@ function sortRows(source) {
 function frequencyForSort(row, field) {
   const buckets = bucketsForView();
   const total = validBucketTotal(row, buckets);
-  return total > 0 ? bucketCount(row, field) / total : Number.NaN;
+  return total > 0 ? (100 * bucketCount(row, field)) / total : Number.NaN;
 }
 
 const eloColor = relativeEloColor;
@@ -519,11 +519,6 @@ function renderMapChips() {
 }
 
 function toggleMapChip(mapName) {
-  if (selectedMaps.length === VALID_MAPS.length && selectedMaps.includes(mapName)) {
-    selectedMaps = [mapName];
-    renderMapChips();
-    return;
-  }
   if (selectedMaps.includes(mapName)) {
     selectedMaps = selectedMaps.filter(map => map !== mapName);
   } else {
