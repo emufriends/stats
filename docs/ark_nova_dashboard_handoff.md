@@ -479,6 +479,10 @@ Important Endgames definitions:
 - `Scored` counts appearances in `endgame_scores`.
 - `Keeprate` is `Scored / Dealt`, so it can exceed 100% due to effects such as Elephants and Adapt.
 - Keeprate's numeric value is not capped; only the blue bar width is capped at 100%.
+- Percentage cells reserve a fixed non-shrinking label width, including on phones, so
+  two- and three-digit percentages retain identical bar-track lengths.
+- General-view desktop widths are `5/18/12/12/8/17/10/10/8` percent for
+  Rank/Endgame/Delta scored/Delta dealt/Elo/Keeprate/Scored/Dealt/CP.
 - Scored/CP stats use non-conceded games only.
 - `delta dealt` uses raw non-conceded dealt rows for Base.
 - Some MW logs attach the two initial `endgame` arrays to the opposite player. For each complete table,
@@ -506,7 +510,15 @@ On phones, Home keeps the navigation rail expanded and reserves its width in the
 ### Sponsor Endgames Page
 
 `assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to non-conceded games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points, Elo, and delta buckets all use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. Delta headers use the shared `#col-tooltip`, and map chips use the same isolate-then-toggle behavior as other filter bars. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
-- Valid delta body cells expose their 95% Elo-delta confidence interval on hover; impossible and unavailable buckets remain tooltip-free dashes.
+- The right-aligned `Delta Elo / Frequency` switch is frontend-only, defaults to Delta Elo on mount, and retains its state across CP/Appeal, dataset, and filter changes.
+- Frequency mode changes bucket headers to `f (value)`, displays two-decimal percentages, and sorts bucket columns by the displayed frequency. Its denominator is the sum of the card's theoretically valid bucket counts, so impossible logged values are excluded and the displayed valid buckets total 100% apart from rounding. Hover shows the exact `bucket count / valid-bucket total`.
+- In Delta Elo mode, valid buckets with at least 1,000 occurrences expose their 95% Elo-delta confidence interval on hover. Values below 1,000 occurrences remain visible in grey parentheses and show `Insufficient data (fewer than 1,000 observations).` instead of a CI.
+- Low-sample values use muted grey at 70% opacity so they are visually subordinate;
+  the shared tooltip remains full-opacity.
+- Desktop widths are `5/18/10/7/15/15/15/15` percent for CP. Appeal uses
+  `5/18/10/7` percent for Rank/Sponsor/Appeal/Elo and divides the remaining 60%
+  equally across its seven buckets (`8.5714%` each).
+- Impossible and unavailable buckets remain tooltip-free dashes.
 - No Round filter
 - No Completed games toggle exposed to the user
 - No attributes bar
@@ -524,7 +536,8 @@ CP by map:
 
 - Rows are endgames; columns are the 15 maps plus final `CP`.
 - Map cells show average CP on that map.
-- Map cells use the same red/neutral/green semantic scale as delta columns, normalized across roughly 1.5 to 4.0.
+- Map cells use the red/neutral/green semantic scale, normalized independently within
+  each map column across the complete filtered CP-by-map result.
 - Final `CP` column keeps the normal CP color styling.
 - Map filter is hidden and ignored in this view because all maps must be shown as columns.
 
@@ -573,6 +586,10 @@ Tournament H2H:
 - Toggle modes are Win% and Elo delta.
 - Win% cells show percentage plus exact `wins-losses`; Elo cells show signed average delta plus `n = X`.
 - The rightmost Overall column is wider and separated with a double border.
+- Matchup cells and Overall use separate color populations. Win% matchups normalize
+  across matchup rows; Elo matchups use the capped adaptive Delta scale. Overall
+  normalizes independently across Overall rows and uses CP-style orange-to-green text
+  in both modes, without a tinted background.
 - Rows default to natural map order and can be ranked descending by the active Overall metric; missing Overall values remain last. H2H row height tracks the rendered map-column width through a scoped `ResizeObserver`.
 
 ### Combos Page
@@ -585,9 +602,15 @@ Tournament H2H:
 
 Played cards are deduplicated per table/player/card/round before aggregation. All six type combinations are supported for Card + Card; self-pairs and unobserved pairs are omitted, and individual baselines use the same active filters as interaction rows. Frontend defaults to minimum 1000 plays and Synergy descending. All three views put the individual card delta beneath each card name. Card + Card supports one-card or exact unordered-pair header filtering.
 
-Sidebar filters are view-aware: Card + Card shows Map and Round, Card + Map hides Map and shows Round, and Card + Round shows Map and hides Round. Card + Map and Card + Round provide multi-select header filters for their represented dimension. Card + Map's Map header is filter-only; a narrowed selection replaces its filter icon with an `N/15` chip, and popup map chips expose styled full-name tooltips. Card selectors search both display names and aliases from `cards_altnames.csv`. Card + Map displays map names as `Observation Tower (1a)` while retaining raw full names for matching. Card + Card's six-value Type popup includes all/none controls and spans the Played plus Type columns exactly. Fixed-position Type popups are flush with their headers, follow layout/scroll changes, and close only after the complete popup leaves the viewport. Empty Type, Map, or Round selections return no rows, and `6+` means round 6 or later.
+Sidebar filters are view-aware: Card + Card shows Map and Round, Card + Map hides Map and shows Round, and Card + Round shows Map and hides Round. Card + Map and Card + Round provide multi-select header filters for their represented dimension. Card + Map's Map header is filter-only; a narrowed selection replaces its filter icon with an `N/15` chip, and popup map chips expose styled full-name tooltips. Card selectors search both display names and aliases from `cards_altnames.csv`; their single-choice popup uses the same Inter 12px typography and row spacing as Attributes/Abilities. A selected card leaves the header label unchanged and replaces only the search icon with a muted-red clear X. Card + Map displays map names as `Observation Tower (1a)` while retaining raw full names for matching. Card + Card's six-value Type popup includes all/none controls and spans the Played plus Type columns exactly. Fixed-position Type popups are flush with their headers, follow layout/scroll changes, and close only after the complete popup leaves the viewport. Empty Type, Map, or Round selections return no rows, and `6+` means round 6 or later.
 
-All three tables use 100%-total desktop column allocations and a `1080px` readability floor. Card + Card has nine columns; Card + Map and Card + Round have eight because their general card delta is integrated into the Card cell. Normal 1280px desktop layouts do not scroll; narrower desktop/tablet layouts scroll horizontally instead of allowing headers, names, or badges to overlap. Cards and Endgames similarly use `950px` and `900px` desktop/tablet width floors; existing mobile table sizing remains authoritative. Card + Map and Card + Round use the Cards-style single-card Type filter. Active sortable headers use the shared bright-green `sorted` state; narrowed filters use the paler filter accent. Loading, error, and empty states hide pagination and span the active view's complete column count.
+Card + Card rows remain canonical unordered alphabetical pairs in the payload. When a
+Card 1 or Card 2 header filter is selected, the frontend projects the matching card,
+individual Delta, and Card-header sort value into that chosen display slot. With no
+selection, body order remains alphabetical; global rank calculation continues to use
+canonical pair identity.
+
+All three tables use 100%-total desktop column allocations and a `1080px` readability floor. Card + Card uses `5/18/18/11/11/11/7/9/10` percent for Rank/Card 1/Card 2/Delta Sum/Delta Actual/Synergy/Elo/Played/Type. Its Type header retains the filter icon when all six pair types are active. Narrowed states use one centered dot, horizontal rows of two or three, four die corners, or four corners plus center for five; zero selected retains active-filter styling without dots. Card + Map and Card + Round have eight columns because their general card delta is integrated into the Card cell. Normal 1280px desktop layouts do not scroll; narrower desktop/tablet layouts scroll horizontally instead of allowing headers, names, or badges to overlap. Cards and Endgames similarly use `950px` and `900px` desktop/tablet width floors; existing mobile table sizing remains authoritative. Card + Map and Card + Round use the Cards-style single-card Type filter. Active sortable headers use the shared bright-green `sorted` state; narrowed filters use the paler filter accent. Loading, error, and empty states hide pagination and span the active view's complete column count.
 
 Default snapshots:
 
@@ -1400,8 +1423,8 @@ The backend uses `STDDEV_SAMP` and `COUNT(elo_delta)` on the exact rows used by
 the corresponding `AVG(elo_delta)`. It uses Student's t critical values through
 200 degrees of freedom and the normal limit `1.959963984540054` above that.
 Intervals require at least two non-null observations. CI tooltips display a fixed-width
-gradient line whose endpoint colors use the same seven thresholds as visible delta
-values, with signed lower/upper labels beneath it. The fixed line length does not encode
+gradient line whose endpoint colors are continuously interpolated from the same Delta
+scale as visible values, with signed lower/upper labels beneath it. The fixed line length does not encode
 interval width. Tooltips do not display the internal `n` or a low-sample warning.
 
 The CI count is deliberately separate from visible table counts:
@@ -1427,6 +1450,24 @@ Public payload field names use:
 All MW/Base default snapshots include these fields. Filtered requests recompute
 mean, sample SD, count, and interval after applying the active filters; cached
 filtered responses are keyed by that complete filter set and data version.
+
+### Continuous Numeric Color Scales
+
+`assets/js/color-scales.js` is the shared source for value-dependent frontend colors.
+All numeric scales use continuous RGB interpolation. Each Elo Delta statistic derives
+its own minimum and maximum from the complete filtered result before pagination after
+winsorizing observations to `[-2.0, +2.0]`; values and CI bounds outside that cap use
+the applicable endpoint color without expanding the range. CI cells carry their
+statistic's color-range endpoints so tooltip gradients match visible means. Sponsor
+bucket ranges exclude grey values below 1,000 observations. Every other value-dependent
+scale (Elo, playrate/keeprate and Sponsor frequency, CP, Synergy, Maps metrics, and
+Maps H2H Win%) derives its minimum and maximum from the complete currently filtered
+result before pagination. Each statistic column has its own range; Maps metrics remain
+row variables and normalize across the currently displayed maps. Equal endpoints use
+the midpoint color and missing values remain muted. Bar lengths remain absolute rather
+than range-normalized. This local render-time calculation adds no request or payload
+cost. Categorical colors such as card-type badges and graph-series identities are
+intentionally unchanged.
 
 ## Important Bugs Fixed Recently
 

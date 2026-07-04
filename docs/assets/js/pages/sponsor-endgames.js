@@ -1,10 +1,23 @@
 export const id = 'sponsor-endgames';
+import {
+  cappedNumericRange,
+  deltaRangeColor,
+  numericRange,
+  orangeGreenRangeColor,
+  playrateColor,
+  relativeEloColor,
+} from '../color-scales.js?v=20260704-4';
+
 export const title = 'Sponsor Endgames';
 export const navLabel = 'Sponsor Endgames';
 
 export const mainHtml = `
   <div class="main-header sponsor-endgames-main-header">
     <div class="table-meta" id="tableMeta"></div>
+    <div class="maps-h2h-mode sponsor-endgames-mode" role="group" aria-label="Sponsor endgames metric">
+      <button type="button" class="active" data-mode="delta" onclick="setSponsorEndgamesMode('delta')">&Delta; Elo</button>
+      <button type="button" data-mode="frequency" onclick="setSponsorEndgamesMode('frequency')">Frequency</button>
+    </div>
   </div>
 
   <div class="attributes-bar endgames-tabs-bar sponsor-endgames-tabs-bar">
@@ -119,6 +132,7 @@ let isPageMounted = false;
 let mountToken = 0;
 let isMW = 1;
 let activeView = 'cp';
+let activeMode = 'delta';
 let rows = [];
 let selectedMaps = VALID_MAPS.map(map => map.full);
 let currentSort = { col: 'avg_cp', dir: 'desc' };
@@ -139,6 +153,7 @@ export function mount({ dataset = 1 } = {}) {
   mountToken += 1;
   isMW = Number(dataset) === 0 ? 0 : 1;
   activeView = 'cp';
+  activeMode = 'delta';
   currentSort = { col: 'avg_cp', dir: 'desc' };
   selectedMaps = VALID_MAPS.map(map => map.full);
   renderTabs();
@@ -163,6 +178,7 @@ function bindWindowHandlers() {
     selectAllMaps,
     selectNoneMaps,
     setSponsorEndgamesView,
+    setSponsorEndgamesMode,
     sortSponsorEndgames,
     toggleMapChip,
   });
@@ -182,6 +198,12 @@ function setSponsorEndgamesView(view) {
   applyFilters(++mountToken);
 }
 
+function setSponsorEndgamesMode(mode) {
+  activeMode = mode === 'frequency' ? 'frequency' : 'delta';
+  renderModeSwitch();
+  renderTable();
+}
+
 function sortSponsorEndgames(col) {
   if (currentSort.col === col) {
     currentSort.dir = currentSort.dir === 'desc' ? 'asc' : 'desc';
@@ -194,6 +216,12 @@ function sortSponsorEndgames(col) {
 function renderTabs() {
   document.querySelectorAll('.sponsor-endgames-tabs .endgames-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.view === activeView);
+  });
+}
+
+function renderModeSwitch() {
+  document.querySelectorAll('.sponsor-endgames-mode button').forEach(button => {
+    button.classList.toggle('active', button.dataset.mode === activeMode);
   });
 }
 
@@ -283,6 +311,7 @@ function renderTable() {
     meta.innerHTML = `Showing <strong>1-${visibleRows.length}</strong> of <strong>${visibleRows.length}</strong> sponsors`;
   }
   renderTableHead();
+  renderModeSwitch();
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
   const sortedRows = sortRows(visibleRows);
@@ -293,30 +322,54 @@ function renderTable() {
   const elos = sortedRows.map(row => Number(row.avg_elo)).filter(Number.isFinite);
   const minElo = elos.length ? Math.min(...elos) : null;
   const maxElo = elos.length ? Math.max(...elos) : null;
-  tbody.innerHTML = sortedRows.map((row, index) => rowHtml(row, index + 1, minElo, maxElo, minScore, maxScore)).join('');
+  const buckets = bucketsForView();
+  const frequencyRanges = Object.fromEntries(buckets.map(([field]) => [
+    field,
+    numericRange(sortedRows, row => frequencyForSort(row, field)),
+  ]));
+  const deltaRanges = Object.fromEntries(buckets.map(([field]) => [
+    field,
+    cappedNumericRange(
+      sortedRows.filter(row => bucketCount(row, field) >= 1000),
+      row => row[field],
+    ),
+  ]));
+  tbody.innerHTML = sortedRows.map((row, index) => rowHtml(
+    row, index + 1, minElo, maxElo, minScore, maxScore, frequencyRanges, deltaRanges,
+  )).join('');
+}
+
+function bucketsForView() {
+  return activeView === 'cp'
+    ? [['delta_0', 0], ['delta_1', 1], ['delta_2', 2], ['delta_3_plus', 3]]
+    : Array.from({ length: 7 }, (_, value) => [`delta_${value}`, value]);
 }
 
 function renderTableHead() {
   const thead = document.getElementById('tableHead');
   if (!thead) return;
+  const prefix = activeMode === 'frequency' ? 'f' : '\u0394';
+  const metricDescription = activeMode === 'frequency' ? 'relative frequency' : 'average elo gain';
   const bucketHeaders = activeView === 'cp'
-    ? [['delta_0', '\u0394 (0)', 'average elo gain when 0 CP scored'],
-      ['delta_1', '\u0394 (1)', 'average elo gain when 1 CP scored'],
-      ['delta_2', '\u0394 (2)', 'average elo gain when 2 CP scored'],
-      ['delta_3_plus', '\u0394 (3+)', 'average elo gain when 3+ CP scored']]
+    ? [['delta_0', `${prefix} (0)`, `${metricDescription} when 0 CP scored`],
+      ['delta_1', `${prefix} (1)`, `${metricDescription} when 1 CP scored`],
+      ['delta_2', `${prefix} (2)`, `${metricDescription} when 2 CP scored`],
+      ['delta_3_plus', `${prefix} (3+)`, `${metricDescription} when 3+ CP scored`]]
     : Array.from({ length: 7 }, (_, value) => [
       `delta_${value}`,
-      `\u0394 (${value})`,
-      `average elo gain when ${value} appeal scored`,
+      `${prefix} (${value})`,
+      `${metricDescription} when ${value} appeal scored`,
     ]);
   const averageField = activeView === 'cp' ? 'avg_cp' : 'avg_appeal';
   thead.innerHTML = `
     <tr>
       <th style="width:5%;text-align:center;">#</th>
-      ${sortableHeader('sponsor', 'Sponsor', '25%')}
+      ${sortableHeader('sponsor', 'Sponsor', '18%')}
       ${sortableHeader(averageField, activeView === 'cp' ? 'CP' : 'Appeal', '10%')}
-      ${sortableHeader('avg_elo', 'Elo', '10%')}
-      ${bucketHeaders.map(([field, label, tooltip]) => sortableHeader(field, label, '', tooltip)).join('')}
+      ${sortableHeader('avg_elo', 'Elo', '7%')}
+      ${bucketHeaders.map(([field, label, tooltip]) => sortableHeader(
+        field, label, activeView === 'cp' ? '15%' : '8.5714%', tooltip,
+      )).join('')}
     </tr>`;
 }
 
@@ -330,36 +383,65 @@ function sortableHeader(field, label, width = '', tooltip = '') {
   </th>`;
 }
 
-function rowHtml(row, rank, minElo, maxElo, minScore, maxScore) {
+function rowHtml(row, rank, minElo, maxElo, minScore, maxScore, frequencyRanges, deltaRanges) {
   const avg = activeView === 'cp' ? row.avg_cp : row.avg_appeal;
-  const buckets = activeView === 'cp'
-    ? [['delta_0', 0], ['delta_1', 1], ['delta_2', 2], ['delta_3_plus', 3]]
-    : [['delta_0', 0], ['delta_1', 1], ['delta_2', 2], ['delta_3', 3], ['delta_4', 4], ['delta_5', 5], ['delta_6', 6]];
+  const buckets = bucketsForView();
   return `
     <tr>
       <td class="rank-cell">${rank}</td>
       <td class="sponsor-name-cell">${escapeHtml(row.sponsor)}</td>
       <td class="sponsor-avg-cell" style="color:${scoreColor(avg, minScore, maxScore)}">${formatNumber(avg, 2)}</td>
       <td class="elo-cell" style="color:${eloColor(row.avg_elo, minElo, maxElo)}">${formatNumber(row.avg_elo, 0)}</td>
-      ${buckets.map(([field, value]) => deltaCell(row, field, value)).join('')}
+      ${buckets.map(([field, value]) => bucketCell(
+        row, field, value, buckets, frequencyRanges[field], deltaRanges[field],
+      )).join('')}
     </tr>`;
 }
 
-function deltaCell(row, field, value) {
+function bucketCount(row, field) {
+  const count = Number(row[field.replace('delta_', 'count_')]);
+  return Number.isFinite(count) ? count : 0;
+}
+
+function validBucketTotal(row, buckets) {
+  return buckets.reduce((total, [field, value]) => {
+    const possible = Array.isArray(row.possible_values) && row.possible_values.includes(value);
+    return total + (possible ? bucketCount(row, field) : 0);
+  }, 0);
+}
+
+function bucketCell(row, field, value, buckets, frequencyRange, deltaRange) {
   const possible = Array.isArray(row.possible_values) && row.possible_values.includes(value);
   if (!possible) return '<td class="unavailable-cell">-</td>';
+  const occurrences = bucketCount(row, field);
+  if (activeMode === 'frequency') {
+    const total = validBucketTotal(row, buckets);
+    const frequency = total > 0 ? (100 * occurrences) / total : null;
+    if (!Number.isFinite(frequency)) return '<td class="unavailable-cell">-</td>';
+    const tooltip = `${occurrences.toLocaleString('en-US')} / ${total.toLocaleString('en-US')}`;
+    return `<td class="sponsor-frequency-cell sponsor-value-tooltip" data-value-tooltip="${escapeAttr(tooltip)}"
+      style="color:${playrateColor(frequency, frequencyRange?.min, frequencyRange?.max)}">${frequency.toFixed(2)}%</td>`;
+  }
   const raw = row[field];
   const n = Number(raw);
   if (!Number.isFinite(n)) return '<td class="unavailable-cell">-</td>';
-  const ciAttrs = ` data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}"`;
-  return `<td class="delta delta-ci-cell"${ciAttrs} style="color:${deltaColor(n)}">${formatSigned(n)}</td>`;
+  if (occurrences < 1000) {
+    return `<td class="delta sponsor-delta-insufficient sponsor-value-tooltip"
+      data-value-tooltip="Insufficient data (fewer than 1,000 observations).">(${formatSigned(n)})</td>`;
+  }
+  const ciAttrs = ` data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(deltaRange?.min ?? '')}" data-ci-color-max="${escapeAttr(deltaRange?.max ?? '')}"`;
+  return `<td class="delta delta-ci-cell"${ciAttrs} style="color:${deltaRangeColor(n, deltaRange?.min, deltaRange?.max)}">${formatSigned(n)}</td>`;
 }
 
 function sortRows(source) {
   const direction = currentSort.dir === 'asc' ? 1 : -1;
   return [...source].sort((a, b) => {
-    const av = a[currentSort.col];
-    const bv = b[currentSort.col];
+    const av = activeMode === 'frequency' && currentSort.col.startsWith('delta_')
+      ? frequencyForSort(a, currentSort.col)
+      : a[currentSort.col];
+    const bv = activeMode === 'frequency' && currentSort.col.startsWith('delta_')
+      ? frequencyForSort(b, currentSort.col)
+      : b[currentSort.col];
     if (currentSort.col === 'sponsor') {
       return String(av || '').localeCompare(String(bv || '')) * direction;
     }
@@ -372,37 +454,20 @@ function sortRows(source) {
   });
 }
 
-function deltaColor(value) {
-  if (!Number.isFinite(Number(value))) return 'var(--text-muted)';
-  if (value >= 0.6) return 'var(--pos-strong)';
-  if (value >= 0.3) return 'var(--pos-mid)';
-  if (value >= 0.05) return 'var(--pos-weak)';
-  if (value >= -0.05) return 'var(--neutral)';
-  if (value >= -0.3) return 'var(--neg-weak)';
-  if (value >= -0.6) return 'var(--neg-mid)';
-  return 'var(--neg-strong)';
+function frequencyForSort(row, field) {
+  const buckets = bucketsForView();
+  const total = validBucketTotal(row, buckets);
+  return total > 0 ? bucketCount(row, field) / total : Number.NaN;
 }
 
-function eloColor(raw, minElo, maxElo) {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return 'var(--text-muted)';
-  if (maxElo === minElo) return 'var(--elo-mid)';
-  const t = (value - minElo) / (maxElo - minElo);
-  if (t >= 0.66) return 'var(--elo-high)';
-  if (t >= 0.33) return 'var(--elo-mid)';
-  return 'var(--elo-low)';
-}
+const eloColor = relativeEloColor;
 
 function scoreColor(raw, minScore, maxScore) {
   const value = Number(raw);
   if (!Number.isFinite(value)) return 'var(--text-muted)';
   if (!Number.isFinite(Number(minScore)) || !Number.isFinite(Number(maxScore))) return 'var(--text-muted)';
   if (maxScore === minScore) return 'var(--neutral)';
-  const t = Math.max(0, Math.min(1, (value - minScore) / (maxScore - minScore)));
-  const low = { r: 0xFF, g: 0x60, b: 0x27 };
-  const high = { r: 0x7C, g: 0xBA, b: 0x43 };
-  const mix = key => Math.round(low[key] + (high[key] - low[key]) * t);
-  return `rgb(${mix('r')}, ${mix('g')}, ${mix('b')})`;
+  return orangeGreenRangeColor(value, minScore, maxScore);
 }
 
 function renderMetaPlaceholder() {
@@ -541,9 +606,18 @@ document.addEventListener('mouseover', event => {
   positionColTip(event);
 });
 
+document.addEventListener('mouseover', event => {
+  if (!isPageMounted || !_colTip) return;
+  const cell = event.target.closest('.sponsor-value-tooltip');
+  if (!cell) return;
+  _colTip.textContent = cell.dataset.valueTooltip || '';
+  _colTip.style.display = 'block';
+  positionColTip(event);
+});
+
 document.addEventListener('mousemove', event => {
   if (!isPageMounted || !_colTip || _colTip.style.display === 'none') return;
-  if (event.target.closest('.delta-ci-cell')) return;
+  if (event.target.closest('.delta-ci-cell, .sponsor-value-tooltip')) return;
   const hasTip = event.target.closest('th')?.querySelector('.col-tip');
   if (!hasTip) {
     _colTip.style.display = 'none';
@@ -554,12 +628,27 @@ document.addEventListener('mousemove', event => {
 
 document.addEventListener('mouseout', event => {
   if (!isPageMounted || !_colTip) return;
-  if (event.target.closest('.delta-ci-cell') || event.relatedTarget?.closest('.delta-ci-cell')) return;
+  if (event.target.closest('.delta-ci-cell, .sponsor-value-tooltip')
+      || event.relatedTarget?.closest('.delta-ci-cell, .sponsor-value-tooltip')) return;
   const source = event.target.closest('th');
   const destination = event.relatedTarget?.closest('th');
   if (!source || destination !== source) {
     _colTip.style.display = 'none';
   }
+});
+
+document.addEventListener('mousemove', event => {
+  if (!isPageMounted || !_colTip) return;
+  const cell = event.target.closest('.sponsor-value-tooltip');
+  if (!cell) return;
+  positionColTip(event);
+});
+
+document.addEventListener('mouseout', event => {
+  if (!isPageMounted || !_colTip) return;
+  const source = event.target.closest('.sponsor-value-tooltip');
+  const destination = event.relatedTarget?.closest('.sponsor-value-tooltip');
+  if (source && destination !== source) _colTip.style.display = 'none';
 });
 
 function positionColTip(event) {

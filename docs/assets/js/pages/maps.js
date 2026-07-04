@@ -1,4 +1,14 @@
 export const id = 'maps';
+import {
+  cappedNumericRange,
+  cssColorRgb,
+  deltaRangeColor,
+  divergingRangeColor,
+  normalizeToRange,
+  numericRange,
+  orangeGreenRangeColor,
+} from '../color-scales.js?v=20260704-4';
+
 export const title = 'Maps';
 export const navLabel = 'Maps';
 
@@ -576,14 +586,7 @@ function sortMapsByHeader() {
 }
 
 function rowColor(value, min, max, lowerIsBetter) {
-  if (!Number.isFinite(value) || min === null || max === null || max === min) return 'var(--neutral)';
-  const normalized = (value - min) / (max - min);
-  const score = lowerIsBetter ? 1 - normalized : normalized;
-  if (score >= 0.72) return 'var(--pos-strong)';
-  if (score >= 0.56) return 'var(--pos-mid)';
-  if (score >= 0.44) return 'var(--neutral)';
-  if (score >= 0.28) return 'var(--neg-mid)';
-  return 'var(--neg-strong)';
+  return divergingRangeColor(value, min, max, lowerIsBetter);
 }
 
 function isLowerBetter(row) {
@@ -639,14 +642,29 @@ function renderH2h() {
   if (tfoot) tfoot.innerHTML = '';
   renderH2hHead();
   const matrix = buildH2hMatrix();
+  const matchupRows = currentRows().filter(row => row.row_type !== 'overall' && Number(row.games) > 0);
+  const overallRows = currentRows().filter(row => row.row_type === 'overall' && Number(row.games) > 0);
+  const matchupRange = h2hMode === 'win'
+    ? numericRange(matchupRows, row => row.win_pct)
+    : cappedNumericRange(matchupRows, row => row.elo_delta);
+  const overallRange = numericRange(
+    overallRows,
+    row => h2hMode === 'win' ? row.win_pct : row.elo_delta,
+  );
   const totalGames = totalH2hGames(matrix);
   renderH2hMeta(totalGames);
   const rowMaps = sortedMapsForH2h(matrix);
   tbody.innerHTML = rowMaps.map(rowMap => `
     <tr>
       <td class="maps-h2h-row-head maps-custom-tip" data-tip="${escapeAttr(rowMap.full)}">${escapeHtml(rowMap.code)}</td>
-      ${visibleMaps.map(colMap => h2hCellHtml(matrix.matchups.get(h2hKey(rowMap.full, colMap.full)), rowMap.full === colMap.full)).join('')}
-      ${h2hCellHtml(matrix.overall.get(rowMap.full), false, true)}
+      ${visibleMaps.map(colMap => h2hCellHtml(
+        matrix.matchups.get(h2hKey(rowMap.full, colMap.full)),
+        rowMap.full === colMap.full,
+        false,
+        matchupRange,
+        overallRange,
+      )).join('')}
+      ${h2hCellHtml(matrix.overall.get(rowMap.full), false, true, matchupRange, overallRange)}
     </tr>`).join('');
   syncH2hRowHeight();
   ensureH2hResizeObserver();
@@ -748,13 +766,16 @@ function h2hKey(rowMap, colMap) {
   return `${rowMap}|||${colMap}`;
 }
 
-function h2hCellHtml(cell, diagonal = false, overall = false) {
+function h2hCellHtml(cell, diagonal = false, overall = false, matchupRange = null, overallRange = null) {
   if (diagonal || !cell || !Number.isFinite(Number(cell.games)) || Number(cell.games) <= 0) {
     return `<td class="maps-h2h-cell maps-h2h-empty${overall ? ' maps-h2h-overall-cell' : ''}">-</td>`;
   }
-  const style = h2hMode === 'win'
-    ? h2hWinStyle(Number(cell.win_pct))
-    : h2hEloStyle(Number(cell.elo_delta));
+  const activeValue = Number(h2hMode === 'win' ? cell.win_pct : cell.elo_delta);
+  const style = overall
+    ? `color:${orangeGreenRangeColor(activeValue, overallRange?.min, overallRange?.max)}`
+    : h2hMode === 'win'
+      ? h2hWinStyle(activeValue, matchupRange)
+      : h2hEloStyle(activeValue, matchupRange);
   const main = h2hMode === 'win'
     ? formatWinPct(cell.win_pct)
     : signedOneDecimal(cell.elo_delta);
@@ -768,36 +789,26 @@ function h2hCellHtml(cell, diagonal = false, overall = false) {
     </td>`;
 }
 
-function h2hWinStyle(value) {
+function h2hWinStyle(value, range) {
   if (!Number.isFinite(value)) return '';
-  const normalized = clamp((value - 50) / 50, -1, 1);
+  const t = normalizeToRange(value, range?.min, range?.max);
+  const normalized = t === null ? 0 : t * 2 - 1;
   return h2hColorStyle(normalized);
 }
 
-function h2hEloStyle(value) {
+function h2hEloStyle(value, range) {
   if (!Number.isFinite(value)) return '';
-  const normalized = clamp(value / 10, -1, 1);
-  return h2hColorStyle(normalized);
+  const color = deltaRangeColor(value, range?.min, range?.max);
+  const t = normalizeToRange(clamp(value, -2, 2), range?.min, range?.max);
+  const magnitude = t === null ? 0 : Math.abs(t * 2 - 1);
+  return `color:${color};background:rgba(${cssColorRgb(color)},${(0.08 + magnitude * 0.22).toFixed(3)})`;
 }
-
-const H2H_SCALE_RGB = {
-  'var(--pos-strong)': '76,175,114',
-  'var(--pos-mid)': '139,199,138',
-  'var(--neutral)': '122,158,128',
-  'var(--neg-mid)': '217,124,90',
-  'var(--neg-strong)': '192,67,42',
-};
 
 function h2hColorStyle(normalized) {
-  // Reuse the same 5-step pos-strong/pos-mid/neutral/neg-mid/neg-strong scale
-  // rowColor() already uses for the Metrics table, so H2H matches the rest of
-  // the page instead of only ever showing two fixed hues. Background alpha
-  // still scales with magnitude on top of that for the heatmap look.
-  const score = (normalized + 1) / 2;
-  const color = rowColor(score, 0, 1, false);
-  const rgb = H2H_SCALE_RGB[color] || H2H_SCALE_RGB['var(--neutral)'];
+  // Text and heatmap backgrounds share the same continuous diverging scale.
+  const color = divergingRangeColor(normalized, -1, 1);
   const alpha = 0.08 + Math.abs(normalized) * 0.22;
-  return `color:${color};background:rgba(${rgb},${alpha.toFixed(3)})`;
+  return `color:${color};background:rgba(${cssColorRgb(color)},${alpha.toFixed(3)})`;
 }
 
 function totalH2hGames(matrix) {

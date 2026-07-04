@@ -44,7 +44,7 @@
       --tab-active:  var(--accent);
       --tab-bg:      var(--bg-surface);
 
-      /* delta colours — unchanged, do not touch */
+      /* Anchor colours for the continuous Elo-delta scale. */
       --pos-strong:  #4caf72;
       --pos-mid:     #8bc78a;
       --pos-weak:    #b8dbb5;
@@ -53,7 +53,7 @@
       --neg-strong:  #c0432a;
       --neutral:     #7a9e80;
 
-      /* elo colour scale (teal/blue-green) — unchanged, do not touch */
+      /* Anchor colours for continuous Elo and playrate/frequency scales. */
       --elo-low:   #2a5a5a;
       --elo-mid:   #2a8a7a;
       --elo-high:  #4acfb0;
@@ -977,6 +977,12 @@
        bar and table no longer jump when the meta text is inserted. */
     .sponsor-endgames-main-header {
       align-items: center;
+    }
+
+    .sponsor-endgames-main-header .sponsor-endgames-mode {
+      height: 24.6667px;
+      margin-left: auto;
+      min-width: 156px;
     }
 
     .sponsor-endgames-main-header .table-meta {
@@ -2029,10 +2035,12 @@
     }
 
     .playrate-val {
+      flex: 0 0 54px;
       font-variant-numeric: tabular-nums;
       font-weight: 500;
       font-size: 12px;
-      min-width: 42px;
+      min-width: 54px;
+      width: 54px;
       text-align: right;
     }
 
@@ -2422,6 +2430,19 @@
 
     .sponsor-endgames-table .delta {
       font-weight: 400;
+    }
+
+    .sponsor-endgames-table .sponsor-frequency-cell {
+      cursor: help;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+    }
+
+    .sponsor-endgames-table .sponsor-delta-insufficient {
+      color: var(--text-dim);
+      cursor: help;
+      font-weight: 400;
+      opacity: 0.7;
     }
 
     .maps-h2h-filter-note {
@@ -3066,6 +3087,46 @@
     .combination-map-filter-header,
     .combination-round-filter-header { cursor: pointer; }
     .combination-map-filter-header { cursor: default; }
+
+    .combination-type-header .type-filter-indicator:not(.type-filter-icon) {
+      width: 17px;
+      min-width: 17px;
+      height: 17px;
+    }
+
+    .combination-type-dots {
+      position: relative;
+      display: block;
+      width: 17px;
+      height: 17px;
+    }
+
+    .combination-type-dot {
+      position: absolute;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .combination-type-dots.count-1 .combination-type-dot:nth-child(1) { left: 7px; top: 7px; }
+
+    .combination-type-dots.count-2 .combination-type-dot:nth-child(1) { left: 4px; top: 7px; }
+    .combination-type-dots.count-2 .combination-type-dot:nth-child(2) { left: 10px; top: 7px; }
+
+    .combination-type-dots.count-3 .combination-type-dot:nth-child(1) { left: 1px; top: 7px; }
+    .combination-type-dots.count-3 .combination-type-dot:nth-child(2) { left: 7px; top: 7px; }
+    .combination-type-dots.count-3 .combination-type-dot:nth-child(3) { left: 13px; top: 7px; }
+
+    .combination-type-dots.count-4 .combination-type-dot:nth-child(1),
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(1) { left: 3px; top: 3px; }
+    .combination-type-dots.count-4 .combination-type-dot:nth-child(2),
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(2) { left: 11px; top: 3px; }
+    .combination-type-dots.count-4 .combination-type-dot:nth-child(3),
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(3) { left: 3px; top: 11px; }
+    .combination-type-dots.count-4 .combination-type-dot:nth-child(4),
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(4) { left: 11px; top: 11px; }
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(5) { left: 7px; top: 7px; }
     .combinations-map-table .combination-context-filter-header {
       display: inline-flex;
       align-items: center;
@@ -3095,9 +3156,17 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .combination-filter-clear {
-      font-size: 15px;
+    .card-search-btn.combination-filter-clear {
+      color: #b87970;
+      font-size: 13px;
       font-weight: 600;
+    }
+    .card-search-btn.combination-filter-clear:hover { color: #cf8c82; }
+    .combination-card-filter-header .card-search-btn {
+      width: 22px;
+      height: 22px;
+      margin-left: 0;
+      padding: 2px;
     }
     .combination-map-filter-btn {
       position: relative;
@@ -3156,14 +3225,26 @@
     .combination-card-choice-list {
       max-height: 260px;
       overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
     }
     .combination-card-choice {
       display: block;
       width: 100%;
-      padding: 8px 10px;
+      padding: 5px 6px;
       border: 0;
+      border-radius: var(--radius);
       color: var(--text);
       background: transparent;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.35;
+      letter-spacing: 0;
+      text-transform: none;
       text-align: left;
       cursor: pointer;
     }
@@ -3637,8 +3718,10 @@
       }
 
       .playrate-val {
+        flex-basis: 46px;
         font-size: 10px;
-        min-width: 34px;
+        min-width: 46px;
+        width: 46px;
       }
 
       /* Keep the slide-in filter panel compact on phones. */

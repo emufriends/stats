@@ -1,4 +1,15 @@
 ﻿export const id = 'endgames';
+import {
+  cappedNumericRange,
+  deltaRangeColor,
+  divergingRangeColor,
+  greenIntensityRangeColor,
+  numericRange,
+  orangeGreenRangeColor,
+  playrateColor,
+  relativeEloColor,
+} from '../color-scales.js?v=20260704-4';
+
 export const title = 'Endgames';
 export const navLabel = 'Endgames';
 
@@ -150,9 +161,6 @@ let apiWarmupLastAt = 0;
 const API_WARMUP_COOLDOWN_MS = 30000;
 const defaultSnapshotCache = {};
 const CP_VALUES = [0, 1, 2, 3, 4];
-const CP_PCT_COLOR_MAX = 50;
-const CP_MAP_COLOR_MIN = 1.5;
-const CP_MAP_COLOR_MAX = 4;
 const CHART_LINE_COLORS = [
   '#81c784', '#4db6ac', '#64b5f6', '#9575cd', '#f06292', '#ffb74d',
   '#aed581', '#4dd0e1', '#7986cb', '#ba68c8', '#e57373', '#dce775',
@@ -585,14 +593,14 @@ function generalHeadHtml() {
   return `
     <tr>
       <th style="width:5%;text-align:center;cursor:default;">#</th>
-      ${nameHeaderHtml('20%')}
+      ${nameHeaderHtml('18%')}
       <th onclick="sortBy('delta_in_hand')" style="width:12%;text-align:center">&Delta; (scored)<span class="col-tip" data-tip="average elo gain when scored at the end of the game">?</span><span class="sort-arrow" id="sort-delta_in_hand">\u2195</span></th>
       <th onclick="sortBy('delta_played')" style="width:12%;text-align:center">&Delta; (dealt)<span class="col-tip" data-tip="average elo gain when dealt at the start of the game">?</span><span class="sort-arrow" id="sort-delta_played">\u2195</span></th>
       <th onclick="sortBy('avg_elo')" style="width:8%;text-align:center">Elo<span class="col-tip" data-tip="average player elo when scored">?</span><span class="sort-arrow" id="sort-avg_elo">\u2195</span></th>
-      <th onclick="sortBy('playrate_pct')" style="width:13%;text-align:center">Keeprate <span class="col-tip" data-tip-fraction>?</span><span class="sort-arrow" id="sort-playrate_pct">\u2195</span></th>
+      <th onclick="sortBy('playrate_pct')" style="width:17%;text-align:center">Keeprate <span class="col-tip" data-tip-fraction>?</span><span class="sort-arrow" id="sort-playrate_pct">\u2195</span></th>
       <th onclick="sortBy('n_played')" style="width:10%;text-align:center">Scored<span class="col-tip" data-tip="n scored">?</span><span class="sort-arrow" id="sort-n_played">\u2195</span></th>
       <th onclick="sortBy('n_seen')" style="width:10%;text-align:center">Dealt<span class="col-tip" data-tip="n dealt">?</span><span class="sort-arrow" id="sort-n_seen">\u2195</span></th>
-      <th onclick="sortBy('avg_cp')" style="width:10%;text-align:center">CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
+      <th onclick="sortBy('avg_cp')" style="width:8%;text-align:center">CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
     </tr>`;
 }
 
@@ -625,11 +633,14 @@ function appendCell(rowEl, className, text, color) {
   return cell;
 }
 
-function appendDeltaCiCell(rowEl, row, prefix, text, color) {
+function appendDeltaCiCell(rowEl, row, prefix, text, range) {
+  const color = deltaRangeColor(row[prefix], range.min, range.max);
   const cell = appendCell(rowEl, 'delta delta-ci-cell', text, color);
   cell.dataset.ciLow = row[`${prefix}_ci95_low`] ?? '';
   cell.dataset.ciHigh = row[`${prefix}_ci95_high`] ?? '';
   cell.dataset.ciN = row[`${prefix}_ci95_n`] ?? '';
+  cell.dataset.ciColorMin = range.min ?? '';
+  cell.dataset.ciColorMax = range.max ?? '';
   return cell;
 }
 
@@ -684,16 +695,14 @@ function renderTable(data) {
   if (currentPage > totalPages) currentPage = totalPages;
   const start = (currentPage - 1) * rpp;
   const pageData = data.slice(start, start + rpp);
-  const eloVals = data.map(r => r.avg_elo).filter(v => v != null);
-  const minElo = eloVals.length ? Math.min(...eloVals) : 0;
-  const maxElo = eloVals.length ? Math.max(...eloVals) : 0;
+  const colorRanges = buildColorRanges(data);
 
   tbody.replaceChildren();
   pageData.forEach(row => {
     const tr = document.createElement('tr');
-    if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION) renderCpDistributionRow(tr, row);
-    else if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP) renderCpByMapRow(tr, row);
-    else renderGeneralRow(tr, row, minElo, maxElo);
+    if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION) renderCpDistributionRow(tr, row, colorRanges);
+    else if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP) renderCpByMapRow(tr, row, colorRanges);
+    else renderGeneralRow(tr, row, colorRanges);
     tbody.appendChild(tr);
   });
 
@@ -708,34 +717,49 @@ function renderTable(data) {
   }
 }
 
-function renderGeneralRow(tr, row, minElo, maxElo) {
+function buildColorRanges(data) {
+  const fields = ['avg_elo', 'playrate_pct', 'avg_cp'];
+  if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION) {
+    CP_VALUES.forEach(cp => fields.push(`cp_${cp}_pct`));
+  } else if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP) {
+    VALID_MAPS.forEach(map => fields.push(map.field));
+  }
+  const ranges = Object.fromEntries(fields.map(field => [field, numericRange(data, row => row[field])]));
+  if (activeEndgamesView === ENDGAMES_VIEW_GENERAL) {
+    ranges.delta_in_hand = cappedNumericRange(data, row => row.delta_in_hand);
+    ranges.delta_played = cappedNumericRange(data, row => row.delta_played);
+  }
+  return ranges;
+}
+
+function renderGeneralRow(tr, row, ranges) {
   const prVal = row.playrate_pct || 0;
   const cpVal = row.avg_cp;
   appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
   appendCell(tr, 'card-name', titleCase(row.card_name || ''));
-  appendDeltaCiCell(tr, row, 'delta_in_hand', fmtDelta(row.delta_in_hand), deltaColor(row.delta_in_hand));
-  appendDeltaCiCell(tr, row, 'delta_played', fmtDelta(row.delta_played), deltaColor(row.delta_played));
-  appendCell(tr, 'n-cell', row.avg_elo != null ? Math.round(row.avg_elo).toLocaleString('en-US') : '\u2014', eloColor(row.avg_elo, minElo, maxElo));
+  appendDeltaCiCell(tr, row, 'delta_in_hand', fmtDelta(row.delta_in_hand), ranges.delta_in_hand);
+  appendDeltaCiCell(tr, row, 'delta_played', fmtDelta(row.delta_played), ranges.delta_played);
+  appendCell(tr, 'n-cell', row.avg_elo != null ? Math.round(row.avg_elo).toLocaleString('en-US') : '\u2014', eloColor(row.avg_elo, ranges.avg_elo.min, ranges.avg_elo.max));
   appendPlayrateCell(
     tr,
     row.playrate_pct != null ? `${row.playrate_pct.toFixed(2)}%` : '\u2014',
     prVal,
     Math.min(Math.max(prVal, 0), 100),
-    prColor(prVal),
+    prColor(prVal, ranges.playrate_pct.min, ranges.playrate_pct.max),
   );
   appendCell(tr, 'n-cell', fmtN(row.n_played));
   appendCell(tr, 'n-cell', fmtN(row.n_seen));
-  appendCell(tr, 'delta cp-cell', cpVal != null ? Number(cpVal).toFixed(2) : '\u2014', cpColor(cpVal));
+  appendCell(tr, 'delta cp-cell', cpVal != null ? Number(cpVal).toFixed(2) : '\u2014', cpColor(cpVal, ranges.avg_cp));
 }
 
-function renderCpDistributionRow(tr, row) {
+function renderCpDistributionRow(tr, row, ranges) {
   appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
   appendCell(tr, 'card-name', titleCase(row.card_name || ''));
   CP_VALUES.forEach(cp => {
     const pct = row[`cp_${cp}_pct`];
-    appendCell(tr, 'n-cell cp-pct-cell', fmtPercent(pct), cpPctColor(pct));
+    appendCell(tr, 'n-cell cp-pct-cell', fmtPercent(pct), cpPctColor(pct, ranges[`cp_${cp}_pct`]));
   });
-  appendCell(tr, 'delta cp-cell', row.avg_cp != null ? Number(row.avg_cp).toFixed(2) : '\u2014', cpColor(row.avg_cp));
+  appendCell(tr, 'delta cp-cell', row.avg_cp != null ? Number(row.avg_cp).toFixed(2) : '\u2014', cpColor(row.avg_cp, ranges.avg_cp));
 }
 
 function renderCpDistributionGraph(data) {
@@ -967,14 +991,14 @@ function showChartTooltip(row, event, tooltip) {
   tooltip.style.top = `${y}px`;
 }
 
-function renderCpByMapRow(tr, row) {
+function renderCpByMapRow(tr, row, ranges) {
   appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
   appendCell(tr, 'card-name', titleCase(row.card_name || ''));
   VALID_MAPS.forEach(map => {
     const val = row[map.field];
-    appendCell(tr, 'n-cell cp-map-cell', val != null ? Number(val).toFixed(2) : '\u2014', cpMapColor(val));
+    appendCell(tr, 'n-cell cp-map-cell', val != null ? Number(val).toFixed(2) : '\u2014', cpMapColor(val, ranges[map.field]));
   });
-  appendCell(tr, 'delta cp-cell', row.avg_cp != null ? Number(row.avg_cp).toFixed(2) : '\u2014', cpColor(row.avg_cp));
+  appendCell(tr, 'delta cp-cell', row.avg_cp != null ? Number(row.avg_cp).toFixed(2) : '\u2014', cpColor(row.avg_cp, ranges.avg_cp));
 }
 
 function columnCountForView() {
@@ -1071,60 +1095,22 @@ function titleCase(str) {
   }).join(' ');
 }
 
-function deltaColor(val) {
+function cpPctColor(val, range) {
   if (val == null) return 'var(--text-muted)';
-  if (val >= 0.6) return 'var(--pos-strong)';
-  if (val >= 0.3) return 'var(--pos-mid)';
-  if (val >= 0.05) return 'var(--pos-weak)';
-  if (val >= -0.05) return 'var(--neutral)';
-  if (val >= -0.3) return 'var(--neg-weak)';
-  if (val >= -0.6) return 'var(--neg-mid)';
-  return 'var(--neg-strong)';
+  return greenIntensityRangeColor(val, range?.min, range?.max, true);
 }
 
-function cpPctColor(val) {
+function cpMapColor(val, range) {
   if (val == null) return 'var(--text-muted)';
-  const t = Math.max(0, Math.min(1, Number(val) / CP_PCT_COLOR_MAX));
-  const low = { r: 0x62, g: 0x8f, b: 0x72 };
-  const high = { r: 0x78, g: 0xe3, b: 0x8f };
-  const mix = key => Math.round(low[key] + (high[key] - low[key]) * t);
-  return `rgba(${mix('r')}, ${mix('g')}, ${mix('b')}, ${0.78 + t * 0.22})`;
+  return divergingRangeColor(val, range?.min, range?.max);
 }
 
-function cpMapColor(val) {
-  if (val == null) return 'var(--text-muted)';
-  const t = Math.max(0, Math.min(1, (Number(val) - CP_MAP_COLOR_MIN) / (CP_MAP_COLOR_MAX - CP_MAP_COLOR_MIN)));
-  if (t >= 0.86) return 'var(--pos-strong)';
-  if (t >= 0.68) return 'var(--pos-mid)';
-  if (t >= 0.52) return 'var(--pos-weak)';
-  if (t >= 0.42) return 'var(--neutral)';
-  if (t >= 0.24) return 'var(--neg-weak)';
-  if (t >= 0.12) return 'var(--neg-mid)';
-  return 'var(--neg-strong)';
-}
+const prColor = playrateColor;
+const eloColor = relativeEloColor;
 
-function prColor(val) {
-  if (val >= 50) return 'var(--pr-high)';
-  if (val >= 30) return 'var(--pr-mid)';
-  return 'var(--pr-low)';
-}
-
-function eloColor(val, minElo, maxElo) {
+function cpColor(val, range) {
   if (val == null) return 'var(--text-muted)';
-  if (maxElo === minElo) return 'var(--elo-mid)';
-  const t = (val - minElo) / (maxElo - minElo);
-  if (t >= 0.66) return 'var(--elo-high)';
-  if (t >= 0.33) return 'var(--elo-mid)';
-  return 'var(--elo-low)';
-}
-
-function cpColor(val) {
-  if (val == null) return 'var(--text-muted)';
-  const t = Math.max(0, Math.min(1, Number(val) / 4));
-  const low = { r: 0xFF, g: 0x60, b: 0x27 };
-  const high = { r: 0x7C, g: 0xBA, b: 0x43 };
-  const mix = key => Math.round(low[key] + (high[key] - low[key]) * t);
-  return `rgb(${mix('r')}, ${mix('g')}, ${mix('b')})`;
+  return orangeGreenRangeColor(val, range?.min, range?.max);
 }
 
 const _colTip = document.getElementById('col-tooltip');

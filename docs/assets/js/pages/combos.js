@@ -1,4 +1,12 @@
 export const id = 'combos';
+import {
+  cappedNumericRange,
+  deltaRangeColor,
+  numericRange,
+  orangeGreenRangeColor,
+  relativeEloColor,
+} from '../color-scales.js?v=20260704-4';
+
 export const title = 'Combos';
 export const navLabel = 'Combos';
 
@@ -161,6 +169,8 @@ let currentPage = 1;
 let rowsPerPage = 50;
 let sortState = { col: 'interaction', dir: 'desc' };
 let eloRange = { min: null, max: null };
+let interactionRange = { min: null, max: null };
+let deltaRanges = {};
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true;
@@ -424,11 +434,9 @@ function applyClientFilters({ preserveHead = false } = {}) {
     minimum > 0 && candidatesBeforeMinimum.length > 0 && filteredData.length === 0
   );
   sortFilteredData();
-  const eloValues = filteredData.map(row => Number(row.avg_elo)).filter(Number.isFinite);
-  eloRange = {
-    min: eloValues.length ? Math.min(...eloValues) : null,
-    max: eloValues.length ? Math.max(...eloValues) : null,
-  };
+  eloRange = numericRange(filteredData, row => row.avg_elo);
+  interactionRange = numericRange(filteredData, row => row.interaction);
+  deltaRanges = buildDeltaRanges(filteredData);
   const pages = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
   currentPage = Math.min(currentPage, pages);
   renderTable(preserveHead);
@@ -438,10 +446,10 @@ function sortFilteredData() {
   filteredData.sort(compareCombinationRows);
 }
 
-function compareCombinationRows(a, b) {
+function compareCombinationRows(a, b, projectSlots = true) {
   const direction = sortState.dir === 'asc' ? 1 : -1;
-  const av = a[sortState.col];
-  const bv = b[sortState.col];
+  const av = comparisonValue(a, sortState.col, projectSlots);
+  const bv = comparisonValue(b, sortState.col, projectSlots);
   let result = 0;
   if (typeof av === 'string' || typeof bv === 'string') {
     result = String(av || '').localeCompare(String(bv || '')) * direction;
@@ -465,11 +473,54 @@ function compareCombinationRows(a, b) {
   return 0;
 }
 
+function comparisonValue(row, field, projectSlots) {
+  if (activeView !== 'card_card' || !projectSlots || !['card_1', 'card_2'].includes(field)) {
+    return row[field];
+  }
+  const projected = projectPairRow(row);
+  return field === 'card_1' ? projected.cardOne : projected.cardTwo;
+}
+
+function projectPairRow(row) {
+  const swap = (selectedOne && row.card_2 === selectedOne)
+    || (!selectedOne && selectedTwo && row.card_1 === selectedTwo);
+  if (!swap) {
+    return {
+      cardOne: row.card_1,
+      cardTwo: row.card_2,
+      deltaOne: row.delta_1,
+      deltaTwo: row.delta_2,
+    };
+  }
+  return {
+    cardOne: row.card_2,
+    cardTwo: row.card_1,
+    deltaOne: row.delta_2,
+    deltaTwo: row.delta_1,
+  };
+}
+
+function buildDeltaRanges(data) {
+  if (activeView === 'card_card') {
+    return {
+      delta_1: cappedNumericRange(data, row => projectPairRow(row).deltaOne),
+      delta_2: cappedNumericRange(data, row => projectPairRow(row).deltaTwo),
+      delta_combined: cappedNumericRange(data, row => row.delta_combined),
+      delta_actual: cappedNumericRange(data, row => row.delta_actual),
+    };
+  }
+  const contextField = activeView === 'card_map' ? 'delta_map' : 'delta_round';
+  return {
+    delta_general: cappedNumericRange(data, row => row.delta_general),
+    [contextField]: cappedNumericRange(data, row => row[contextField]),
+  };
+}
+
 function assignGlobalRanks(minimum) {
   allData.forEach(row => { row.global_rank = null; });
   const rankingUniverse = allData
     .filter(row => Number(row.n_played) >= minimum)
-    .sort(compareCombinationRows);
+    .sort((a, b) => compareCombinationRows(a, b, false));
   rankingUniverse.forEach((row, index) => { row.global_rank = index + 1; });
 }
 
@@ -534,8 +585,8 @@ function renderHead() {
   }
   thead.innerHTML = `<tr>
     <th style="width:5%">#</th>
-    ${cardFilterHeader('card_1', 'Card 1', 1, '19%')}
-    ${cardFilterHeader('card_2', 'Card 2', 2, '19%')}
+    ${cardFilterHeader('card_1', 'Card 1', 1, '18%')}
+    ${cardFilterHeader('card_2', 'Card 2', 2, '18%')}
     ${header('delta_combined', '\u0394 (Sum)', '\u0394 (Card 1) + \u0394 (Card 2)', '11%')}
     ${header('delta_actual', '\u0394 (Actual)',
       'average elo gain when both cards were played in the same game by the same player', '11%')}
@@ -544,9 +595,9 @@ function renderHead() {
     ${header('avg_elo', 'Elo', 'average player elo when both cards were played', '7%')}
     ${header('n_played', 'Played', 'n (both cards played)', '9%')}
     <th class="type-filter-header combination-type-header ${selectedTypes.size === PAIR_TYPES.length ? '' : 'type-filter-active'}"
-        style="width:8%" onclick="toggleCombinationTypePopup(event)">
+        style="width:10%" onclick="toggleCombinationTypePopup(event)">
       <span class="type-filter-label">Type
-        <span class="type-filter-indicator type-filter-icon">${selectedTypes.size === PAIR_TYPES.length ? '' : `(${selectedTypes.size})`}</span>
+        <span class="type-filter-indicator ${selectedTypes.size === PAIR_TYPES.length ? 'type-filter-icon' : ''}">${combinationTypeIndicatorHtml()}</span>
       </span>
       <div class="type-filter-popup combination-type-popup" id="combinationTypePopup">
         <div class="combination-popup-actions map-select-all-none">
@@ -583,9 +634,9 @@ function cardFilterHeader(field, label, slot, width = '20%') {
         type="button" title="${selected ? `Clear ${label} filter` : `Filter ${label}`}"
         aria-label="${selected ? `Clear ${label} filter` : `Filter ${label}`}"
         onclick="${selected ? `clearCombinationSelection(${slot}, event)` : `openCombinationCardFilter(${slot}, event)`}">
-        ${selected ? 'x' : '&#128269;'}
+        ${selected ? '&#10005;' : '&#128269;'}
       </button>
-      <span class="card-header-title ${selected ? 'combination-filter-active' : ''}">${escapeHtml(selected ? titleCase(selected) : label)}</span>
+      <span class="card-header-title">${escapeHtml(label)}</span>
       <span class="sort-arrow ${active ? 'active' : ''}">${arrow}</span>
     </div>
     <div class="combination-header-popup combination-card-popup" id="combinationCardPopup${slot}"
@@ -674,12 +725,13 @@ function rowHtml(row, rank) {
     const isMap = activeView === 'card_map';
     return `<tr>
       <td class="rank-cell">${rank}</td>
-      ${combinedCardTd(row.card_name, row.delta_general)}
+      ${combinedCardTd(row.card_name, row.delta_general, deltaRanges.delta_general)}
       <td>${escapeHtml(isMap ? formatMapName(row.map_name) : row.round_name)}</td>
       ${deltaTd(
         isMap ? row.delta_map : row.delta_round,
         row,
-        isMap ? 'delta_map' : 'delta_round'
+        isMap ? 'delta_map' : 'delta_round',
+        deltaRanges[isMap ? 'delta_map' : 'delta_round'],
       )}
       ${interactionTd(row.interaction)}
       <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
@@ -687,11 +739,14 @@ function rowHtml(row, rank) {
       <td>${singleTypeBadge(row.card_type)}</td>
     </tr>`;
   }
+  const projected = projectPairRow(row);
   return `<tr>
     <td class="rank-cell">${rank}</td>
-    ${combinedCardTd(row.card_1, row.delta_1)}
-    ${combinedCardTd(row.card_2, row.delta_2)}
-    ${deltaTd(row.delta_combined)}${deltaTd(row.delta_actual, row, 'delta_actual')}
+    ${combinedCardTd(projected.cardOne, projected.deltaOne, deltaRanges.delta_1)}
+    ${combinedCardTd(projected.cardTwo, projected.deltaTwo, deltaRanges.delta_2)}
+    ${deltaTd(row.delta_combined, null, '', deltaRanges.delta_combined)}${deltaTd(
+      row.delta_actual, row, 'delta_actual', deltaRanges.delta_actual,
+    )}
     ${interactionTd(row.interaction)}
     <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
     <td class="n-cell">${formatInteger(row.n_played)}</td>
@@ -699,11 +754,11 @@ function rowHtml(row, rank) {
   </tr>`;
 }
 
-function combinedCardTd(cardName, delta) {
+function combinedCardTd(cardName, delta, range) {
   const value = Number(delta);
   return `<td class="combination-card-cell combination-card-with-delta">
     <span class="combination-card-name">${escapeHtml(titleCase(cardName))}</span>
-    <span class="combination-card-delta" style="color:${deltaColor(value)}">(${formatSigned(value)})</span>
+    <span class="combination-card-delta" style="color:${deltaRangeColor(value, range?.min, range?.max)}">(${formatSigned(value)})</span>
   </td>`;
 }
 
@@ -727,13 +782,13 @@ function pairTypeBadge(rawTypeOne, rawTypeTwo) {
   </span>`;
 }
 
-function deltaTd(raw, row = null, prefix = '') {
+function deltaTd(raw, row = null, prefix = '', range = null) {
   const value = Number(raw);
   const ciClass = row && prefix ? ' delta-ci-cell' : '';
   const ciAttrs = row && prefix
-    ? ` data-ci-low="${escapeAttr(row[`${prefix}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${prefix}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${prefix}_ci95_n`] ?? '')}"`
+    ? ` data-ci-low="${escapeAttr(row[`${prefix}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${prefix}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${prefix}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(range?.min ?? '')}" data-ci-color-max="${escapeAttr(range?.max ?? '')}"`
     : '';
-  return `<td class="delta${ciClass}"${ciAttrs} style="color:${deltaColor(value)}">${formatSigned(value)}</td>`;
+  return `<td class="delta${ciClass}"${ciAttrs} style="color:${deltaRangeColor(value, range?.min, range?.max)}">${formatSigned(value)}</td>`;
 }
 
 function interactionTd(raw) {
@@ -836,13 +891,23 @@ function selectNoneCombinationTypes(event) {
   applyClientFilters({ preserveHead: true });
 }
 
+function combinationTypeIndicatorHtml() {
+  if (selectedTypes.size === PAIR_TYPES.length) return '';
+  return `<span class="combination-type-dots count-${selectedTypes.size}" aria-label="${selectedTypes.size} of ${PAIR_TYPES.length} types selected">
+    ${Array.from({ length: selectedTypes.size }, () => '<i class="combination-type-dot"></i>').join('')}
+  </span>`;
+}
+
 function updateCombinationTypeHeader() {
   const header = document.querySelector('.combination-type-header');
   if (!header) return;
   const narrowed = selectedTypes.size !== PAIR_TYPES.length;
   header.classList.toggle('type-filter-active', narrowed);
   const indicator = header.querySelector('.type-filter-indicator');
-  if (indicator) indicator.textContent = narrowed ? `(${selectedTypes.size})` : '';
+  if (indicator) {
+    indicator.classList.toggle('type-filter-icon', !narrowed);
+    indicator.innerHTML = combinationTypeIndicatorHtml();
+  }
   header.querySelectorAll('[data-type]').forEach(button => {
     button.classList.toggle('active', selectedTypes.has(button.dataset.type));
   });
@@ -1254,36 +1319,13 @@ function renderError(error) {
   if (body) body.innerHTML = `<tr><td colspan="${activeView === 'card_card' ? 9 : 8}"><div class="state-overlay"><div class="state-title">Could not load combinations</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div></td></tr>`;
 }
 
-function deltaColor(value) {
-  if (!Number.isFinite(value)) return 'var(--text-muted)';
-  if (value >= 0.6) return 'var(--pos-strong)';
-  if (value >= 0.3) return 'var(--pos-mid)';
-  if (value >= 0.05) return 'var(--pos-weak)';
-  if (value >= -0.05) return 'var(--neutral)';
-  if (value >= -0.3) return 'var(--neg-weak)';
-  if (value >= -0.6) return 'var(--neg-mid)';
-  return 'var(--neg-strong)';
-}
-
 function interactionColor(value) {
   if (!Number.isFinite(value)) return 'var(--text-muted)';
-  const t = Math.max(0, Math.min(1, (value + 1.5) / 3));
-  const low = { r: 0xFF, g: 0x60, b: 0x27 };
-  const high = { r: 0x7C, g: 0xBA, b: 0x43 };
-  const mix = key => Math.round(low[key] + (high[key] - low[key]) * t);
-  return `rgb(${mix('r')}, ${mix('g')}, ${mix('b')})`;
+  return orangeGreenRangeColor(value, interactionRange.min, interactionRange.max);
 }
 
 function eloColor(raw) {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return 'var(--text-muted)';
-  if (!Number.isFinite(eloRange.min) || !Number.isFinite(eloRange.max) || eloRange.min === eloRange.max) {
-    return 'var(--elo-mid)';
-  }
-  const t = (value - eloRange.min) / (eloRange.max - eloRange.min);
-  if (t >= 0.66) return 'var(--elo-high)';
-  if (t >= 0.33) return 'var(--elo-mid)';
-  return 'var(--elo-low)';
+  return relativeEloColor(raw, eloRange.min, eloRange.max);
 }
 
 function formatSigned(raw) {

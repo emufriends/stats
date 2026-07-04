@@ -1,4 +1,12 @@
 ﻿export const id = 'cards';
+import {
+  cappedNumericRange,
+  deltaRangeColor,
+  numericRange,
+  playrateColor,
+  relativeEloColor,
+} from '../color-scales.js?v=20260704-4';
+
 export const title = 'Cards';
 export const navLabel = 'Cards';
 export const mainHtml = "<!--\n      Main table controls.\n      Desktop/tablet: meta left, Minimum plays + Rows controls right.\n      Phone: compact single row. Card search lives inside the Card table header.\n    -->\n    <div class=\"main-header\">\n      <div class=\"table-meta\" id=\"tableMeta\"></div>\n      <div class=\"main-controls\">\n        <!-- Frontend-only Minimum plays filter.\n             Empty value = no minimum. It filters by n_played immediately via onMinPlaysInput().\n             The blank placeholder is intentional; CSS draws the centred dash. -->\n        <div class=\"min-plays-wrap\">\n          <label class=\"min-plays-label\" for=\"minPlayedInput\"><span class=\"min-plays-label-full\">Minimum plays</span><span class=\"min-plays-label-short\">Min plays</span></label>\n          <input class=\"min-plays-input\" type=\"number\" id=\"minPlayedInput\" placeholder=\" \" min=\"0\" inputmode=\"numeric\" oninput=\"onMinPlaysInput()\" />\n        </div>\n        <div class=\"rpp-wrap\">\n          Rows\n          <select class=\"rpp-select\" id=\"rppSelect\" onchange=\"onRppChange()\">\n            <option value=\"25\">25</option>\n            <option value=\"50\" selected>50</option>\n            <option value=\"100\">100</option>\n            <option value=\"9999\">All</option>\n          </select>\n        </div>\n      </div>\n    </div>\n\n    <!-- Attributes bar\n         Client-side-only card metadata filters (Species, Habitat, Strength,\n         Size, Reefer, Aviary, Abilities). Reads cards_attributes.csv, looked\n         up by card_name. Filtering is layered into applySearch() exactly like\n         the Type filter \u2014 no backend call, instant results.\n         Collapsible, collapsed by default.\n\n         Important maintenance notes:\n         - Conditions still exists in cards_attributes.csv, but is intentionally\n           NOT exposed in the UI and is not read by the frontend.\n         - Species and Habitat are separate filters, not a combined OR group.\n         - Rock/Water/Science are boolean \"only cards with this tag\" toggles.\n         - Strength/Science are Sponsor-only; Size/Reefer/Aviary/Abilities are\n           Animal-only. Availability is controlled in ATTR_RELEVANT_TYPES. -->\n    <div class=\"attributes-bar collapsed\" id=\"attributesBar\">\n      <div class=\"attributes-bar-header\" onclick=\"toggleAttributesBar()\">\n        <div class=\"attributes-bar-title\">\n          Attributes\n        </div>\n        <div class=\"attributes-bar-actions\">\n          <button class=\"attributes-reset-btn\" onclick=\"resetAttributesFromHeader(event)\">Reset</button>\n          <span class=\"attributes-bar-chevron\">&#9662;</span>\n        </div>\n      </div>\n      <div class=\"attributes-bar-body\" id=\"attributesBarBody\">\n\n        <!-- Species and Habitat are separate include-list filters.\n             Both are disabled and reset when Type is Project-only.\n             Do not merge these back into one Tags control unless Panda asks:\n             user testing specifically preferred them split. -->\n        <div class=\"attr-group\" id=\"attrGroupSpecies\" data-attr-group=\"species\">\n          <span class=\"attr-group-label\">Species</span>\n          <button class=\"attr-tags-btn\" id=\"speciesBtn\" onclick=\"toggleTagPopup('species', event)\">\n            <span id=\"speciesBtnLabel\">All</span>\n            <span class=\"attr-tags-indicator\" id=\"speciesBtnIndicator\"></span>\n          </button>\n        </div>\n\n        <div class=\"attr-group\" id=\"attrGroupContinent\" data-attr-group=\"continent\">\n          <span class=\"attr-group-label\">Habitat</span>\n          <button class=\"attr-tags-btn\" id=\"continentBtn\" onclick=\"toggleTagPopup('continent', event)\">\n            <span id=\"continentBtnLabel\">All</span>\n            <span class=\"attr-tags-indicator\" id=\"continentBtnIndicator\"></span>\n          </button>\n        </div>\n\n        <div class=\"attr-separator\" aria-hidden=\"true\"></div>\n\n        <!-- Rock / Water / Science: simple yes/no toggles, default OFF (no filtering).\n             Switching ON narrows to \"only cards that have this tag\".\n             Rock/Water appear on Animal and Sponsor; Science only on Sponsor. -->\n        <div class=\"attr-group\" id=\"attrGroupRock\" data-attr-group=\"rock\">\n          <span class=\"attr-group-label\">Rock</span>\n          <div class=\"attr-toggle-row\">\n            <label class=\"toggle\">\n              <input type=\"checkbox\" id=\"rockToggle\" onchange=\"onBoolTagToggle('rock')\" />\n              <span class=\"toggle-track\"></span>\n            </label>\n          </div>\n        </div>\n\n        <div class=\"attr-group\" id=\"attrGroupWater\" data-attr-group=\"water\">\n          <span class=\"attr-group-label\">Water</span>\n          <div class=\"attr-toggle-row\">\n            <label class=\"toggle\">\n              <input type=\"checkbox\" id=\"waterToggle\" onchange=\"onBoolTagToggle('water')\" />\n              <span class=\"toggle-track\"></span>\n            </label>\n          </div>\n        </div>\n\n        <div class=\"attr-separator\" aria-hidden=\"true\"></div>\n\n        <div class=\"attr-group\" id=\"attrGroupScience\" data-attr-group=\"science\">\n          <span class=\"attr-group-label\">Science</span>\n          <div class=\"attr-toggle-row\">\n            <label class=\"toggle\">\n              <input type=\"checkbox\" id=\"scienceToggle\" onchange=\"onBoolTagToggle('science')\" />\n              <span class=\"toggle-track\"></span>\n            </label>\n          </div>\n        </div>\n\n        <div class=\"attr-separator\" aria-hidden=\"true\"></div>\n\n        <!-- Strength: 3/4/5/6 chips. Sponsor-only attribute.\n             Disabled unless Sponsor is active in the Type filter.\n             Narrowing this (away from all-selected) forces Type to Sponsor-only. -->\n        <div class=\"attr-group\" id=\"attrGroupStrength\" data-attr-group=\"strength\">\n          <div class=\"attr-group-heading\">\n            <span class=\"attr-group-label\">Strength</span>\n            <span class=\"attr-group-actions\">\n              (<span class=\"map-toggle-link\" onclick=\"selectAllAttributeValues('strength')\">all</span> / <span class=\"map-toggle-link\" onclick=\"selectNoneAttributeValues('strength')\">none</span>)\n            </span>\n          </div>\n          <div class=\"attr-chip-row\" id=\"strengthChips\"></div>\n        </div>\n\n        <div class=\"attr-separator\" aria-hidden=\"true\"></div>\n\n        <!-- Size: 1/2/3/4/5 chips. Animal-only attribute.\n             Disabled unless Animal is active in the Type filter.\n             Narrowing this forces Type to Animal-only. -->\n        <div class=\"attr-group\" id=\"attrGroupSize\" data-attr-group=\"size\">\n          <div class=\"attr-group-heading\">\n            <span class=\"attr-group-label\">Size</span>\n            <span class=\"attr-group-actions\">\n              (<span class=\"map-toggle-link\" onclick=\"selectAllAttributeValues('size')\">all</span> / <span class=\"map-toggle-link\" onclick=\"selectNoneAttributeValues('size')\">none</span>)\n            </span>\n          </div>\n          <div class=\"attr-chip-row\" id=\"sizeChips\"></div>\n        </div>\n\n        <div class=\"attr-separator\" aria-hidden=\"true\"></div>\n\n        <!-- Reefer: yes/no toggle, default No (off, not filtering).\n             Animal-only attribute. Disabled unless Animal is active in Type.\n             Turning ON forces Type to Animal-only, remembering whatever Type\n             selection was active immediately before (shared with Aviary).\n             Turning OFF restores that remembered Type \u2014 unless Aviary is still\n             ON, in which case Type stays Animal-only until both are off. -->\n        <div class=\"attr-group\" id=\"attrGroupReefer\" data-attr-group=\"reefer\">\n          <span class=\"attr-group-label\">Reefer</span>\n          <div class=\"attr-toggle-row\">\n            <label class=\"toggle\">\n              <input type=\"checkbox\" id=\"reeferToggle\" onchange=\"onReeferAviaryToggle('reefer')\" />\n              <span class=\"toggle-track\"></span>\n            </label>\n          </div>\n        </div>\n\n        <!-- Aviary: same pattern as Reefer, sharing the same remembered-Type slot. -->\n        <div class=\"attr-group\" id=\"attrGroupAviary\" data-attr-group=\"aviary\">\n          <span class=\"attr-group-label\">Aviary</span>\n          <div class=\"attr-toggle-row\">\n            <label class=\"toggle\">\n              <input type=\"checkbox\" id=\"aviaryToggle\" onchange=\"onReeferAviaryToggle('aviary')\" />\n              <span class=\"toggle-track\"></span>\n            </label>\n          </div>\n        </div>\n\n        <div class=\"attr-separator\" aria-hidden=\"true\"></div>\n\n        <!-- Abilities: searchable multi-select checklist, alphabetical, OR logic.\n             Animal-only attribute. Disabled unless Animal is active in Type. -->\n        <div class=\"attr-group\" id=\"attrGroupAbilities\" data-attr-group=\"abilities\">\n          <span class=\"attr-group-label\">Abilities</span>\n          <div class=\"abilities-dropdown\">\n            <button class=\"abilities-dropdown-btn\" id=\"abilitiesBtn\" onclick=\"toggleAbilitiesPanel(event)\">\n              <span id=\"abilitiesBtnLabel\">All</span>\n              <span class=\"attr-tags-indicator\" id=\"abilitiesBtnIndicator\"></span>\n            </button>\n            <div class=\"abilities-panel\" id=\"abilitiesPanel\" onclick=\"event.stopPropagation()\">\n              <input class=\"abilities-search-input\" type=\"text\" id=\"abilitiesSearchInput\"\n                     placeholder=\"Search abilities...\" oninput=\"renderAbilitiesList()\" />\n              <div class=\"abilities-actions\">\n                <span class=\"map-toggle-link\" onclick=\"selectAllAbilities()\">all</span> /\n                <span class=\"map-toggle-link\" onclick=\"selectNoneAbilities()\">none</span>\n              </div>\n              <div class=\"abilities-list\" id=\"abilitiesList\"></div>\n            </div>\n          </div>\n        </div>\n\n      </div>\n    </div>\n\n    <!-- Tag popup overlay: reused by Species and Habitat.\n         The popup content is generated from currentTagPopupKind, so there is\n         only one modal in the DOM for both controls. -->\n    <div class=\"tags-popup-overlay\" id=\"tagPopupOverlay\" onclick=\"closeTagPopupOnOverlay(event)\">\n      <div class=\"tags-popup\" onclick=\"event.stopPropagation()\">\n        <div class=\"tags-popup-header\">\n          <span class=\"tags-popup-title\" id=\"tagPopupTitle\">Species</span>\n          <div class=\"tags-popup-actions\">\n            <span class=\"map-toggle-link\" onclick=\"selectAllCurrentTagPopup()\">all</span> /\n            <span class=\"map-toggle-link\" onclick=\"selectNoneCurrentTagPopup()\">none</span>\n          </div>\n        </div>\n\n        <div class=\"tags-popup-section\">\n          <div class=\"tags-popup-chips\" id=\"tagPopupChips\"></div>\n        </div>\n\n        <button class=\"tags-popup-close-btn\" onclick=\"closeTagPopup()\">Done</button>\n      </div>\n    </div>\n\n    <div class=\"table-wrap\">\n      <div class=\"table-scroll\">\n      <table id=\"statsTable\">\n        <thead>\n          <tr>\n            <th style=\"width:5%;text-align:center;cursor:default;\">#</th>\n            <th class=\"card-search-header\" onclick=\"sortBy('card_name')\" style=\"width:20%;text-align:center\">\n              <div class=\"card-header-content\" id=\"cardHeaderContent\">\n                <button class=\"card-search-btn\" id=\"cardSearchBtn\" onclick=\"openCardSearch(event)\" title=\"Search cards\" aria-label=\"Search cards\">&#128269;</button>\n                <span class=\"card-header-title\">Card</span>\n                <span class=\"sort-arrow\" id=\"sort-card_name\">&#8597;</span>\n              </div>\n              <div class=\"card-header-search\" id=\"cardHeaderSearch\" onclick=\"event.stopPropagation()\">\n                <span class=\"card-header-search-icon\">&#128269;</span>\n                <input class=\"card-header-search-input\" type=\"text\" id=\"searchInput\" placeholder=\"Search...\" oninput=\"onSearch()\" />\n                <button class=\"card-search-close\" onclick=\"closeCardSearch(event)\" title=\"Clear search\" aria-label=\"Clear search\">x</button>\n              </div>\n            </th>\n            <th onclick=\"sortBy('delta_played')\" style=\"width:12%;text-align:center\">&Delta; (Played)<span class=\"col-tip\" data-tip=\"average elo gain when played\">?</span><span class=\"sort-arrow\" id=\"sort-delta_played\">&#8597;</span></th>\n            <th onclick=\"sortBy('delta_in_hand')\" style=\"width:12%;text-align:center\">&Delta; (In Hand)<span class=\"col-tip\" data-tip=\"average elo gain when in hand\">?</span><span class=\"sort-arrow\" id=\"sort-delta_in_hand\">&#8597;</span></th>\n            <th onclick=\"sortBy('avg_elo')\" style=\"width:8%;text-align:center\">Elo<span class=\"col-tip\" data-tip=\"average player elo when played\">?</span><span class=\"sort-arrow\" id=\"sort-avg_elo\">&#8597;</span></th>\n            <th onclick=\"sortBy('playrate_pct')\" style=\"width:13%;text-align:center\">Playrate <span class=\"col-tip\" data-tip-fraction>?</span><span class=\"sort-arrow\" id=\"sort-playrate_pct\">&#8597;</span></th>\n            <th onclick=\"sortBy('n_played')\" style=\"width:10%;text-align:center\">Played<span class=\"col-tip\" data-tip-played>?</span><span class=\"sort-arrow\" id=\"sort-n_played\">&#8597;</span></th>\n            <th onclick=\"sortBy('n_seen')\" style=\"width:10%;text-align:center\">Seen<span class=\"col-tip\" data-tip-seen>?</span><span class=\"sort-arrow\" id=\"sort-n_seen\">&#8597;</span></th>\n            <th class=\"type-filter-header\" id=\"typeFilterHeader\" style=\"width:10%;text-align:center;cursor:pointer;\" onclick=\"toggleTypeFilterPopup(event)\">\n              <span class=\"type-filter-label\">Type <span class=\"type-filter-indicator type-filter-icon\" id=\"typeFilterIndicator\"></span></span>\n              <div class=\"type-filter-popup\" id=\"typeFilterPopup\">\n                <button class=\"chip active\" data-value=\"animal\" onclick=\"toggleTypeChip(this)\">Animal</button>\n                <button class=\"chip active\" data-value=\"sponsor\" onclick=\"toggleTypeChip(this)\">Sponsor</button>\n                <button class=\"chip active\" data-value=\"project\" onclick=\"toggleTypeChip(this)\">Project</button>\n              </div>\n            </th>\n          </tr>\n        </thead>\n        <tbody id=\"tableBody\">\n          <tr><td colspan=\"9\">\n            <div class=\"state-overlay\">\n              <div class=\"spinner\"></div>\n              <div class=\"state-title\">Preparing data...</div>\n              <div class=\"state-sub\">Loading the latest available card statistics.</div>\n            </div>\n          </td></tr>\n        </tbody>\n      </table>\n      </div>\n      <div class=\"pagination\" id=\"pagination\" style=\"display:none;\"></div>\n    </div>";
@@ -841,11 +849,14 @@ function appendCell(rowEl, className, text, color) {
   return cell;
 }
 
-function appendDeltaCiCell(rowEl, row, prefix, text, color) {
+function appendDeltaCiCell(rowEl, row, prefix, text, range) {
+  const color = deltaRangeColor(row[prefix], range.min, range.max);
   const cell = appendCell(rowEl, 'delta delta-ci-cell', text, color);
   cell.dataset.ciLow = row[`${prefix}_ci95_low`] ?? '';
   cell.dataset.ciHigh = row[`${prefix}_ci95_high`] ?? '';
   cell.dataset.ciN = row[`${prefix}_ci95_n`] ?? '';
+  cell.dataset.ciColorMin = range.min ?? '';
+  cell.dataset.ciColorMax = range.max ?? '';
   return cell;
 }
 
@@ -919,11 +930,11 @@ function renderTable(data) {
   const start = (currentPage - 1) * rpp;
   const pageData = data.slice(start, start + rpp);
 
-  // Find max playrate for bar scaling, and elo range for colour scale
-  const maxPR = Math.max(...data.map(r => r.playrate_pct || 0), 1);
-  const eloVals = data.map(r => r.avg_elo).filter(v => v != null);
-  const minElo = Math.min(...eloVals);
-  const maxElo = Math.max(...eloVals);
+  // Color ranges use the complete filtered result, before pagination.
+  const playrateRange = numericRange(data, row => row.playrate_pct);
+  const eloRange = numericRange(data, row => row.avg_elo);
+  const deltaPlayedRange = cappedNumericRange(data, row => row.delta_played);
+  const deltaInHandRange = cappedNumericRange(data, row => row.delta_in_hand);
 
   tbody.replaceChildren();
   pageData.forEach(row => {
@@ -932,16 +943,16 @@ function renderTable(data) {
     const pr = row.playrate_pct != null ? row.playrate_pct.toFixed(2) + '%' : '\u2014';
     const prVal = row.playrate_pct || 0;
     const barWidth = prVal; // absolute: playrate % = bar width %
-    const barColor = prColor(prVal);
+    const barColor = prColor(prVal, playrateRange.min, playrateRange.max);
     const eloDisplay = row.avg_elo != null ? Math.round(row.avg_elo).toLocaleString('en-US') : '\u2014';
-    const eloCol = eloColor(row.avg_elo, minElo, maxElo);
+    const eloCol = eloColor(row.avg_elo, eloRange.min, eloRange.max);
 
     const tr = document.createElement('tr');
     appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
     appendCell(tr, 'card-name', titleCase(row.card_name));
-    appendDeltaCiCell(tr, row, 'delta_played', dp, deltaColor(row.delta_played));
+    appendDeltaCiCell(tr, row, 'delta_played', dp, deltaPlayedRange);
     if (roundFilterActive) appendUnavailableCell(tr);
-    else appendDeltaCiCell(tr, row, 'delta_in_hand', dh, deltaColor(row.delta_in_hand));
+    else appendDeltaCiCell(tr, row, 'delta_in_hand', dh, deltaInHandRange);
     appendCell(tr, 'n-cell', eloDisplay, eloCol);
     if (roundFilterActive) appendUnavailableCell(tr);
     else appendPlayrateCell(tr, pr, prVal, barWidth, barColor);
@@ -1079,31 +1090,8 @@ function titleCase(str) {
     .replace(/\bGalapagos\b/g, 'Gal\u00e1pagos');
 }
 
-function deltaColor(val) {
-  if (val == null) return 'var(--text-muted)';
-  if (val >= 0.6)  return 'var(--pos-strong)';
-  if (val >= 0.3)  return 'var(--pos-mid)';
-  if (val >= 0.05) return 'var(--pos-weak)';
-  if (val >= -0.05) return 'var(--neutral)';
-  if (val >= -0.3) return 'var(--neg-weak)';
-  if (val >= -0.6) return 'var(--neg-mid)';
-  return 'var(--neg-strong)';
-}
-
-function prColor(val) {
-  if (val >= 50) return 'var(--pr-high)';
-  if (val >= 30) return 'var(--pr-mid)';
-  return 'var(--pr-low)';
-}
-
-function eloColor(val, minElo, maxElo) {
-  if (val == null) return 'var(--text-muted)';
-  if (maxElo === minElo) return 'var(--elo-mid)';
-  const t = (val - minElo) / (maxElo - minElo); // 0 = lowest, 1 = highest
-  if (t >= 0.66) return 'var(--elo-high)';
-  if (t >= 0.33) return 'var(--elo-mid)';
-  return 'var(--elo-low)';
-}
+const prColor = playrateColor;
+const eloColor = relativeEloColor;
 
 // Column header tooltips
 const _colTip = document.getElementById('col-tooltip');
@@ -2100,10 +2088,6 @@ const PAGE_WINDOW_HANDLERS = {
 function bindWindowHandlers() {
   Object.assign(window, PAGE_WINDOW_HANDLERS);
 }
-
-
-
-
 
 
 
