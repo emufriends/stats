@@ -7,7 +7,7 @@ import {
   normalizeToRange,
   numericRange,
   orangeGreenRangeColor,
-} from '../color-scales.js?v=20260704-8';
+} from '../color-scales.js?v=20260704-9';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';

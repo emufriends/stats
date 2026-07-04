@@ -1,5 +1,5 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260704-8';
-import { deltaColor, deltaRangeColor } from './color-scales.js?v=20260704-8';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260704-9';
+import { deltaColor, deltaRangeColor } from './color-scales.js?v=20260704-9';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
   closeSidebarIfOpen,
@@ -10,7 +10,7 @@ import {
   setTopbarDataset,
   toggleNavCollapse,
   toggleSidebar,
-} from './layout.js?v=20260704-8';
+} from './layout.js?v=20260704-9';
 
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;

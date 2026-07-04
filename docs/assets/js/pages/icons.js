@@ -4,17 +4,41 @@ import {
   numericRange,
   orangeGreenRangeColor,
   playrateColor,
-} from '../color-scales.js?v=20260704-8';
+} from '../color-scales.js?v=20260704-9';
 
 export const id = 'icons';
 export const title = 'Icons';
 export const navLabel = 'Icons';
 
-const ICONS = [
-  'Birds', 'Herbivores', 'Predators', 'Primates', 'Reptiles', 'Sea Animals',
-  'Bears', 'Petting Zoo Animals', 'Africa', 'Americas', 'Asia', 'Australia',
-  'Europe', 'Rock', 'Water', 'Science',
+const ICON_GROUPS = [
+  {
+    id: 'species',
+    label: 'Species',
+    icons: [
+      ['Birds', 'bird.png'], ['Herbivores', 'herbivore.png'],
+      ['Predators', 'predator.png'], ['Primates', 'primate.png'],
+      ['Reptiles', 'reptile.png'], ['Sea Animals', 'sea-animal.png'],
+      ['Bears', 'bear.png'], ['Petting Zoo Animals', 'petting-zoo.png'],
+    ],
+  },
+  {
+    id: 'habitat',
+    label: 'Habitat',
+    icons: [
+      ['Africa', 'africa.png'], ['Americas', 'americas.png'], ['Asia', 'asia.png'],
+      ['Australia', 'australia.png'], ['Europe', 'europe.png'],
+    ],
+  },
+  {
+    id: 'other',
+    label: 'Other',
+    icons: [['Rock', 'rock.png'], ['Water', 'water.png'], ['Science', 'science.png']],
+  },
 ];
+const ICONS = ICON_GROUPS.flatMap(group => group.icons.map(([name]) => name));
+const ICON_ASSETS = Object.fromEntries(
+  ICON_GROUPS.flatMap(group => group.icons.map(([name, asset]) => [name, asset])),
+);
 const BUCKETS = [
   ['delta_0', '0'], ['delta_1', '1'], ['delta_2', '2'], ['delta_3', '3'],
   ['delta_4', '4'], ['delta_5', '5'], ['delta_6', '6'], ['delta_7_plus', '7+'],
@@ -34,6 +58,11 @@ const SNAPSHOTS = {
   1: 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/icons/default-mw.json?v=20260704-1',
   0: 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/icons/default-base.json?v=20260704-1',
 };
+const CHART_LINE_COLORS = [
+  '#34d399', '#60a5fa', '#f59e0b', '#f472b6', '#a78bfa', '#22d3ee',
+  '#fb7185', '#84cc16', '#f97316', '#2dd4bf', '#818cf8', '#eab308',
+  '#4ade80', '#38bdf8', '#c084fc', '#f43f5e',
+];
 
 export const mainHtml = `
   <div class="main-header sponsor-endgames-main-header">
@@ -44,11 +73,16 @@ export const mainHtml = `
     </div>
   </div>
   <div class="attributes-bar endgames-tabs-bar icons-filter-bar">
-    <div class="icons-filter-heading">
-      <span>Icons</span>
-      <span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllIcons()">all</span> / <span class="map-toggle-link" onclick="selectNoneIcons()">none</span>)</span>
+    <div class="icons-filter-scroll">
+      <div class="icons-filter-controls">
+        <span class="icons-all-none"><span class="map-toggle-link" onclick="selectAllIcons()">all</span> / <span class="map-toggle-link" onclick="selectNoneIcons()">none</span></span>
+        <div class="icons-filter-groups" id="iconFilterChips"></div>
+      </div>
     </div>
-    <div class="icons-filter-scroll"><div class="icons-filter-chips" id="iconFilterChips"></div></div>
+    <button type="button" class="endgames-graph-toggle icons-graph-toggle" aria-label="Toggle icon graph"
+      title="Show graph" onclick="toggleIconsGraphView()">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16" /><path d="M4 5v14" /><path d="M6.5 15.5 10 11l3.5 2.5L18 7" /></svg>
+    </button>
   </div>
   <div class="table-wrap">
     <div class="table-scroll">
@@ -93,6 +127,7 @@ let mounted = false;
 let token = 0;
 let isMW = 1;
 let mode = 'delta';
+let graphView = false;
 let rows = [];
 let selectedIcons = new Set(ICONS);
 let selectedMaps = VALID_MAPS.map(([, full]) => full);
@@ -104,7 +139,8 @@ export function mount({ dataset = 1 } = {}) {
   token += 1;
   isMW = Number(dataset) === 0 ? 0 : 1;
   mode = 'delta';
-  selectedIcons = new Set(ICONS);
+  graphView = false;
+  selectedIcons = new Set(availableIconNames());
   selectedMaps = VALID_MAPS.map(([, full]) => full);
   sort = { col: 'amount', dir: 'desc' };
   bindHandlers();
@@ -120,6 +156,9 @@ export function unmount() {
 
 export function setDataset(dataset) {
   isMW = Number(dataset) === 0 ? 0 : 1;
+  if (isMW) selectedIcons.add('Sea Animals');
+  else selectedIcons.delete('Sea Animals');
+  renderIconChips();
   applyFilters(++token);
 }
 
@@ -133,7 +172,9 @@ function bindHandlers() {
     selectNoneMaps,
     setIconsMode,
     sortIcons,
+    toggleIconGroup,
     toggleIconChip,
+    toggleIconsGraphView,
     toggleMapChip,
   });
 }
@@ -143,7 +184,14 @@ function setIconsMode(next) {
   document.querySelectorAll('.icons-mode button').forEach(button => {
     button.classList.toggle('active', button.dataset.mode === mode);
   });
-  renderTable();
+  renderCurrentView();
+}
+
+function toggleIconsGraphView() {
+  graphView = !graphView;
+  document.querySelector('.icons-graph-toggle')?.classList.toggle('active', graphView);
+  document.querySelector('.icons-table')?.classList.toggle('icons-graph-view', graphView);
+  renderCurrentView();
 }
 
 function sortIcons(col) {
@@ -198,7 +246,7 @@ async function applyFilters(activeToken = token) {
     if (!mounted || activeToken !== token) return;
     rows = Array.isArray(payload.data) ? payload.data : [];
     assignRanks();
-    renderTable();
+    renderCurrentView();
   } catch (error) {
     if (mounted && activeToken === token) renderError(error);
   }
@@ -222,22 +270,44 @@ async function fetchApi(p) {
 }
 
 function assignRanks() {
-  [...rows].sort((a, b) => compareValues(b.amount, a.amount) || String(a.icon).localeCompare(String(b.icon)))
+  datasetRows().sort((a, b) => compareValues(b.amount, a.amount) || String(a.icon).localeCompare(String(b.icon)))
     .forEach((row, index) => { row.global_rank = index + 1; });
 }
 
+function availableIconNames() {
+  return ICONS.filter(icon => isMW || icon !== 'Sea Animals');
+}
+
+function datasetRows() {
+  return rows.filter(row => isMW || row.icon !== 'Sea Animals');
+}
+
 function visibleRows() {
-  return rows.filter(row => selectedIcons.has(row.icon));
+  return datasetRows().filter(row => selectedIcons.has(row.icon));
 }
 
 function sortedRows(data) {
   const direction = sort.dir === 'desc' ? -1 : 1;
   return [...data].sort((a, b) => {
-    let av = sort.col === 'icon' ? a.icon : sortValue(a, sort.col);
-    let bv = sort.col === 'icon' ? b.icon : sortValue(b, sort.col);
+    if (sort.col.startsWith('delta_')) {
+      const aTier = bucketSortTier(a, sort.col);
+      const bTier = bucketSortTier(b, sort.col);
+      if (aTier !== bTier) return aTier - bTier;
+      if (aTier === 2) return (a.global_rank ?? 999) - (b.global_rank ?? 999);
+    }
+    const av = sort.col === 'icon' ? a.icon : sortValue(a, sort.col);
+    const bv = sort.col === 'icon' ? b.icon : sortValue(b, sort.col);
     if (typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv)) * direction;
-    return compareValues(av, bv) * direction || String(a.icon).localeCompare(String(b.icon));
+    return compareValues(av, bv) * direction ||
+      (a.global_rank ?? 999) - (b.global_rank ?? 999);
   });
+}
+
+function bucketSortTier(row, field) {
+  if (isImpossibleBucket(row, field)) return 2;
+  const value = mode === 'frequency' ? frequency(row, field) : Number(row[field]);
+  if (!Number.isFinite(value)) return 2;
+  return mode === 'delta' && count(row, field) < 1000 ? 1 : 0;
 }
 
 function sortValue(row, field) {
@@ -254,23 +324,35 @@ function compareValues(a, b) {
   return an - bn;
 }
 
+function renderCurrentView() {
+  if (graphView) renderGraph();
+  else renderTable();
+}
+
 function renderTable() {
   renderHead();
   const data = sortedRows(visibleRows());
+  const universe = datasetRows();
   const meta = document.getElementById('tableMeta');
-  if (meta) meta.innerHTML = `Showing <strong>${data.length}</strong> of <strong>${rows.length}</strong> icons`;
+  if (meta) meta.innerHTML = `Showing <strong>${data.length}</strong> of <strong>${universe.length}</strong> icons`;
   const body = document.getElementById('tableBody');
   if (!body) return;
   if (!data.length) {
     body.innerHTML = '<tr><td colspan="11"><div class="state-overlay"><div class="state-title">No icons selected</div><div class="state-sub">Enable at least one icon above the table.</div></div></td></tr>';
     return;
   }
-  const amountRange = numericRange(rows, row => row.amount);
+  const amountRange = numericRange(universe, row => row.amount);
   const deltaRanges = Object.fromEntries(BUCKETS.map(([field]) => [
-    field, cappedNumericRange(rows.filter(row => count(row, field) >= 1000), row => row[field]),
+    field, cappedNumericRange(
+      universe.filter(row => !isImpossibleBucket(row, field) && count(row, field) >= 1000),
+      row => row[field],
+    ),
   ]));
   const frequencyRanges = Object.fromEntries(BUCKETS.map(([field]) => [
-    field, numericRange(rows, row => frequency(row, field)),
+    field, numericRange(
+      universe.filter(row => !isImpossibleBucket(row, field)),
+      row => frequency(row, field),
+    ),
   ]));
   body.innerHTML = data.map(row => `
     <tr>
@@ -301,6 +383,7 @@ function header(field, label, width) {
 }
 
 function bucketCell(row, field, deltaRange, frequencyRange) {
+  if (isImpossibleBucket(row, field)) return '<td class="unavailable-cell">-</td>';
   const occurrences = count(row, field);
   if (mode === 'frequency') {
     const pct = frequency(row, field);
@@ -324,6 +407,13 @@ function bucketCell(row, field, deltaRange, frequencyRange) {
     style="color:${deltaRangeColor(value, deltaRange.min, deltaRange.max)}">${signed(value)}</td>`;
 }
 
+function isImpossibleBucket(row, field) {
+  if (row.icon !== 'Petting Zoo Animals') return false;
+  const index = BUCKETS.findIndex(([bucket]) => bucket === field);
+  const maximum = isMW ? 4 : 3;
+  return index > maximum;
+}
+
 function count(row, field) {
   const value = Number(row[field.replace('delta_', 'count_')]);
   return Number.isFinite(value) ? value : 0;
@@ -334,30 +424,289 @@ function frequency(row, field) {
   return total > 0 ? 100 * count(row, field) / total : Number.NaN;
 }
 
+function renderGraph() {
+  const data = visibleRows();
+  const body = document.getElementById('tableBody');
+  const head = document.getElementById('tableHead');
+  const meta = document.getElementById('tableMeta');
+  if (head) head.innerHTML = '';
+  if (meta) meta.innerHTML = '';
+  if (!body) return;
+  body.innerHTML = '<tr><td colspan="11" class="chart-host-cell"></td></tr>';
+  const host = body.querySelector('.chart-host-cell');
+  if (!data.length) {
+    host.innerHTML = '<div class="state-overlay"><div class="state-title">No icons selected</div><div class="state-sub">Enable at least one icon above the graph.</div></div>';
+    return;
+  }
+  host.appendChild(buildIconsChart(data));
+}
+
+function buildIconsChart(data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cp-dist-chart-wrap icons-chart-wrap';
+  const chart = document.createElement('div');
+  chart.className = 'cp-dist-chart';
+  const legend = document.createElement('div');
+  legend.className = 'cp-dist-legend';
+  const controls = document.createElement('div');
+  controls.className = 'cp-dist-legend-controls';
+  controls.innerHTML = '<span>Lines</span><span>(<button type="button" data-action="all">all</button> / <button type="button" data-action="none">none</button>)</span>';
+  const legendList = document.createElement('div');
+  legendList.className = 'cp-dist-legend-list';
+  const chartTooltip = document.createElement('div');
+  chartTooltip.className = 'cp-dist-tooltip';
+  const selected = new Set(data.map((_, index) => index));
+
+  const width = 820;
+  const height = 440;
+  const margin = { top: 24, right: 28, bottom: 56, left: 64 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const allValues = data.flatMap(row => BUCKETS.flatMap(([field]) => {
+    if (isImpossibleBucket(row, field)) return [];
+    if (mode === 'delta') {
+      const value = Number(row[field]);
+      return count(row, field) >= 1000 && Number.isFinite(value) ? [value] : [];
+    }
+    const value = frequency(row, field);
+    return Number.isFinite(value) ? [value] : [];
+  }));
+  let yMin;
+  let yMax;
+  if (mode === 'frequency') {
+    yMin = 0;
+    yMax = Math.max(10, Math.ceil((Math.max(...allValues, 0) * 1.08) / 10) * 10);
+  } else {
+    const rawMin = Math.min(0, ...allValues);
+    const rawMax = Math.max(0, ...allValues);
+    const padding = Math.max(0.1, (rawMax - rawMin) * 0.1);
+    yMin = Math.floor((rawMin - padding) * 2) / 2;
+    yMax = Math.ceil((rawMax + padding) * 2) / 2;
+    if (yMin === yMax) { yMin -= 0.5; yMax += 0.5; }
+  }
+  const x = index => margin.left + index / (BUCKETS.length - 1) * innerWidth;
+  const y = value => margin.top + innerHeight -
+    (Number(value) - yMin) / (yMax - yMin) * innerHeight;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `Icon ${mode === 'delta' ? 'Elo delta' : 'frequency'} line chart`);
+
+  for (let index = 0; index <= 4; index += 1) {
+    const tick = yMin + (yMax - yMin) * index / 4;
+    const gy = y(tick);
+    appendSvg(svg, 'line', { x1: margin.left, x2: width - margin.right, y1: gy, y2: gy, class: 'cp-dist-grid' });
+    const label = appendSvg(svg, 'text', {
+      x: margin.left - 10, y: gy + 4, 'text-anchor': 'end', class: 'cp-dist-axis-label',
+    });
+    label.textContent = mode === 'frequency' ? `${tick.toFixed(0)}%` : signedAxis(tick);
+  }
+  BUCKETS.forEach(([, bucket], index) => {
+    const label = appendSvg(svg, 'text', {
+      x: x(index), y: height - 17, 'text-anchor': 'middle', class: 'cp-dist-axis-label',
+    });
+    label.textContent = `${mode === 'frequency' ? 'f' : '\u0394'} (${bucket})`;
+  });
+  appendSvg(svg, 'line', {
+    x1: margin.left, x2: width - margin.right,
+    y1: margin.top + innerHeight, y2: margin.top + innerHeight, class: 'cp-dist-axis',
+  });
+  appendSvg(svg, 'line', {
+    x1: margin.left, x2: margin.left, y1: margin.top,
+    y2: margin.top + innerHeight, class: 'cp-dist-axis',
+  });
+  if (mode === 'delta' && yMin < 0 && yMax > 0) {
+    appendSvg(svg, 'line', {
+      x1: margin.left, x2: width - margin.right, y1: y(0), y2: y(0),
+      class: 'icons-chart-zero',
+    });
+  }
+
+  const syncSelection = () => {
+    svg.querySelectorAll('.cp-dist-line, .cp-dist-dot').forEach(element => {
+      element.classList.toggle('deselected', !selected.has(Number(element.dataset.index)));
+    });
+    legendList.querySelectorAll('.cp-dist-legend-item').forEach(element => {
+      const active = selected.has(Number(element.dataset.index));
+      element.classList.toggle('deselected', !active);
+      element.setAttribute('aria-pressed', String(active));
+    });
+  };
+  const toggleLine = index => {
+    if (selected.size === data.length) {
+      selected.clear();
+      selected.add(index);
+    } else if (selected.has(index)) selected.delete(index);
+    else selected.add(index);
+    syncSelection();
+  };
+  const highlight = index => {
+    svg.querySelectorAll('.cp-dist-line').forEach(element => {
+      element.classList.toggle('highlighted', Number(element.dataset.index) === index);
+      element.classList.toggle('dimmed', Number(element.dataset.index) !== index);
+    });
+    legendList.querySelectorAll('.cp-dist-legend-item').forEach(element => {
+      element.classList.toggle('highlighted', Number(element.dataset.index) === index);
+      element.classList.toggle('dimmed', Number(element.dataset.index) !== index);
+    });
+  };
+  const clearHighlight = () => {
+    svg.querySelectorAll('.cp-dist-line').forEach(element => element.classList.remove('highlighted', 'dimmed'));
+    legendList.querySelectorAll('.cp-dist-legend-item').forEach(element => element.classList.remove('highlighted', 'dimmed'));
+    chartTooltip.style.display = 'none';
+  };
+
+  controls.addEventListener('click', event => {
+    const action = event.target?.dataset?.action;
+    if (action === 'all') data.forEach((_, index) => selected.add(index));
+    if (action === 'none') selected.clear();
+    syncSelection();
+  });
+
+  data.forEach((row, rowIndex) => {
+    const color = CHART_LINE_COLORS[rowIndex % CHART_LINE_COLORS.length];
+    const points = BUCKETS.map(([field], bucketIndex) => {
+      if (isImpossibleBucket(row, field)) return null;
+      const value = mode === 'delta' ? Number(row[field]) : frequency(row, field);
+      if (!Number.isFinite(value)) return null;
+      if (mode === 'delta' && count(row, field) < 1000) return null;
+      return { field, bucketIndex, value, x: x(bucketIndex), y: y(value) };
+    });
+    let pathData = '';
+    let segmentOpen = false;
+    points.forEach(point => {
+      if (!point) { segmentOpen = false; return; }
+      pathData += `${segmentOpen ? 'L' : 'M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)} `;
+      segmentOpen = true;
+    });
+    if (pathData) {
+      const path = appendSvg(svg, 'path', { d: pathData.trim(), class: 'cp-dist-line', stroke: color });
+      path.dataset.index = String(rowIndex);
+      path.addEventListener('click', event => { event.stopPropagation(); toggleLine(rowIndex); });
+      path.addEventListener('mouseenter', () => highlight(rowIndex));
+      path.addEventListener('mousemove', event => {
+        const rect = svg.getBoundingClientRect();
+        const relativeX = (event.clientX - rect.left) / rect.width * width;
+        const nearest = points.filter(Boolean).reduce((best, point) =>
+          !best || Math.abs(point.x - relativeX) < Math.abs(best.x - relativeX) ? point : best, null);
+        if (nearest) showIconsChartTooltip(row, nearest, event, chartTooltip);
+      });
+      path.addEventListener('mouseleave', clearHighlight);
+    }
+    points.filter(Boolean).forEach(point => {
+      const dot = appendSvg(svg, 'circle', {
+        cx: point.x, cy: point.y, r: 3, class: 'cp-dist-dot', fill: color,
+      });
+      dot.dataset.index = String(rowIndex);
+      dot.addEventListener('click', event => { event.stopPropagation(); toggleLine(rowIndex); });
+      dot.addEventListener('mouseenter', event => {
+        highlight(rowIndex);
+        showIconsChartTooltip(row, point, event, chartTooltip);
+      });
+      dot.addEventListener('mousemove', event => showIconsChartTooltip(row, point, event, chartTooltip));
+      dot.addEventListener('mouseleave', clearHighlight);
+    });
+
+    const legendItem = document.createElement('button');
+    legendItem.type = 'button';
+    legendItem.className = 'cp-dist-legend-item icons-chart-legend-item';
+    legendItem.dataset.index = String(rowIndex);
+    legendItem.setAttribute('aria-pressed', 'true');
+    legendItem.innerHTML = `<span class="cp-dist-legend-swatch" style="background:${color}"></span>
+      <img src="assets/img/icons/${ICON_ASSETS[row.icon]}" alt="" /><span>${escapeHtml(row.icon)}</span>`;
+    legendItem.addEventListener('click', () => toggleLine(rowIndex));
+    legendItem.addEventListener('mouseenter', () => highlight(rowIndex));
+    legendItem.addEventListener('mouseleave', clearHighlight);
+    legendList.appendChild(legendItem);
+  });
+
+  legend.append(controls, legendList);
+  syncSelection();
+  chart.append(svg, chartTooltip);
+  wrap.append(chart, legend);
+  return wrap;
+}
+
+function appendSvg(parent, tag, attributes) {
+  const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+  parent.appendChild(element);
+  return element;
+}
+
+function signedAxis(value) {
+  const rounded = Math.abs(value) < 0.0001 ? 0 : value;
+  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)}`;
+}
+
+function showIconsChartTooltip(row, point, event, chartTooltip) {
+  const bucket = BUCKETS[point.bucketIndex][1];
+  const observations = count(row, point.field).toLocaleString('en-US');
+  const value = mode === 'frequency' ? `${point.value.toFixed(2)}%` : signed(point.value);
+  chartTooltip.innerHTML = `<strong>${escapeHtml(row.icon)}</strong>
+    <div>${mode === 'frequency' ? 'f' : '\u0394'} (${bucket}): ${value}</div>
+    <div>n = ${observations}</div>`;
+  chartTooltip.style.display = 'block';
+  const rect = chartTooltip.parentElement.getBoundingClientRect();
+  chartTooltip.style.left = `${event.clientX - rect.left + 12}px`;
+  chartTooltip.style.top = `${event.clientY - rect.top + 12}px`;
+}
+
 function renderIconChips() {
   const container = document.getElementById('iconFilterChips');
   if (!container) return;
-  container.innerHTML = ICONS.map(icon => `<button class="chip ${selectedIcons.has(icon) ? 'active' : ''}"
-    onclick="toggleIconChip('${escapeAttr(icon)}')">${escapeHtml(icon)}</button>`).join('');
+  container.innerHTML = ICON_GROUPS.map(group => {
+    const groupIcons = group.icons
+      .map(([name]) => name)
+      .filter(icon => isMW || icon !== 'Sea Animals');
+    const allSelected = groupIcons.every(icon => selectedIcons.has(icon));
+    const selectedCount = groupIcons.filter(icon => selectedIcons.has(icon)).length;
+    return `<div class="icons-filter-group" data-group="${group.id}">
+      <button type="button" class="icons-group-button ${allSelected ? 'active' : selectedCount ? 'partial' : ''}"
+        onclick="toggleIconGroup('${group.id}')">${group.label}</button>
+      <span class="icons-group-bracket">(</span>
+      <div class="icons-group-items">${groupIcons.map(icon => `
+        <button type="button" class="icons-image-chip icons-value-tooltip ${selectedIcons.has(icon) ? 'active' : ''}"
+          onclick="toggleIconChip('${escapeAttr(icon)}')" aria-pressed="${selectedIcons.has(icon)}"
+          data-value-tooltip="${escapeAttr(icon)}" aria-label="${escapeAttr(icon)}">
+          <img src="assets/img/icons/${ICON_ASSETS[icon]}" alt="" />
+        </button>`).join('')}</div>
+      <span class="icons-group-bracket">)</span>
+    </div>`;
+  }).join('<div class="attr-separator icons-group-separator" aria-hidden="true"></div>');
+}
+
+function toggleIconGroup(groupId) {
+  const group = ICON_GROUPS.find(item => item.id === groupId);
+  if (!group) return;
+  const icons = group.icons.map(([name]) => name).filter(icon => isMW || icon !== 'Sea Animals');
+  const allSelected = icons.every(icon => selectedIcons.has(icon));
+  icons.forEach(icon => {
+    if (allSelected) selectedIcons.delete(icon);
+    else selectedIcons.add(icon);
+  });
+  renderIconChips();
+  renderCurrentView();
 }
 
 function toggleIconChip(icon) {
   if (selectedIcons.has(icon)) selectedIcons.delete(icon);
   else selectedIcons.add(icon);
   renderIconChips();
-  renderTable();
+  renderCurrentView();
 }
 
 function selectAllIcons() {
-  selectedIcons = new Set(ICONS);
+  selectedIcons = new Set(availableIconNames());
   renderIconChips();
-  renderTable();
+  renderCurrentView();
 }
 
 function selectNoneIcons() {
   selectedIcons.clear();
   renderIconChips();
-  renderTable();
+  renderCurrentView();
 }
 
 function renderMapChips() {

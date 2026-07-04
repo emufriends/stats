@@ -8,7 +8,7 @@ import {
   orangeGreenRangeColor,
   playrateColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260704-8';
+} from '../color-scales.js?v=20260704-9';
 
 export const title = 'Endgames';
 export const navLabel = 'Endgames';

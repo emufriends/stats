@@ -5,7 +5,7 @@ import {
   numericRange,
   relativeEloColor,
   synergyRangeColor,
-} from '../color-scales.js?v=20260704-8';
+} from '../color-scales.js?v=20260704-9';
 
 export const title = 'Combos';
 export const navLabel = 'Combos';
@@ -543,7 +543,7 @@ function renderTable(preserveHead = false) {
   const meta = document.getElementById('tableMeta');
   const start = filteredData.length ? (currentPage - 1) * rowsPerPage + 1 : 0;
   const end = Math.min(currentPage * rowsPerPage, filteredData.length);
-  if (meta) meta.innerHTML = `<span class="meta-prefix">Showing </span><strong>${start}-${end}</strong> of <strong>${filteredData.length}</strong> combinations`;
+  if (meta) meta.innerHTML = `<span class="meta-prefix">Showing </span><strong>${start}-${end}</strong> of <strong>${filteredData.length}</strong> <span class="combo-meta-full">combinations</span><span class="combo-meta-short">combos</span>`;
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
   const pageRows = filteredData.slice(start ? start - 1 : 0, end);

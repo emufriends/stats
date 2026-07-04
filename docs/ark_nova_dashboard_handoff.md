@@ -517,11 +517,19 @@ On phones, Home keeps the navigation rail expanded and reserves its width in the
 
 Amount is the mean non-null final icon count. Buckets `0` through `6` are exact counts and `7+` includes every value at least seven. Null icon fields are excluded rather than converted to zero. Each bucket's displayed Delta, sample SD, CI count, and prevalence count come from the same filtered icon/player population; frequency divides the bucket count by that icon's non-null `n_total`. Delta buckets below 1,000 observations use the Sponsor Endgames insufficient-data presentation. Default order is Amount descending.
 
-The full-width icon chip bar is client-side, defaults to all 16 enabled, and preserves global Amount ranks when narrowed. The page supports MW/Base plus player/opponent Elo, maps, and date filters, with no Completed-only control. Default snapshots are `card-stats/icons/default-{mw|base}.json`.
+The full-width icon selector uses the PNG artwork under `assets/img/icons` and groups icons into Species, Habitat, and Other. Individual icons toggle independently; a fully selected group-button click clears that group, while a partial/empty group-button click selects the whole group. Selected artwork is full-color and deselected artwork is greyed. Base omits Sea Animals from the selector, table, graph, ranges, and Amount-ranking universe. The selector preserves global Amount ranks and rank gaps when narrowed.
+
+The graph toggle at the selector's right edge swaps the table for an Endgames-style SVG line chart. The selector defines the available lines, while the graph legend independently shows/hides those lines. Delta mode plots `Delta (0)` through `Delta (7+)`, omitting missing, impossible, and sub-1,000 points and breaking paths across gaps. Frequency mode plots the same buckets as percentages. Axes scale dynamically, tooltips include icon/bucket/value/n, and mode/filter/dataset/selector changes rebuild the legend with all available lines selected.
+
+Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table cells are tooltip-free dashes and are absent from graphs and color ranges. Delta-column sorting always places valid values first, sub-1,000 values second, and impossible/missing values last while respecting numeric direction inside the first two tiers. The `#` column always remains Amount rank regardless of active sorting.
+
+The page supports MW/Base plus player/opponent Elo, maps, and date filters, with no Completed-only control. Default snapshots are `card-stats/icons/default-{mw|base}.json`.
 
 ### Chip Selection
 
 Every chip UI uses independent toggling: clicking an active chip deselects only it, and clicking an inactive chip selects only it. There is no all-selected-to-isolated shortcut. This applies to sidebar Maps/Rounds, Home maps, table Type filters, Card/Open Hand attribute chips, Combo Type and header filters, Sponsor/Endgame maps, and Icons. Existing all/none controls, empty-selection behavior, and attribute/type dependency rules remain intact.
+
+The deliberate exception is line-chart selection in Endgames CP distribution and Icons: when every available graph line is selected, clicking one line or legend item isolates it. Subsequent graph clicks toggle normally. This exception does not change selector-bar chip behavior.
 - The right-aligned `Delta Elo / Frequency` switch is frontend-only, defaults to Delta Elo on mount, and retains its state across CP/Appeal, dataset, and filter changes.
 - Frequency mode changes bucket headers to `f (value)`, displays two-decimal percentages, and sorts bucket columns by the displayed frequency. Its denominator is the sum of the card's theoretically valid bucket counts, so impossible logged values are excluded and the displayed valid buckets total 100% apart from rounding. Hover shows the exact `bucket count / valid-bucket total`.
 - In Delta Elo mode, valid buckets with at least 1,000 occurrences expose their 95% Elo-delta confidence interval on hover. Values below 1,000 occurrences remain visible in grey parentheses and show `Insufficient data (fewer than 1,000 observations).` instead of a CI.
@@ -631,6 +639,8 @@ card-stats/combinations/card-card/default-{mw|base}.json
 card-stats/combinations/card-map/default-{mw|base}.json
 card-stats/combinations/card-round/default-{mw|base}.json
 ```
+
+Combo result metadata uses `combinations` on desktop and the shorter `combos` on phones.
 
 ### Shared Table UI
 
