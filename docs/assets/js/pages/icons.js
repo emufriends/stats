@@ -75,7 +75,6 @@ export const mainHtml = `
   <div class="attributes-bar endgames-tabs-bar icons-filter-bar">
     <div class="icons-filter-scroll">
       <div class="icons-filter-controls">
-        <span class="icons-all-none"><span class="map-toggle-link" onclick="selectAllIcons()">all</span> / <span class="map-toggle-link" onclick="selectNoneIcons()">none</span></span>
         <div class="icons-filter-groups" id="iconFilterChips"></div>
       </div>
     </div>
@@ -245,7 +244,6 @@ async function applyFilters(activeToken = token) {
     }
     if (!mounted || activeToken !== token) return;
     rows = Array.isArray(payload.data) ? payload.data : [];
-    assignRanks();
     renderCurrentView();
   } catch (error) {
     if (mounted && activeToken === token) renderError(error);
@@ -269,11 +267,6 @@ async function fetchApi(p) {
   return payload;
 }
 
-function assignRanks() {
-  datasetRows().sort((a, b) => compareValues(b.amount, a.amount) || String(a.icon).localeCompare(String(b.icon)))
-    .forEach((row, index) => { row.global_rank = index + 1; });
-}
-
 function availableIconNames() {
   return ICONS.filter(icon => isMW || icon !== 'Sea Animals');
 }
@@ -293,14 +286,18 @@ function sortedRows(data) {
       const aTier = bucketSortTier(a, sort.col);
       const bTier = bucketSortTier(b, sort.col);
       if (aTier !== bTier) return aTier - bTier;
-      if (aTier === 2) return (a.global_rank ?? 999) - (b.global_rank ?? 999);
+      if (aTier === 2) return String(a.icon).localeCompare(String(b.icon));
     }
     const av = sort.col === 'icon' ? a.icon : sortValue(a, sort.col);
     const bv = sort.col === 'icon' ? b.icon : sortValue(b, sort.col);
     if (typeof av === 'string' || typeof bv === 'string') return String(av).localeCompare(String(bv)) * direction;
-    return compareValues(av, bv) * direction ||
-      (a.global_rank ?? 999) - (b.global_rank ?? 999);
+    return compareValues(av, bv) * direction || String(a.icon).localeCompare(String(b.icon));
   });
+}
+
+function isRankEligible(row) {
+  if (!sort.col.startsWith('delta_')) return true;
+  return bucketSortTier(row, sort.col) === 0;
 }
 
 function bucketSortTier(row, field) {
@@ -331,8 +328,13 @@ function renderCurrentView() {
 
 function renderTable() {
   renderHead();
-  const data = sortedRows(visibleRows());
   const universe = datasetRows();
+  const sortedUniverse = sortedRows(universe);
+  let nextRank = 1;
+  sortedUniverse.forEach(row => {
+    row.current_rank = isRankEligible(row) ? nextRank++ : null;
+  });
+  const data = sortedUniverse.filter(row => selectedIcons.has(row.icon));
   const meta = document.getElementById('tableMeta');
   if (meta) meta.innerHTML = `Showing <strong>${data.length}</strong> of <strong>${universe.length}</strong> icons`;
   const body = document.getElementById('tableBody');
@@ -356,7 +358,7 @@ function renderTable() {
   ]));
   body.innerHTML = data.map(row => `
     <tr>
-      <td class="rank-cell">${row.global_rank ?? '-'}</td>
+      <td class="rank-cell">${row.current_rank ?? '\u2014'}</td>
       <td class="sponsor-name-cell">${escapeHtml(row.icon)}</td>
       <td class="sponsor-avg-cell" style="color:${orangeGreenRangeColor(row.amount, amountRange.min, amountRange.max)}">${format(row.amount, 2)}</td>
       ${BUCKETS.map(([field]) => bucketCell(row, field, deltaRanges[field], frequencyRanges[field])).join('')}
@@ -371,15 +373,21 @@ function renderHead() {
     <th style="width:5%;text-align:center;">#</th>
     ${header('icon', 'Icon', '18%')}
     ${header('amount', 'Amount', '10%')}
-    ${BUCKETS.map(([field, label]) => header(field, `${prefix} (${label})`, '8.375%')).join('')}
+    ${BUCKETS.map(([field, label]) => {
+      const description = mode === 'frequency'
+        ? `relative frequency of games ending with ${label === '7+' ? '7 or more' : label} of this icon`
+        : `average elo gain in games ending with ${label === '7+' ? '7 or more' : label} of this icon`;
+      return header(field, `${prefix} (${label})`, '8.375%', description);
+    }).join('')}
   </tr>`;
 }
 
-function header(field, label, width) {
+function header(field, label, width, tooltip = '') {
   const active = sort.col === field;
   const arrow = active ? (sort.dir === 'desc' ? '\u2193' : '\u2191') : '\u2195';
   return `<th class="${active ? 'sorted' : ''}" onclick="sortIcons('${field}')" style="width:${width};text-align:center;">
-    ${label}<span class="sort-arrow${active ? ' active' : ''}">${arrow}</span></th>`;
+    ${label}${tooltip ? `<span class="col-tip" data-tip="${escapeAttr(tooltip)}">?</span>` : ''}
+    <span class="sort-arrow${active ? ' active' : ''}">${arrow}</span></th>`;
 }
 
 function bucketCell(row, field, deltaRange, frequencyRange) {
@@ -565,7 +573,8 @@ function buildIconsChart(data) {
   });
 
   data.forEach((row, rowIndex) => {
-    const color = CHART_LINE_COLORS[rowIndex % CHART_LINE_COLORS.length];
+    const colorIndex = availableIconNames().indexOf(row.icon);
+    const color = CHART_LINE_COLORS[Math.max(0, colorIndex) % CHART_LINE_COLORS.length];
     const points = BUCKETS.map(([field], bucketIndex) => {
       if (isImpossibleBucket(row, field)) return null;
       const value = mode === 'delta' ? Number(row[field]) : frequency(row, field);
@@ -642,11 +651,9 @@ function signedAxis(value) {
 
 function showIconsChartTooltip(row, point, event, chartTooltip) {
   const bucket = BUCKETS[point.bucketIndex][1];
-  const observations = count(row, point.field).toLocaleString('en-US');
   const value = mode === 'frequency' ? `${point.value.toFixed(2)}%` : signed(point.value);
   chartTooltip.innerHTML = `<strong>${escapeHtml(row.icon)}</strong>
-    <div>${mode === 'frequency' ? 'f' : '\u0394'} (${bucket}): ${value}</div>
-    <div>n = ${observations}</div>`;
+    <div>${mode === 'frequency' ? 'f' : '\u0394'} (${bucket}): ${value}</div>`;
   chartTooltip.style.display = 'block';
   const rect = chartTooltip.parentElement.getBoundingClientRect();
   chartTooltip.style.left = `${event.clientX - rect.left + 12}px`;
@@ -660,19 +667,16 @@ function renderIconChips() {
     const groupIcons = group.icons
       .map(([name]) => name)
       .filter(icon => isMW || icon !== 'Sea Animals');
-    const allSelected = groupIcons.every(icon => selectedIcons.has(icon));
     const selectedCount = groupIcons.filter(icon => selectedIcons.has(icon)).length;
     return `<div class="icons-filter-group" data-group="${group.id}">
-      <button type="button" class="icons-group-button ${allSelected ? 'active' : selectedCount ? 'partial' : ''}"
+      <button type="button" class="icons-group-button ${selectedCount ? 'active' : ''}"
         onclick="toggleIconGroup('${group.id}')">${group.label}</button>
-      <span class="icons-group-bracket">(</span>
       <div class="icons-group-items">${groupIcons.map(icon => `
         <button type="button" class="icons-image-chip icons-value-tooltip ${selectedIcons.has(icon) ? 'active' : ''}"
           onclick="toggleIconChip('${escapeAttr(icon)}')" aria-pressed="${selectedIcons.has(icon)}"
           data-value-tooltip="${escapeAttr(icon)}" aria-label="${escapeAttr(icon)}">
           <img src="assets/img/icons/${ICON_ASSETS[icon]}" alt="" />
         </button>`).join('')}</div>
-      <span class="icons-group-bracket">)</span>
     </div>`;
   }).join('<div class="attr-separator icons-group-separator" aria-hidden="true"></div>');
 }

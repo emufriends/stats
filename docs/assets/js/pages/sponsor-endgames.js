@@ -315,6 +315,10 @@ function renderTable() {
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
   const sortedRows = sortRows(visibleRows);
+  let nextRank = 1;
+  sortedRows.forEach(row => {
+    row.current_rank = sponsorRankEligible(row) ? nextRank++ : null;
+  });
   const averageField = activeView === 'cp' ? 'avg_cp' : 'avg_appeal';
   const scores = sortedRows.map(row => Number(row[averageField])).filter(Number.isFinite);
   const minScore = scores.length ? Math.min(...scores) : null;
@@ -334,8 +338,8 @@ function renderTable() {
       row => row[field],
     ),
   ]));
-  tbody.innerHTML = sortedRows.map((row, index) => rowHtml(
-    row, index + 1, minElo, maxElo, minScore, maxScore, frequencyRanges, deltaRanges,
+  tbody.innerHTML = sortedRows.map(row => rowHtml(
+    row, row.current_rank, minElo, maxElo, minScore, maxScore, frequencyRanges, deltaRanges,
   )).join('');
 }
 
@@ -366,7 +370,7 @@ function renderTableHead() {
       <th style="width:5%;text-align:center;">#</th>
       ${sortableHeader('sponsor', 'Sponsor', '18%')}
       ${sortableHeader(averageField, activeView === 'cp' ? 'CP' : 'Appeal', '10%')}
-      ${sortableHeader('avg_elo', 'Elo', '7%')}
+      ${sortableHeader('avg_elo', 'Elo', '7%', 'average player elo in these sponsor endgame observations')}
       ${bucketHeaders.map(([field, label, tooltip]) => sortableHeader(
         field, label, activeView === 'cp' ? '15%' : '8.5714%', tooltip,
       )).join('')}
@@ -388,7 +392,7 @@ function rowHtml(row, rank, minElo, maxElo, minScore, maxScore, frequencyRanges,
   const buckets = bucketsForView();
   return `
     <tr>
-      <td class="rank-cell">${rank}</td>
+      <td class="rank-cell">${rank ?? '\u2014'}</td>
       <td class="sponsor-name-cell">${escapeHtml(row.sponsor)}</td>
       <td class="sponsor-avg-cell" style="color:${scoreColor(avg, minScore, maxScore)}">${formatNumber(avg, 2)}</td>
       <td class="elo-cell" style="color:${eloColor(row.avg_elo, minElo, maxElo)}">${formatNumber(row.avg_elo, 0)}</td>
@@ -436,6 +440,12 @@ function bucketCell(row, field, value, buckets, frequencyRange, deltaRange) {
 function sortRows(source) {
   const direction = currentSort.dir === 'asc' ? 1 : -1;
   return [...source].sort((a, b) => {
+    if (currentSort.col.startsWith('delta_')) {
+      const aTier = sponsorBucketSortTier(a, currentSort.col);
+      const bTier = sponsorBucketSortTier(b, currentSort.col);
+      if (aTier !== bTier) return aTier - bTier;
+      if (aTier === 2) return String(a.sponsor || '').localeCompare(String(b.sponsor || ''));
+    }
     const av = activeMode === 'frequency' && currentSort.col.startsWith('delta_')
       ? frequencyForSort(a, currentSort.col)
       : a[currentSort.col];
@@ -447,11 +457,25 @@ function sortRows(source) {
     }
     const an = Number(av);
     const bn = Number(bv);
-    if (!Number.isFinite(an) && !Number.isFinite(bn)) return 0;
+    if (!Number.isFinite(an) && !Number.isFinite(bn)) return String(a.sponsor || '').localeCompare(String(b.sponsor || ''));
     if (!Number.isFinite(an)) return 1;
     if (!Number.isFinite(bn)) return -1;
-    return (an - bn) * direction;
+    return (an - bn) * direction || String(a.sponsor || '').localeCompare(String(b.sponsor || ''));
   });
+}
+
+function sponsorBucketSortTier(row, field) {
+  const bucket = bucketsForView().find(([candidate]) => candidate === field);
+  const possible = bucket && Array.isArray(row.possible_values) && row.possible_values.includes(bucket[1]);
+  if (!possible) return 2;
+  const value = activeMode === 'frequency' ? frequencyForSort(row, field) : Number(row[field]);
+  if (!Number.isFinite(value)) return 2;
+  return activeMode === 'delta' && bucketCount(row, field) < 1000 ? 1 : 0;
+}
+
+function sponsorRankEligible(row) {
+  if (!currentSort.col.startsWith('delta_')) return true;
+  return sponsorBucketSortTier(row, currentSort.col) === 0;
 }
 
 function frequencyForSort(row, field) {

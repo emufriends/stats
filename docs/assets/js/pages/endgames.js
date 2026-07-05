@@ -32,7 +32,14 @@ export const mainHtml = `
             </svg>
           </span>
         </button>
-        <button class="endgames-tab" type="button" data-view="cp_by_map" onclick="setEndgamesView('cp_by_map')">CP by map</button>
+        <button class="endgames-tab" type="button" data-view="cp_by_map" onclick="setEndgamesView('cp_by_map')">
+          <span>CP by map</span>
+          <span class="endgames-graph-toggle" role="button" tabindex="0" title="Show graph" aria-label="Show CP by map graph" onclick="setEndgamesMapGraphView(event)" onkeydown="onEndgamesMapGraphToggleKey(event)">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 19h16" /><path d="M4 5v14" /><path d="M6.5 15.5 10 11l3.5 2.5L18 7" />
+            </svg>
+          </span>
+        </button>
       </div>
     </div>
   </div>
@@ -114,6 +121,7 @@ const ENDGAMES_VIEW_GENERAL = 'general';
 const ENDGAMES_VIEW_CP_DISTRIBUTION = 'cp_distribution';
 const ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH = 'cp_distribution_graph';
 const ENDGAMES_VIEW_CP_BY_MAP = 'cp_by_map';
+const ENDGAMES_VIEW_CP_BY_MAP_GRAPH = 'cp_by_map_graph';
 const DEFAULT_SNAPSHOT_URLS = {
   general: {
     1: 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/default-mw.json',
@@ -202,6 +210,7 @@ function defaultSortForView(view) {
 function apiViewForCurrentView() {
   // Graph mode is a client-side rendering of the CP distribution payload.
   if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH) return ENDGAMES_VIEW_CP_DISTRIBUTION;
+  if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH) return ENDGAMES_VIEW_CP_BY_MAP;
   return activeEndgamesView;
 }
 
@@ -259,22 +268,52 @@ function onEndgamesGraphToggleKey(event) {
   setEndgamesGraphView(event);
 }
 
+function setEndgamesMapGraphView(event) {
+  event?.stopPropagation();
+  event?.preventDefault();
+  activeEndgamesView = activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH
+    ? ENDGAMES_VIEW_CP_BY_MAP
+    : ENDGAMES_VIEW_CP_BY_MAP_GRAPH;
+  currentSort = defaultSortForView(activeEndgamesView);
+  currentPage = 1;
+  allData = [];
+  filteredData = [];
+  renderTableHead();
+  updateEndgamesTabs();
+  updateMapFilterVisibility();
+  applyFilters(mountToken);
+}
+
+function onEndgamesMapGraphToggleKey(event) {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  setEndgamesMapGraphView(event);
+}
+
 function updateEndgamesTabs() {
   document.querySelectorAll('.endgames-tab').forEach(btn => {
     const tabView = btn.dataset.view;
     const isActive = tabView === activeEndgamesView ||
-      (tabView === ENDGAMES_VIEW_CP_DISTRIBUTION && activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH);
+      (tabView === ENDGAMES_VIEW_CP_DISTRIBUTION && activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH) ||
+      (tabView === ENDGAMES_VIEW_CP_BY_MAP && activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH);
     btn.classList.toggle('active', isActive);
-    btn.classList.toggle('graph-active', tabView === ENDGAMES_VIEW_CP_DISTRIBUTION && activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH);
+    btn.classList.toggle('graph-active',
+      (tabView === ENDGAMES_VIEW_CP_DISTRIBUTION && activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH) ||
+      (tabView === ENDGAMES_VIEW_CP_BY_MAP && activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH));
     btn.setAttribute('aria-selected', String(isActive));
   });
-  document.querySelectorAll('.endgames-graph-toggle').forEach(btn => {
-    btn.classList.toggle('active', activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH);
+  document.querySelectorAll('.endgames-tab').forEach(tab => {
+    const toggle = tab.querySelector('.endgames-graph-toggle');
+    if (!toggle) return;
+    const tabView = tab.dataset.view;
+    toggle.classList.toggle('active',
+      (tabView === ENDGAMES_VIEW_CP_DISTRIBUTION && activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH) ||
+      (tabView === ENDGAMES_VIEW_CP_BY_MAP && activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH));
   });
 }
 
 function updateMapFilterVisibility() {
-  const hideMapFilter = activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP;
+  const hideMapFilter = activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP ||
+    activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH;
   document.getElementById('mapFilterGroup')?.classList.toggle('is-hidden', hideMapFilter);
   document.getElementById('mapFilterDivider')?.classList.toggle('is-hidden', hideMapFilter);
 }
@@ -295,7 +334,8 @@ function resetFilters() {
 }
 
 function getParams() {
-  const selectedMaps = activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP
+  const selectedMaps = activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP ||
+      activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH
     ? VALID_MAPS.map(m => m.full)
     : [...document.querySelectorAll('#mapChips .chip.active')].map(c => c.dataset.value);
   const params = {
@@ -397,7 +437,9 @@ function warmApiInBackground() {
 async function applyFilters(activeMountToken = mountToken) {
   if (!isCurrentMount(activeMountToken)) return;
   const params = getParams();
-  if (activeEndgamesView !== ENDGAMES_VIEW_CP_BY_MAP && !(params.maps || []).length) {
+  if (activeEndgamesView !== ENDGAMES_VIEW_CP_BY_MAP &&
+      activeEndgamesView !== ENDGAMES_VIEW_CP_BY_MAP_GRAPH &&
+      !(params.maps || []).length) {
     allData = [];
     filteredData = [];
     searchQuery = normalizeSearchText(document.getElementById('searchInput')?.value || '');
@@ -555,9 +597,9 @@ function renderTableHead() {
   const thead = document.getElementById('tableHead');
   if (!thead) return;
   updateStatsTableMode();
-  if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH) {
-    // Preserve the table header footprint so graph/table switching does not shift the page.
-    thead.innerHTML = cpDistributionHeadHtml();
+  if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH ||
+      activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH) {
+    thead.innerHTML = '';
   } else if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION) {
     thead.innerHTML = cpDistributionHeadHtml();
   } else if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP) {
@@ -571,7 +613,9 @@ function updateStatsTableMode() {
   const table = document.getElementById('statsTable');
   if (!table) return;
   table.classList.toggle('cp-by-map-view', activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP);
-  table.classList.toggle('cp-distribution-graph-view', activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH);
+  table.classList.toggle('endgames-graph-view',
+    activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH ||
+    activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH);
 }
 
 function nameHeaderHtml(width) {
@@ -679,6 +723,10 @@ function renderTable(data) {
 
   if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH) {
     renderCpDistributionGraph(data);
+    return;
+  }
+  if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH) {
+    renderCpByMapGraph(data);
     return;
   }
 
@@ -871,7 +919,6 @@ function buildCpDistributionChart(data) {
       item.classList.toggle('highlighted', Number(item.dataset.index) === index);
       item.classList.toggle('dimmed', Number(item.dataset.index) !== index);
     });
-    if (event) showChartTooltip(data[index], event, tooltip);
   };
   const clearHighlight = () => {
     delete wrap.dataset.highlight;
@@ -923,7 +970,7 @@ function buildCpDistributionChart(data) {
       hoverLine.setAttribute('x1', x(nearestCp));
       hoverLine.setAttribute('x2', x(nearestCp));
       hoverLine.style.display = 'block';
-      showChartTooltip(row, event, tooltip);
+      showChartTooltip(row, nearestCp, event, tooltip);
     });
     path.addEventListener('mouseleave', clearHighlight);
     svg.appendChild(path);
@@ -938,7 +985,7 @@ function buildCpDistributionChart(data) {
       dot.dataset.index = String(index);
       dot.addEventListener('click', event => toggleSelectionFromGraph(index, event));
       dot.addEventListener('mouseenter', event => setHighlight(index, event));
-      dot.addEventListener('mousemove', event => showChartTooltip(row, event, tooltip));
+      dot.addEventListener('mousemove', event => showChartTooltip(row, cp, event, tooltip));
       dot.addEventListener('mouseleave', clearHighlight);
       svg.appendChild(dot);
     });
@@ -951,7 +998,6 @@ function buildCpDistributionChart(data) {
     legendItem.innerHTML = `<span class="cp-dist-legend-swatch" style="background:${color}"></span><span>${titleCase(row.card_name || '')}</span>`;
     legendItem.addEventListener('click', () => toggleSelection(index));
     legendItem.addEventListener('mouseenter', event => setHighlight(index, event));
-    legendItem.addEventListener('mousemove', event => showChartTooltip(row, event, tooltip));
     legendItem.addEventListener('mouseleave', clearHighlight);
     legendList.appendChild(legendItem);
   });
@@ -972,15 +1018,197 @@ function nearestCpFromEvent(event, svg, margin, innerWidth) {
   return Math.max(0, Math.min(4, Math.round((relativeX / innerWidth) * 4)));
 }
 
-function showChartTooltip(row, event, tooltip) {
-  const values = CP_VALUES.map(cp => `<span>${cp}: ${fmtPercent(row[`cp_${cp}_pct`])}</span>`).join('');
-  tooltip.innerHTML = `<strong>${titleCase(row.card_name || '')}</strong><div>${values}</div>`;
+function showChartTooltip(row, cp, event, tooltip) {
+  tooltip.innerHTML = `<strong>${titleCase(row.card_name || '')}</strong><div><span>${cp}: ${fmtPercent(row[`cp_${cp}_pct`])}</span></div>`;
   tooltip.style.display = 'block';
   const hostRect = tooltip.parentElement.getBoundingClientRect();
   const x = Math.min(event.clientX - hostRect.left + 14, hostRect.width - tooltip.offsetWidth - 8);
   const y = Math.max(8, Math.min(event.clientY - hostRect.top + 14, hostRect.height - tooltip.offsetHeight - 8));
   tooltip.style.left = `${x}px`;
   tooltip.style.top = `${y}px`;
+}
+
+function renderCpByMapGraph(data) {
+  const tbody = document.getElementById('tableBody');
+  const pagination = document.getElementById('pagination');
+  const meta = document.getElementById('tableMeta');
+  const sortedData = [...data].sort(compareRowsForCurrentSort);
+  tbody.innerHTML = `<tr><td colspan="${columnCountForView()}" class="chart-host-cell"></td></tr>`;
+  tbody.querySelector('.chart-host-cell').appendChild(buildCpByMapChart(sortedData));
+  pagination.style.display = 'none';
+  meta.innerHTML = '';
+}
+
+function buildCpByMapChart(data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cp-dist-chart-wrap';
+  const chart = document.createElement('div');
+  chart.className = 'cp-dist-chart';
+  const legend = document.createElement('div');
+  legend.className = 'cp-dist-legend';
+  const controls = document.createElement('div');
+  controls.className = 'cp-dist-legend-controls';
+  controls.innerHTML = '<span>Lines</span><span>(<button type="button" data-action="all">all</button> / <button type="button" data-action="none">none</button>)</span>';
+  const legendList = document.createElement('div');
+  legendList.className = 'cp-dist-legend-list';
+  const tooltip = document.createElement('div');
+  tooltip.className = 'cp-dist-tooltip';
+  const selected = new Set(data.map((_, index) => index));
+  const values = data.flatMap(row => VALID_MAPS.map(map => Number(row[map.field]))).filter(Number.isFinite);
+  const observedMax = values.length ? Math.max(...values) : 1;
+  const yMax = Math.max(1, Math.ceil((observedMax * 1.08) * 2) / 2);
+  const width = 900;
+  const height = 430;
+  const margin = { top: 22, right: 22, bottom: 48, left: 54 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const x = index => margin.left + (index / (VALID_MAPS.length - 1)) * innerWidth;
+  const y = value => margin.top + innerHeight - (Math.max(0, Number(value)) / yMax) * innerHeight;
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNs, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Endgame conservation points by map line chart');
+  const svgEl = (tag, attrs) => {
+    const element = document.createElementNS(svgNs, tag);
+    Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
+    svg.appendChild(element);
+    return element;
+  };
+
+  for (let index = 0; index <= 4; index += 1) {
+    const tick = yMax * index / 4;
+    const gy = y(tick);
+    svgEl('line', { x1: margin.left, x2: width - margin.right, y1: gy, y2: gy, class: 'cp-dist-grid' });
+    const label = svgEl('text', {
+      x: margin.left - 12, y: gy + 4, 'text-anchor': 'end', class: 'cp-dist-axis-label',
+    });
+    label.textContent = tick.toFixed(tick % 1 ? 1 : 0);
+  }
+  VALID_MAPS.forEach((map, index) => {
+    const label = svgEl('text', {
+      x: x(index), y: height - 15, 'text-anchor': 'middle', class: 'cp-dist-axis-label',
+    });
+    label.textContent = map.short;
+  });
+  svgEl('line', {
+    x1: margin.left, x2: width - margin.right, y1: margin.top + innerHeight,
+    y2: margin.top + innerHeight, class: 'cp-dist-axis',
+  });
+  svgEl('line', {
+    x1: margin.left, x2: margin.left, y1: margin.top, y2: margin.top + innerHeight,
+    class: 'cp-dist-axis',
+  });
+  const hoverLine = svgEl('line', {
+    class: 'cp-dist-hover-line', y1: margin.top, y2: margin.top + innerHeight,
+  });
+  hoverLine.style.display = 'none';
+
+  const syncSelection = () => {
+    svg.querySelectorAll('.cp-dist-line, .cp-dist-dot').forEach(element => {
+      element.classList.toggle('deselected', !selected.has(Number(element.dataset.index)));
+    });
+    legendList.querySelectorAll('.cp-dist-legend-item').forEach(element => {
+      const active = selected.has(Number(element.dataset.index));
+      element.classList.toggle('deselected', !active);
+      element.setAttribute('aria-pressed', String(active));
+    });
+  };
+  const toggleLine = index => {
+    if (selected.size === data.length) {
+      selected.clear();
+      selected.add(index);
+    } else if (selected.has(index)) selected.delete(index);
+    else selected.add(index);
+    syncSelection();
+  };
+  const highlight = index => {
+    svg.querySelectorAll('.cp-dist-line').forEach(element => {
+      element.classList.toggle('highlighted', Number(element.dataset.index) === index);
+      element.classList.toggle('dimmed', Number(element.dataset.index) !== index);
+    });
+    legendList.querySelectorAll('.cp-dist-legend-item').forEach(element => {
+      element.classList.toggle('highlighted', Number(element.dataset.index) === index);
+      element.classList.toggle('dimmed', Number(element.dataset.index) !== index);
+    });
+  };
+  const clearHighlight = () => {
+    svg.querySelectorAll('.cp-dist-line').forEach(element => element.classList.remove('highlighted', 'dimmed'));
+    legendList.querySelectorAll('.cp-dist-legend-item').forEach(element => element.classList.remove('highlighted', 'dimmed'));
+    hoverLine.style.display = 'none';
+    tooltip.style.display = 'none';
+  };
+  const showPoint = (row, point, event) => {
+    tooltip.innerHTML = `<strong>${titleCase(row.card_name || '')}</strong><div><span>${point.map.short}: ${point.value.toFixed(2)} CP</span></div>`;
+    tooltip.style.display = 'block';
+    const rect = chart.getBoundingClientRect();
+    tooltip.style.left = `${Math.min(event.clientX - rect.left + 14, rect.width - tooltip.offsetWidth - 8)}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(event.clientY - rect.top + 14, rect.height - tooltip.offsetHeight - 8))}px`;
+  };
+  controls.addEventListener('click', event => {
+    if (event.target?.dataset?.action === 'all') data.forEach((_, index) => selected.add(index));
+    if (event.target?.dataset?.action === 'none') selected.clear();
+    syncSelection();
+  });
+
+  data.forEach((row, rowIndex) => {
+    const color = CHART_LINE_COLORS[rowIndex % CHART_LINE_COLORS.length];
+    const points = VALID_MAPS.map((map, mapIndex) => {
+      const raw = row[map.field];
+      const value = Number(raw);
+      return raw != null && Number.isFinite(value)
+        ? { map, mapIndex, value, x: x(mapIndex), y: y(value) }
+        : null;
+    });
+    let pathData = '';
+    let segmentOpen = false;
+    points.forEach(point => {
+      if (!point) { segmentOpen = false; return; }
+      pathData += `${segmentOpen ? 'L' : 'M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)} `;
+      segmentOpen = true;
+    });
+    if (pathData) {
+      const path = svgEl('path', { d: pathData.trim(), class: 'cp-dist-line', stroke: color });
+      path.dataset.index = String(rowIndex);
+      path.addEventListener('click', event => { event.stopPropagation(); toggleLine(rowIndex); });
+      path.addEventListener('mouseenter', () => highlight(rowIndex));
+      path.addEventListener('mousemove', event => {
+        const rect = svg.getBoundingClientRect();
+        const relativeX = (event.clientX - rect.left) / rect.width * width;
+        const nearest = points.filter(Boolean).reduce((best, point) =>
+          !best || Math.abs(point.x - relativeX) < Math.abs(best.x - relativeX) ? point : best, null);
+        if (!nearest) return;
+        hoverLine.setAttribute('x1', nearest.x);
+        hoverLine.setAttribute('x2', nearest.x);
+        hoverLine.style.display = 'block';
+        showPoint(row, nearest, event);
+      });
+      path.addEventListener('mouseleave', clearHighlight);
+    }
+    points.filter(Boolean).forEach(point => {
+      const dot = svgEl('circle', { cx: point.x, cy: point.y, r: 3, class: 'cp-dist-dot', fill: color });
+      dot.dataset.index = String(rowIndex);
+      dot.addEventListener('click', event => { event.stopPropagation(); toggleLine(rowIndex); });
+      dot.addEventListener('mouseenter', event => { highlight(rowIndex); showPoint(row, point, event); });
+      dot.addEventListener('mousemove', event => showPoint(row, point, event));
+      dot.addEventListener('mouseleave', clearHighlight);
+    });
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'cp-dist-legend-item';
+    item.dataset.index = String(rowIndex);
+    item.setAttribute('aria-pressed', 'true');
+    item.innerHTML = `<span class="cp-dist-legend-swatch" style="background:${color}"></span><span>${titleCase(row.card_name || '')}</span>`;
+    item.addEventListener('click', () => toggleLine(rowIndex));
+    item.addEventListener('mouseenter', () => highlight(rowIndex));
+    item.addEventListener('mouseleave', clearHighlight);
+    legendList.appendChild(item);
+  });
+  legend.append(controls, legendList);
+  chart.append(svg, tooltip);
+  wrap.append(chart, legend);
+  syncSelection();
+  return wrap;
 }
 
 function renderCpByMapRow(tr, row, ranges) {
@@ -997,6 +1225,7 @@ function columnCountForView() {
   if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION) return 8;
   if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH) return 8;
   if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP) return 18;
+  if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH) return 18;
   return 9;
 }
 
@@ -1190,6 +1419,8 @@ const PAGE_WINDOW_HANDLERS = {
   setEndgamesView,
   setEndgamesGraphView,
   onEndgamesGraphToggleKey,
+  setEndgamesMapGraphView,
+  onEndgamesMapGraphToggleKey,
 };
 
 function bindWindowHandlers() {

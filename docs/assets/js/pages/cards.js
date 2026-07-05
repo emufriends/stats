@@ -38,6 +38,13 @@ const CARD_ATTRIBUTES_URL = 'cards_attributes.csv';
 const TAG_NONE_VALUE = '0';
 const SPECIES_TAGS = ['Bear', 'Bird', 'Herbivore', 'Petting Zoo', 'Predator', 'Primate', 'Reptile', 'Sea Animal'];
 const CONTINENT_TAGS = ['Africa', 'America', 'Asia', 'Australia', 'Europe'];
+const ATTRIBUTE_ICON_ASSETS = {
+  Bear: 'bear.png', Bird: 'bird.png', Herbivore: 'herbivore.png',
+  'Petting Zoo': 'petting-zoo.png', Predator: 'predator.png', Primate: 'primate.png',
+  Reptile: 'reptile.png', 'Sea Animal': 'sea-animal.png',
+  Africa: 'africa.png', America: 'americas.png', Asia: 'asia.png',
+  Australia: 'australia.png', Europe: 'europe.png',
+};
 
 const STRENGTH_VALUES = ['3', '4', '5', '6'];
 const SIZE_VALUES = ['1', '2', '3', '4', '5'];
@@ -54,6 +61,11 @@ const ATTR_RELEVANT_TYPES = {
   aviary: ['animal'],
   abilities: ['animal'],
 };
+
+function escapeAttr(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 // Keep this list in sync with the actual UI groups above.
 // refreshAttributeAvailability() uses it as the single source of truth for:
@@ -1441,7 +1453,19 @@ function renderCurrentTagPopup() {
   const kind = currentTagPopupKind === 'species' ? 'species' : 'continent';
 
   if (title) title.textContent = currentTagPopupKind === 'species' ? 'Species' : 'Habitat';
-  buildChipGroup('tagPopupChips', values, selectedSet, kind);
+  const container = document.getElementById('tagPopupChips');
+  if (!container) return;
+  container.innerHTML = values.map(value => {
+    const tooltip = value === 'America' ? 'Americas' : value;
+    return `<button type="button" class="attribute-icon-chip ${selectedSet.has(value) ? 'active' : ''}"
+      data-value="${escapeAttr(value)}" data-tooltip="${escapeAttr(tooltip)}"
+      aria-label="${escapeAttr(tooltip)}" aria-pressed="${selectedSet.has(value)}">
+      <img src="assets/img/icons/${ATTRIBUTE_ICON_ASSETS[value]}" alt="" />
+    </button>`;
+  }).join('');
+  container.querySelectorAll('.attribute-icon-chip').forEach(btn => {
+    btn.onclick = () => toggleAttributeChip(btn, selectedSet, values, kind);
+  });
 }
 
 function selectAllCurrentTagPopup() {

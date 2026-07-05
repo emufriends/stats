@@ -440,7 +440,8 @@ In-page views:
 - `General`
 - `CP distribution` table
 - `CP distribution` graph, toggled by the graph icon inside the CP distribution tab cell
-- `CP by map`
+- `CP by map` table
+- `CP by map` graph, toggled by the graph icon inside the CP by map tab cell
 
 General table columns:
 
@@ -517,11 +518,11 @@ On phones, Home keeps the navigation rail expanded and reserves its width in the
 
 Amount is the mean non-null final icon count. Buckets `0` through `6` are exact counts and `7+` includes every value at least seven. Null icon fields are excluded rather than converted to zero. Each bucket's displayed Delta, sample SD, CI count, and prevalence count come from the same filtered icon/player population; frequency divides the bucket count by that icon's non-null `n_total`. Delta buckets below 1,000 observations use the Sponsor Endgames insufficient-data presentation. Default order is Amount descending.
 
-The full-width icon selector uses the PNG artwork under `assets/img/icons` and groups icons into Species, Habitat, and Other. Individual icons toggle independently; a fully selected group-button click clears that group, while a partial/empty group-button click selects the whole group. Selected artwork is full-color and deselected artwork is greyed. Base omits Sea Animals from the selector, table, graph, ranges, and Amount-ranking universe. The selector preserves global Amount ranks and rank gaps when narrowed.
+The full-width icon selector uses the PNG artwork under `assets/img/icons` and groups icons into Species, Habitat, and Other. It has no all/none control or decorative brackets. Individual icons toggle independently; a fully selected group-button click clears that group, while a partial/empty group-button click selects the whole group. A group remains visually active until all its members are deselected. Selected artwork is full-color and deselected artwork is greyed. Base omits Sea Animals from the selector, table, graph, ranges, and ranking universe. Attributes separators and Icons group separators share the same fixed 2px rule.
 
-The graph toggle at the selector's right edge swaps the table for an Endgames-style SVG line chart. The selector defines the available lines, while the graph legend independently shows/hides those lines. Delta mode plots `Delta (0)` through `Delta (7+)`, omitting missing, impossible, and sub-1,000 points and breaking paths across gaps. Frequency mode plots the same buckets as percentages. Axes scale dynamically, tooltips include icon/bucket/value/n, and mode/filter/dataset/selector changes rebuild the legend with all available lines selected.
+The enlarged graph toggle at the selector's right edge swaps the table for an Endgames-style SVG line chart. The selector defines the available lines, while the graph legend independently shows/hides those lines. Each icon has a permanent palette position assigned from the complete MW/Base icon order before selector filtering, so hiding lines never recolors survivors. Delta mode plots `Delta (0)` through `Delta (7+)`, omitting missing, impossible, and sub-1,000 points and breaking paths across gaps. Frequency mode plots the same buckets as percentages. Axes scale dynamically; tooltips contain icon, bucket, and value but no observation count.
 
-Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table cells are tooltip-free dashes and are absent from graphs and color ranges. Delta-column sorting always places valid values first, sub-1,000 values second, and impossible/missing values last while respecting numeric direction inside the first two tiers. The `#` column always remains Amount rank regardless of active sorting.
+Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table cells are tooltip-free dashes and are absent from graphs and color ranges. The `#` column follows the current sort. Delta-column sorting places valid values first, sub-1,000 values second, and impossible/missing values last while respecting numeric direction inside the first two tiers; only valid values receive ranks. Frequency sorting similarly leaves impossible/missing rows unranked. Unranked rows display an em dash.
 
 The page supports MW/Base plus player/opponent Elo, maps, and date filters, with no Completed-only control. Default snapshots are `card-stats/icons/default-{mw|base}.json`.
 
@@ -529,7 +530,9 @@ The page supports MW/Base plus player/opponent Elo, maps, and date filters, with
 
 Every chip UI uses independent toggling: clicking an active chip deselects only it, and clicking an inactive chip selects only it. There is no all-selected-to-isolated shortcut. This applies to sidebar Maps/Rounds, Home maps, table Type filters, Card/Open Hand attribute chips, Combo Type and header filters, Sponsor/Endgame maps, and Icons. Existing all/none controls, empty-selection behavior, and attribute/type dependency rules remain intact.
 
-The deliberate exception is line-chart selection in Endgames CP distribution and Icons: when every available graph line is selected, clicking one line or legend item isolates it. Subsequent graph clicks toggle normally. This exception does not change selector-bar chip behavior.
+Cards and Opening Hand render Species and Habitat choices as the same PNG artwork used by Icons rather than text chips. Their styled hover tooltips show the complete label; the underlying `America` metadata value is deliberately presented as `Americas`. Selection semantics and the text summaries on the popup-opening buttons are unchanged.
+
+The deliberate exception is line-chart selection in Endgames CP distribution, Endgames CP by map, and Icons: when every available graph line is selected, clicking one line or legend item isolates it. Subsequent graph clicks toggle normally. This exception does not change selector-bar chip behavior.
 - The right-aligned `Delta Elo / Frequency` switch is frontend-only, defaults to Delta Elo on mount, and retains its state across CP/Appeal, dataset, and filter changes.
 - Frequency mode changes bucket headers to `f (value)`, displays two-decimal percentages, and sorts bucket columns by the displayed frequency. Its denominator is the sum of the card's theoretically valid bucket counts, so impossible logged values are excluded and the displayed valid buckets total 100% apart from rounding. Hover shows the exact `bucket count / valid-bucket total`.
 - In Delta Elo mode, valid buckets with at least 1,000 occurrences expose their 95% Elo-delta confidence interval on hover. Values below 1,000 occurrences remain visible in grey parentheses and show `Insufficient data (fewer than 1,000 observations).` instead of a CI.
@@ -539,6 +542,8 @@ The deliberate exception is line-chart selection in Endgames CP distribution and
   `5/18/10/7` percent for Rank/Sponsor/Appeal/Elo and divides the remaining 60%
   equally across its seven buckets (`8.5714%` each).
 - Impossible and unavailable buckets remain tooltip-free dashes.
+- When a Sponsor bucket is the active sort, valid values rank first; insufficient values remain numerically sorted below them and impossible/missing values remain last. Insufficient and impossible/missing rows display an em dash instead of a rank. Frequency sorting likewise leaves impossible/missing rows unranked.
+- Both Sponsor tables expose a tooltip on Elo describing the average player Elo population.
 - No Round filter
 - No Completed games toggle exposed to the user
 - No attributes bar
@@ -551,6 +556,8 @@ CP distribution:
 - Graph view renders the same data as custom SVG with x-axis `0..4` and y-axis `0..60%`.
 - Graph legend supports all/none controls plus per-endgame selection. If all lines are selected, clicking one legend entry or graph line isolates it.
 - Deselected graph lines remain visible but greyed out.
+- Hover tooltips show only the CP point nearest the pointer, not the complete series.
+- Graph mode removes the table header entirely, so no empty header strip remains above the chart.
 
 CP by map:
 
@@ -560,6 +567,7 @@ CP by map:
   each map column across the complete filtered CP-by-map result.
 - Final `CP` column keeps the normal CP color styling.
 - Map filter is hidden and ignored in this view because all maps must be shown as columns.
+- Graph mode uses the same payload, with maps ordered `1a` through `8a`, then `9` through `14`, then `T1` on the x-axis and average CP on a dynamically padded y-axis. Missing points break line segments. Legend selection and nearest-point tooltips match CP distribution.
 
 Default snapshots:
 
