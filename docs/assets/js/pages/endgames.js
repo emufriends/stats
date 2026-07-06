@@ -3,7 +3,6 @@ import {
   cappedNumericRange,
   deltaRangeColor,
   divergingRangeColor,
-  greenIntensityRangeColor,
   numericRange,
   orangeGreenRangeColor,
   playrateColor,
@@ -16,6 +15,10 @@ export const navLabel = 'Endgames';
 export const mainHtml = `
   <div class="main-header">
     <div class="table-meta" id="tableMeta"></div>
+    <div class="maps-h2h-mode cp-map-mode" id="cpMapMode" style="display:none" role="group" aria-label="CP by map metric">
+      <button type="button" class="active" data-mode="raw" onclick="setCpMapMode('raw')">Raw</button>
+      <button type="button" data-mode="average" onclick="setCpMapMode('average')">vs. average</button>
+    </div>
   </div>
 
   <div class="attributes-bar endgames-tabs-bar">
@@ -164,6 +167,7 @@ let searchQuery = '';
 let currentSort = defaultSortForView(activeEndgamesView);
 let currentPage = 1;
 let rowsPerPage = 9999;
+let cpMapMode = 'raw';
 let apiWarmupInFlight = false;
 let apiWarmupLastAt = 0;
 const API_WARMUP_COOLDOWN_MS = 30000;
@@ -309,6 +313,21 @@ function updateEndgamesTabs() {
       (tabView === ENDGAMES_VIEW_CP_DISTRIBUTION && activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION_GRAPH) ||
       (tabView === ENDGAMES_VIEW_CP_BY_MAP && activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH));
   });
+  const modeSwitch = document.getElementById('cpMapMode');
+  if (modeSwitch) {
+    modeSwitch.style.display = (
+      activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP ||
+      activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP_GRAPH
+    ) ? '' : 'none';
+  }
+}
+
+function setCpMapMode(mode) {
+  cpMapMode = mode === 'average' ? 'average' : 'raw';
+  document.querySelectorAll('#cpMapMode button').forEach(button => {
+    button.classList.toggle('active', button.dataset.mode === cpMapMode);
+  });
+  applySortAndRender();
 }
 
 function updateMapFilterVisibility() {
@@ -352,9 +371,9 @@ function getParams() {
   const dFrom = document.getElementById('dateFrom').value;
   const dTo = document.getElementById('dateTo').value;
 
-  if (pMin) params.player_elo_min = parseInt(pMin, 10);
+  params.player_elo_min = pMin === '' ? 0 : parseInt(pMin, 10);
   if (pMax) params.player_elo_max = parseInt(pMax, 10);
-  if (oMin) params.opponent_elo_min = parseInt(oMin, 10);
+  params.opponent_elo_min = oMin === '' ? 0 : parseInt(oMin, 10);
   if (oMax) params.opponent_elo_max = parseInt(oMax, 10);
   if (dFrom) params.date_from = dFrom;
   if (dTo) params.date_to = dTo;
@@ -557,8 +576,9 @@ function sortBy(col) {
 
 function compareRowsForCurrentSort(a, b) {
   const { col, dir } = currentSort;
-  const av = a[col];
-  const bv = b[col];
+  const isMapField = VALID_MAPS.some(map => map.field === col);
+  const av = isMapField ? cpMapValue(a, col) : a[col];
+  const bv = isMapField ? cpMapValue(b, col) : b[col];
   let cmp;
   if (col === 'card_name') cmp = String(av || '').localeCompare(String(bv || ''));
   else {
@@ -656,7 +676,7 @@ function cpByMapHeadHtml() {
       <th style="width:4%;text-align:center;cursor:default;">#</th>
       ${nameHeaderHtml('16%')}
       ${VALID_MAPS.map(map => `<th onclick="sortBy('${map.field}')" title="${map.full}" style="width:5%;text-align:center">${map.short}<span class="sort-arrow" id="sort-${map.field}">\u2195</span></th>`).join('')}
-      <th onclick="sortBy('avg_cp')" style="width:5%;text-align:center">CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
+      <th onclick="sortBy('avg_cp')" style="width:5%;text-align:center">Avg CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
     </tr>`;
 }
 
@@ -764,7 +784,13 @@ function buildColorRanges(data) {
   } else if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP) {
     VALID_MAPS.forEach(map => fields.push(map.field));
   }
-  const ranges = Object.fromEntries(fields.map(field => [field, numericRange(data, row => row[field])]));
+  const ranges = Object.fromEntries(fields.map(field => [
+    field,
+    activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP && cpMapMode === 'average' &&
+      VALID_MAPS.some(map => map.field === field)
+      ? cappedNumericRange(data, row => cpMapValue(row, field))
+      : numericRange(data, row => row[field]),
+  ]));
   if (activeEndgamesView === ENDGAMES_VIEW_GENERAL) {
     ranges.delta_in_hand = cappedNumericRange(data, row => row.delta_in_hand);
     ranges.delta_played = cappedNumericRange(data, row => row.delta_played);
@@ -1054,16 +1080,19 @@ function buildCpByMapChart(data) {
   const tooltip = document.createElement('div');
   tooltip.className = 'cp-dist-tooltip';
   const selected = new Set(data.map((_, index) => index));
-  const values = data.flatMap(row => VALID_MAPS.map(map => Number(row[map.field]))).filter(Number.isFinite);
-  const observedMax = values.length ? Math.max(...values) : 1;
-  const yMax = Math.max(1, Math.ceil((observedMax * 1.08) * 2) / 2);
+  const values = data.flatMap(row => VALID_MAPS.map(map => cpMapValue(row, map.field))).filter(Number.isFinite);
+  const observedMin = values.length ? Math.min(0, ...values) : 0;
+  const observedMax = values.length ? Math.max(0, ...values) : 1;
+  const padding = Math.max(0.1, (observedMax - observedMin) * 0.08);
+  const yMin = cpMapMode === 'average' ? Math.floor((observedMin - padding) * 10) / 10 : 0;
+  const yMax = Math.max(yMin + 0.5, Math.ceil((observedMax + padding) * 10) / 10);
   const width = 900;
   const height = 430;
   const margin = { top: 22, right: 22, bottom: 48, left: 54 };
   const innerWidth = width - margin.left - margin.right;
   const innerHeight = height - margin.top - margin.bottom;
   const x = index => margin.left + (index / (VALID_MAPS.length - 1)) * innerWidth;
-  const y = value => margin.top + innerHeight - (Math.max(0, Number(value)) / yMax) * innerHeight;
+  const y = value => margin.top + innerHeight - ((Number(value) - yMin) / (yMax - yMin)) * innerHeight;
   const svgNs = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(svgNs, 'svg');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -1077,7 +1106,7 @@ function buildCpByMapChart(data) {
   };
 
   for (let index = 0; index <= 4; index += 1) {
-    const tick = yMax * index / 4;
+    const tick = yMin + (yMax - yMin) * index / 4;
     const gy = y(tick);
     svgEl('line', { x1: margin.left, x2: width - margin.right, y1: gy, y2: gy, class: 'cp-dist-grid' });
     const label = svgEl('text', {
@@ -1099,6 +1128,12 @@ function buildCpByMapChart(data) {
     x1: margin.left, x2: margin.left, y1: margin.top, y2: margin.top + innerHeight,
     class: 'cp-dist-axis',
   });
+  if (cpMapMode === 'average') {
+    svgEl('line', {
+      x1: margin.left, x2: width - margin.right, y1: y(0), y2: y(0),
+      class: 'icons-chart-zero',
+    });
+  }
   const hoverLine = svgEl('line', {
     class: 'cp-dist-hover-line', y1: margin.top, y2: margin.top + innerHeight,
   });
@@ -1139,7 +1174,8 @@ function buildCpByMapChart(data) {
     tooltip.style.display = 'none';
   };
   const showPoint = (row, point, event) => {
-    tooltip.innerHTML = `<strong>${titleCase(row.card_name || '')}</strong><div><span>${point.map.short}: ${point.value.toFixed(2)} CP</span></div>`;
+    const display = cpMapMode === 'average' ? formatCpDifference(point.value) : `${point.value.toFixed(2)} CP`;
+    tooltip.innerHTML = `<strong>${titleCase(row.card_name || '')}</strong><div><span>${point.map.short}: ${display}</span></div>`;
     tooltip.style.display = 'block';
     const rect = chart.getBoundingClientRect();
     tooltip.style.left = `${Math.min(event.clientX - rect.left + 14, rect.width - tooltip.offsetWidth - 8)}px`;
@@ -1155,7 +1191,7 @@ function buildCpByMapChart(data) {
     const color = CHART_LINE_COLORS[rowIndex % CHART_LINE_COLORS.length];
     const points = VALID_MAPS.map((map, mapIndex) => {
       const raw = row[map.field];
-      const value = Number(raw);
+      const value = cpMapValue(row, map.field);
       return raw != null && Number.isFinite(value)
         ? { map, mapIndex, value, x: x(mapIndex), y: y(value) }
         : null;
@@ -1215,8 +1251,15 @@ function renderCpByMapRow(tr, row, ranges) {
   appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
   appendCell(tr, 'card-name', titleCase(row.card_name || ''));
   VALID_MAPS.forEach(map => {
-    const val = row[map.field];
-    appendCell(tr, 'n-cell cp-map-cell', val != null ? Number(val).toFixed(2) : '\u2014', cpMapColor(val, ranges[map.field]));
+    const val = cpMapValue(row, map.field);
+    appendCell(
+      tr,
+      `n-cell cp-map-cell${cpMapMode === 'average' ? ' cp-map-comparison' : ''}`,
+      Number.isFinite(val) ? (cpMapMode === 'average' ? formatCpDifference(val) : val.toFixed(2)) : '\u2014',
+      cpMapMode === 'average'
+        ? deltaRangeColor(val, ranges[map.field]?.min, ranges[map.field]?.max)
+        : cpMapColor(val, ranges[map.field]),
+    );
   });
   appendCell(tr, 'delta cp-cell', row.avg_cp != null ? Number(row.avg_cp).toFixed(2) : '\u2014', cpColor(row.avg_cp, ranges.avg_cp));
 }
@@ -1318,7 +1361,22 @@ function titleCase(str) {
 
 function cpPctColor(val, range) {
   if (val == null) return 'var(--text-muted)';
-  return greenIntensityRangeColor(val, range?.min, range?.max, true);
+  return playrateColor(val, range?.min, range?.max);
+}
+
+function cpMapValue(row, field) {
+  if (row?.[field] == null) return Number.NaN;
+  const raw = Number(row[field]);
+  if (!Number.isFinite(raw)) return Number.NaN;
+  if (cpMapMode !== 'average') return raw;
+  const average = Number(row.avg_cp);
+  return Number.isFinite(average) ? raw - average : Number.NaN;
+}
+
+function formatCpDifference(value) {
+  const number = Math.abs(Number(value)) < 0.005 ? 0 : Number(value);
+  if (number === 0) return '\u00b10.00';
+  return `${number > 0 ? '+' : '\u2212'}${Math.abs(number).toFixed(2)}`;
 }
 
 function cpMapColor(val, range) {
@@ -1421,6 +1479,7 @@ const PAGE_WINDOW_HANDLERS = {
   onEndgamesGraphToggleKey,
   setEndgamesMapGraphView,
   onEndgamesMapGraphToggleKey,
+  setCpMapMode,
 };
 
 function bindWindowHandlers() {

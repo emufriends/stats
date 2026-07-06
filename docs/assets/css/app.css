@@ -2920,9 +2920,78 @@
       background: rgba(7, 17, 16, 0.28);
       padding: 8px;
       overflow-y: auto;
+      height: 470px;
       max-height: 470px;
+      box-sizing: border-box;
+      overflow-y: scroll;
+      scrollbar-gutter: stable;
       scrollbar-width: thin;
       scrollbar-color: var(--border-light) transparent;
+    }
+
+    .cp-map-comparison {
+      font-size: calc(1em - 1px);
+    }
+
+    .build-tabs .endgames-tab {
+      flex: 1 1 50%;
+    }
+
+    .build-tabs {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .build-tables {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+      gap: 28px;
+      align-items: start;
+    }
+
+    .build-table-panel {
+      min-width: 0;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--bg-panel);
+    }
+
+    .build-table-title {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-light);
+      color: var(--text);
+      font-family: 'Bitter', serif;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+    }
+
+    .build-table {
+      width: 100%;
+      min-width: 500px;
+    }
+
+    .build-table th:first-child,
+    .build-table td:first-child {
+      width: 22%;
+    }
+
+    .build-placeholder {
+      min-height: 330px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-panel);
+    }
+
+    @media (max-width: 900px) {
+      .build-tables {
+        grid-template-columns: 1fr;
+        gap: 18px;
+      }
     }
 
     .cp-dist-legend-controls {
@@ -3203,7 +3272,7 @@
     /* Combinations page */
     .combinations-tabs {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       width: 100%;
     }
 

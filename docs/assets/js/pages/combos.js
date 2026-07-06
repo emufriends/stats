@@ -37,7 +37,9 @@ export const mainHtml = `
         <button class="endgames-tab" type="button" data-view="card_map"
                 onclick="setCombinationsView('card_map')">Card + Map</button>
         <button class="endgames-tab" type="button" data-view="card_round"
-                onclick="setCombinationsView('card_round')">Card + Round</button>
+                 onclick="setCombinationsView('card_round')">Card + Round</button>
+        <button class="endgames-tab" type="button" data-view="card_endgame"
+                 onclick="setCombinationsView('card_endgame')">Card + Endgame</button>
       </div>
     </div>
   </div>
@@ -110,7 +112,7 @@ export const sidebarHtml = `
            placeholder="yyyy-mm-dd" id="dateTo" />
   </div>
   <hr class="divider" />
-  <div class="filter-group">
+  <div class="filter-group" id="combinationCompletedSection">
     <div class="toggle-row">
       <span class="toggle-label">Completed games only</span>
       <label class="toggle">
@@ -119,7 +121,7 @@ export const sidebarHtml = `
       </label>
     </div>
   </div>
-  <hr class="divider" />
+  <hr class="divider" id="combinationCompletedDivider" />
   <div class="filter-action-stack">
     <button class="apply-btn" onclick="applyFiltersFromSidebar()">Apply filters</button>
   </div>`;
@@ -131,6 +133,7 @@ const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
   card_map: 'card-map',
   card_round: 'card-round',
+  card_endgame: 'card-endgame',
 };
 const ROUNDS = ['1', '2', '3', '4', '5', '6+'];
 const MAPS = [
@@ -156,6 +159,7 @@ let activeView = 'card_card';
 let allData = [];
 let filteredData = [];
 let cardCatalogue = [];
+let endgameCatalogue = [];
 let cardAliases = new Map();
 let selectedMaps = MAPS.map(([, full]) => full);
 let selectedRounds = new Set(ROUNDS);
@@ -288,6 +292,12 @@ function renderSidebarMapVisibility() {
   if (section) section.style.display = activeView === 'card_map' ? 'none' : '';
   const roundSection = document.getElementById('combinationSidebarRoundSection');
   if (roundSection) roundSection.style.display = activeView === 'card_round' ? 'none' : '';
+  document.getElementById('combinationCompletedSection')?.classList.toggle(
+    'is-hidden', activeView === 'card_endgame'
+  );
+  document.getElementById('combinationCompletedDivider')?.classList.toggle(
+    'is-hidden', activeView === 'card_endgame'
+  );
 }
 
 function getParams() {
@@ -297,9 +307,9 @@ function getParams() {
     combinations_view: activeView,
     is_mw: isMW,
     maps: selectedMaps,
-    player_elo_min: Number(value('playerEloMin') || 300),
+    player_elo_min: value('playerEloMin') === '' ? 0 : Number(value('playerEloMin')),
     player_elo_max: value('playerEloMax') ? Number(value('playerEloMax')) : null,
-    opponent_elo_min: Number(value('opponentEloMin') || 300),
+    opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
     opponent_elo_max: value('opponentEloMax') ? Number(value('opponentEloMax')) : null,
     date_from: value('dateFrom') || '2025-01-01',
     date_to: value('dateTo') || null,
@@ -396,12 +406,15 @@ async function loadCardCatalogue() {
 
 function mergeCardCatalogueFromRows(sourceRows) {
   const names = new Set(cardCatalogue);
+  const endgames = new Set(endgameCatalogue);
   for (const row of sourceRows) {
     if (row.card_name) names.add(row.card_name);
     if (row.card_1) names.add(row.card_1);
     if (row.card_2) names.add(row.card_2);
+    if (row.endgame_name) endgames.add(row.endgame_name);
   }
   cardCatalogue = [...names].sort((a, b) => a.localeCompare(b));
+  endgameCatalogue = [...endgames].sort((a, b) => a.localeCompare(b));
 }
 
 function applyClientFilters({ preserveHead = false } = {}) {
@@ -410,10 +423,11 @@ function applyClientFilters({ preserveHead = false } = {}) {
   const candidatesBeforeMinimum = allData.filter(row => {
     const normalizedPairType = String(row.pair_type || '').replace(' vs. ', ' + ');
     if (activeView === 'card_card' && !selectedTypes.has(normalizedPairType)) return false;
-    if (activeView === 'card_map' || activeView === 'card_round') {
+    if (activeView === 'card_map' || activeView === 'card_round' || activeView === 'card_endgame') {
       const normalizedCardType = String(row.card_type || '').toLowerCase();
       if (!selectedCardTypes.has(normalizedCardType)) return false;
       if (selectedOne && row.card_name !== selectedOne) return false;
+      if (activeView === 'card_endgame' && selectedTwo && row.endgame_name !== selectedTwo) return false;
       if (activeView === 'card_map' && !selectedHeaderMaps.has(row.map_name)) return false;
       if (activeView === 'card_round' && !selectedHeaderRounds.has(row.round_name)) return false;
       return true;
@@ -467,7 +481,9 @@ function compareCombinationRows(a, b, projectSlots = true) {
 
   const stableFields = activeView === 'card_card'
     ? ['card_1', 'card_2', 'pair_type']
-    : ['card_name', activeView === 'card_map' ? 'map_name' : 'round_name', 'card_type'];
+    : activeView === 'card_endgame'
+      ? ['card_name', 'endgame_name', 'card_type']
+      : ['card_name', activeView === 'card_map' ? 'map_name' : 'round_name', 'card_type'];
   for (const field of stableFields) {
     const stableResult = String(a[field] || '').localeCompare(String(b[field] || ''));
     if (stableResult !== 0) return stableResult;
@@ -503,10 +519,10 @@ function projectPairRow(row) {
 }
 
 function buildDeltaRanges(data) {
-  if (activeView === 'card_card') {
+  if (activeView === 'card_card' || activeView === 'card_endgame') {
     return {
-      delta_1: cappedNumericRange(data, row => row.delta_1),
-      delta_2: cappedNumericRange(data, row => row.delta_2),
+      delta_1: cappedNumericRange(data, row => activeView === 'card_endgame' ? row.delta_card : row.delta_1),
+      delta_2: cappedNumericRange(data, row => activeView === 'card_endgame' ? row.delta_endgame : row.delta_2),
       delta_combined: cappedNumericRange(data, row => row.delta_combined),
       delta_actual: cappedNumericRange(data, row => row.delta_actual),
     };
@@ -549,7 +565,7 @@ function renderTable(preserveHead = false) {
   const pageRows = filteredData.slice(start ? start - 1 : 0, end);
   tbody.innerHTML = pageRows.length
     ? pageRows.map(row => rowHtml(row, row.global_rank ?? '\u2014')).join('')
-    : `<tr><td colspan="${activeView === 'card_card' ? 9 : 8}"><div class="state-overlay"><div class="state-title">No combinations found</div></div></td></tr>`;
+    : `<tr><td colspan="${activeView === 'card_card' || activeView === 'card_endgame' ? 9 : 8}"><div class="state-overlay"><div class="state-title">No combinations found</div></div></td></tr>`;
   renderPagination();
 }
 
@@ -557,8 +573,22 @@ function renderHead() {
   const thead = document.getElementById('tableHead');
   if (!thead) return;
   const table = document.getElementById('statsTable');
-  table?.classList.toggle('combinations-pair-table', activeView === 'card_card');
-  table?.classList.toggle('combinations-map-table', activeView !== 'card_card');
+  table?.classList.toggle('combinations-pair-table', activeView === 'card_card' || activeView === 'card_endgame');
+  table?.classList.toggle('combinations-map-table', activeView !== 'card_card' && activeView !== 'card_endgame');
+  if (activeView === 'card_endgame') {
+    thead.innerHTML = `<tr>
+      <th style="width:5%">#</th>
+      ${cardFilterHeader('Card', 1, '18%')}
+      ${cardFilterHeader('Endgame', 2, '18%')}
+      ${header('delta_combined', '\u0394 (Sum)', 'sum of the card and endgame general elo deltas', '11%')}
+      ${header('delta_actual', '\u0394 (Actual)', 'average elo gain when this card was played and this endgame was scored', '11%')}
+      ${header('interaction', 'Synergy', '\u0394 (Actual) - \u0394 (Sum)', '11%')}
+      ${header('avg_elo', 'Elo', 'average player elo for this card and endgame pair', '7%')}
+      ${header('n_played', 'Played', 'n (card played and endgame scored)', '9%')}
+      ${singleCardTypeFilterHeader('10%')}
+    </tr>`;
+    return;
+  }
   if (activeView === 'card_map' || activeView === 'card_round') {
     const isMap = activeView === 'card_map';
     const contextLabel = isMap ? 'Map' : 'Round';
@@ -617,7 +647,7 @@ function header(field, label, tooltip = '', width = '') {
   const active = sortState.col === field;
   const arrow = active ? (sortState.dir === 'desc' ? '\u2193' : '\u2191') : '\u2195';
   const labelHtml = `${label}${tooltip ? `<span class="col-tip" data-tip="${escapeAttr(tooltip)}">?</span>` : ''}`;
-  const isPairMetricHeader = activeView === 'card_card'
+  const isPairMetricHeader = (activeView === 'card_card' || activeView === 'card_endgame')
     && ['delta_combined', 'delta_actual', 'interaction', 'avg_elo', 'n_played'].includes(field);
   if (isPairMetricHeader) {
     return `<th class="${active ? 'sorted' : ''}" style="${width ? `width:${width};` : ''}" onclick="sortCombinations('${field}')"><span class="combo-card-card-metric-header"><span class="combo-card-card-header-label">${labelHtml}</span><span class="sort-arrow ${active ? 'active' : ''}">${arrow}</span></span></th>`;
@@ -639,7 +669,7 @@ function cardFilterHeader(label, slot, width = '20%') {
     </div>
     <div class="combination-header-popup combination-card-popup" id="combinationCardPopup${slot}"
          onclick="event.stopPropagation()">
-      <input class="abilities-search-input" type="text" placeholder="Search cards..."
+       <input class="abilities-search-input" type="text" placeholder="${activeView === 'card_endgame' && slot === 2 ? 'Search endgames...' : 'Search cards...'}"
              oninput="renderCombinationCardChoices(${slot}, this.value)" />
       <div class="combination-card-choice-list" id="combinationCardChoices${slot}"></div>
     </div>
@@ -719,6 +749,19 @@ function roundFilterHeader(width = '20%') {
 }
 
 function rowHtml(row, rank) {
+  if (activeView === 'card_endgame') {
+    return `<tr>
+      <td class="rank-cell">${rank}</td>
+      ${combinedCardTd(row.card_name, row.delta_card, deltaRanges.delta_1)}
+      ${combinedCardTd(row.endgame_name, row.delta_endgame, deltaRanges.delta_2)}
+      ${deltaTd(row.delta_combined, null, '', deltaRanges.delta_combined)}
+      ${deltaTd(row.delta_actual, row, 'delta_actual', deltaRanges.delta_actual)}
+      ${interactionTd(row.interaction)}
+      <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
+      <td class="n-cell">${formatInteger(row.n_played)}</td>
+      <td>${singleTypeBadge(row.card_type)}</td>
+    </tr>`;
+  }
   if (activeView === 'card_map' || activeView === 'card_round') {
     const isMap = activeView === 'card_map';
     return `<tr>
@@ -952,8 +995,10 @@ function renderCombinationCardChoices(slot, query = '') {
   const results = document.getElementById(`combinationCardChoices${slot}`);
   if (!results) return;
   const needle = normalize(query);
-  const excluded = slot === 1 ? selectedTwo : selectedOne;
-  const matches = cardCatalogue.filter(card => {
+  const isEndgameSlot = activeView === 'card_endgame' && slot === 2;
+  const catalogue = isEndgameSlot ? endgameCatalogue : cardCatalogue;
+  const excluded = activeView === 'card_card' ? (slot === 1 ? selectedTwo : selectedOne) : '';
+  const matches = catalogue.filter(card => {
     if (card === excluded) return false;
     if (!needle) return true;
     return normalize(card).includes(needle)
@@ -972,7 +1017,7 @@ function selectCombinationCard(slot, card) {
   } else {
     selectedTwo = card;
   }
-  if (selectedOne === selectedTwo) {
+  if (activeView === 'card_card' && selectedOne === selectedTwo) {
     if (slot === 1) selectedTwo = '';
     else selectedOne = '';
   }

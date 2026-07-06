@@ -392,9 +392,9 @@ function getParams() {
   const dFrom = document.getElementById('dateFrom').value;
   const dTo = document.getElementById('dateTo').value;
 
-  if (pMin) params.player_elo_min = parseInt(pMin);
+  params.player_elo_min = pMin === '' ? 0 : parseInt(pMin);
   if (pMax) params.player_elo_max = parseInt(pMax);
-  if (oMin) params.opponent_elo_min = parseInt(oMin);
+  params.opponent_elo_min = oMin === '' ? 0 : parseInt(oMin);
   if (oMax) params.opponent_elo_max = parseInt(oMax);
   if (dFrom) params.date_from = dFrom;
   if (dTo) params.date_to = dTo;

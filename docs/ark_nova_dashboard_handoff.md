@@ -252,7 +252,7 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, and Icons. Home has no rail item; the topbar logo links to it. The remaining future-page placeholders are Actions, MW Action Cards, Predictors, Buildings, Projects, Workers, Records, and Players. They use lightweight inline SVG icons and normal hover styling, but have no links, routes, click actions, or active state.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Icons, and Build. Home has no rail item; the topbar logo links to it. Build uses the former Buildings shovel item and routes to `#/build`. The remaining future-page placeholders are Actions, MW Action Cards, Predictors, Projects, Workers, Records, and Players.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Header topbar includes:
   - MW/Base switch
@@ -510,7 +510,7 @@ On phones, Home keeps the navigation rail expanded and reserves its width in the
 
 ### Sponsor Endgames Page
 
-`assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to non-conceded games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points, Elo, and delta buckets all use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. Delta headers use the shared `#col-tooltip`. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
+`assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to non-conceded games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points and delta buckets use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. There is intentionally no Elo result column or `avg_elo` payload field. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
 
 ### Icons Page
 
@@ -521,6 +521,8 @@ Amount is the mean non-null final icon count. Buckets `0` through `6` are exact 
 The full-width icon selector uses the PNG artwork under `assets/img/icons` and groups icons into Species, Habitat, and Other. It has no all/none control or decorative brackets. Individual icons toggle independently; a fully selected group-button click clears that group, while a partial/empty group-button click selects the whole group. A group remains visually active until all its members are deselected. Selected artwork is full-color and deselected artwork is greyed. Base omits Sea Animals from the selector, table, graph, ranges, and ranking universe. Attributes separators and Icons group separators share the same fixed 2px rule.
 
 The enlarged graph toggle at the selector's right edge swaps the table for an Endgames-style SVG line chart. The selector defines the available lines, while the graph legend independently shows/hides those lines. Each icon has a permanent palette position assigned from the complete MW/Base icon order before selector filtering, so hiding lines never recolors survivors. Delta mode plots `Delta (0)` through `Delta (7+)`, omitting missing, impossible, and sub-1,000 points and breaking paths across gaps. Frequency mode plots the same buckets as percentages. Axes scale dynamically; tooltips contain icon, bucket, and value but no observation count.
+
+The graph and legend keep a fixed height with a stable scrollbar gutter, so reducing the available icon lines does not resize or shift the chart. Icon bucket headers use the same styled header-tooltip event path as Sponsor Endgames.
 
 Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table cells are tooltip-free dashes and are absent from graphs and color ranges. The `#` column follows the current sort. Delta-column sorting places valid values first, sub-1,000 values second, and impossible/missing values last while respecting numeric direction inside the first two tiers; only valid values receive ranks. Frequency sorting similarly leaves impossible/missing rows unranked. Unranked rows display an em dash.
 
@@ -538,12 +540,9 @@ The deliberate exception is line-chart selection in Endgames CP distribution, En
 - In Delta Elo mode, valid buckets with at least 1,000 occurrences expose their 95% Elo-delta confidence interval on hover. Values below 1,000 occurrences remain visible in grey parentheses and show `Insufficient data (fewer than 1,000 observations).` instead of a CI.
 - Low-sample values use muted grey at 70% opacity so they are visually subordinate;
   the shared tooltip remains full-opacity.
-- Desktop widths are `5/18/10/7/15/15/15/15` percent for CP. Appeal uses
-  `5/18/10/7` percent for Rank/Sponsor/Appeal/Elo and divides the remaining 60%
-  equally across its seven buckets (`8.5714%` each).
 - Impossible and unavailable buckets remain tooltip-free dashes.
 - When a Sponsor bucket is the active sort, valid values rank first; insufficient values remain numerically sorted below them and impossible/missing values remain last. Insufficient and impossible/missing rows display an em dash instead of a rank. Frequency sorting likewise leaves impossible/missing rows unranked.
-- Both Sponsor tables expose a tooltip on Elo describing the average player Elo population.
+- Desktop widths are `5/25/10/15/15/15/15` for CP and `5/25/10` plus seven `8.5714%` buckets for Appeal.
 - No Round filter
 - No Completed games toggle exposed to the user
 - No attributes bar
@@ -568,6 +567,8 @@ CP by map:
 - Final `CP` column keeps the normal CP color styling.
 - Map filter is hidden and ignored in this view because all maps must be shown as columns.
 - Graph mode uses the same payload, with maps ordered `1a` through `8a`, then `9` through `14`, then `T1` on the x-axis and average CP on a dynamically padded y-axis. Missing points break line segments. Legend selection and nearest-point tooltips match CP distribution.
+- The `Raw / vs. average` switch is frontend-only and applies to table and graph. Comparison values are `map CP - Avg CP`, display signed to two decimals, use zero-anchored capped Delta colors independently per map column, and retain raw `Avg CP` as the final reference column.
+- CP-distribution frequency columns use the shared blue frequency scale rather than the former green intensity scale.
 
 Default snapshots:
 
@@ -622,13 +623,14 @@ Tournament H2H:
 
 ### Combos Page
 
-`assets/js/pages/combos.js` is routed at `#/combos` and uses backend `stats_page: "combinations"` with three views:
+`assets/js/pages/combos.js` is routed at `#/combos` and uses backend `stats_page: "combinations"` with four equal-width views:
 
 - `card_card`: unordered same-player card pairs. Card 1 is alphabetically first; actual delta is the player's delta when both were played, and Synergy is actual minus the sum of both individual card deltas.
 - `card_map`: card/map rows for the 15 standard maps. Synergy is map-specific delta minus the card's general delta.
 - `card_round`: card/round rows for rounds `1` through `5` and a `6+` bucket. Synergy is round-specific delta minus the card's general delta.
+- `card_endgame`: a played card paired with an endgame scored by the same player in the same non-conceded game. Delta Sum is the filtered card-play baseline plus the scored-endgame baseline; Delta Actual is the exact pair mean and Synergy is Actual minus Sum.
 
-Played cards are deduplicated per table/player/card/round before aggregation. All six type combinations are supported for Card + Card; self-pairs and unobserved pairs are omitted, and individual baselines use the same active filters as interaction rows. Frontend defaults to minimum 1000 plays and Synergy descending. All three views put the individual card delta beneath each card name. Card + Card supports one-card or exact unordered-pair header filtering.
+Played cards are deduplicated per table/player/card/round before aggregation. All six type combinations are supported for Card + Card; self-pairs and unobserved pairs are omitted, and individual baselines use the same active filters as interaction rows. Frontend defaults to minimum 1000 plays and Synergy descending. Every card/endgame entity cell displays its general Delta beneath its name. Card + Card supports one-card or exact unordered-pair header filtering.
 
 Sidebar filters are view-aware: Card + Card shows Map and Round, Card + Map hides Map and shows Round, and Card + Round shows Map and hides Round. Card + Map and Card + Round provide multi-select header filters for their represented dimension. Card + Map's Map header is filter-only; a narrowed selection replaces its filter icon with an `N/15` chip, and popup map chips expose styled full-name tooltips. Card selectors search both display names and aliases from `cards_altnames.csv`; their single-choice popup uses the same Inter 12px typography and row spacing as Attributes/Abilities. A selected card leaves the header label unchanged and replaces only the search icon with a muted-red clear X. Card + Map displays map names as `Observation Tower (1a)` while retaining raw full names for matching. Card + Card's six-value Type popup includes all/none controls and spans the Played plus Type columns exactly. Fixed-position Type popups are flush with their headers, follow layout/scroll changes, and close only after the complete popup leaves the viewport. Empty Type, Map, or Round selections return no rows, and `6+` means round 6 or later.
 
@@ -638,7 +640,7 @@ and individual Delta into that chosen display slot. With no selection, body orde
 remains alphabetical; global rank calculation continues to use canonical pair
 identity. Card/Card 1/Card 2 headers are filter-only and are deliberately not sortable.
 
-All three tables use 100%-total desktop column allocations and a `1080px` readability floor. Card + Card uses `5/18/18/11/11/11/7/9/10` percent for Rank/Card 1/Card 2/Delta Sum/Delta Actual/Synergy/Elo/Played/Type. Its Type header retains the filter icon when all six pair types are active. Narrowed states use one centered dot, horizontal rows of two or three, four die corners, or four corners plus center for five; zero selected retains active-filter styling without dots. Card + Map and Card + Round have eight columns because their general card delta is integrated into the Card cell. Normal 1280px desktop layouts do not scroll; narrower desktop/tablet layouts scroll horizontally instead of allowing headers, names, or badges to overlap. Cards and Endgames similarly use `950px` and `900px` desktop/tablet width floors; existing mobile table sizing remains authoritative. Card + Map and Card + Round use the Cards-style single-card Type filter. Active sortable headers use the shared bright-green `sorted` state; narrowed filters use the paler filter accent. Loading, error, and empty states hide pagination and span the active view's complete column count.
+All four tables use 100%-total desktop allocations and a `1080px` readability floor. Card + Card and Card + Endgame use `5/18/18/11/11/11/7/9/10`; Card + Endgame has independent non-sortable Card and Endgame searches, puts each general Delta beneath its name, uses only the card's three-value Type filter, and hides Completed-only because scored pairs are inherently complete. Its Round filter applies to the card play.
 
 Default snapshots:
 
@@ -646,15 +648,26 @@ Default snapshots:
 card-stats/combinations/card-card/default-{mw|base}.json
 card-stats/combinations/card-map/default-{mw|base}.json
 card-stats/combinations/card-round/default-{mw|base}.json
+card-stats/combinations/card-endgame/default-{mw|base}.json
 ```
 
 Combo result metadata uses `combinations` on desktop and the shorter `combos` on phones.
+
+### Build Page
+
+`assets/js/pages/build.js` is routed at `#/build`; backend page id is `build`. Enclosures uses joined Full/Log observations at one player/game row. Standard rows are sizes 1-5 with exact buckets 0-4 and `5+`; unique rows are Aviary, Reptile House, Petting Zoo, Large Aquarium, and Small Aquarium with No/Yes buckets. Only Petting Zoo has Empty, defined exactly as built once with `COALESCE(Petting_Zoo_icons, 0) = 0`.
+
+Elo Delta and Frequency share the two-table layout. Delta cells expose the usual CI and use the 1,000-observation sufficiency rule. Ordinary frequency denominators are non-null observations for that enclosure field. Empty Petting Zoo frequency uniquely divides empty Petting Zoos by built Petting Zoos and uses violet. Elo Delta remembers Completed=false by default; Frequency separately remembers Completed=true. Default snapshots live under `card-stats/build/enclosures/{delta|frequency}/default-{mw|base}.json`. Covered hexes is an intentional empty placeholder.
+
+Prepared Logs includes numeric fields for all five standard sizes plus `aviary_built`, `reptile_house_built`, `petting_zoo_built`, `large_aquarium_built`, and `small_aquarium_built`.
 
 ### Shared Table UI
 
 `app.js` observes rendered `.rank-cell` elements and reduces only overflowing rank text, down to a legible minimum; page modules do not need their own four-digit-rank handling. Card-header search buttons keep their compact glyph but use a larger invisible hit target extending mainly to the left. Sortable tables should add the shared `sorted` class to the active `<th>`; narrowed filters use `--accent-filter` instead.
 
 Default sort highlighting is hidden during loading and applied only after data has loaded. Cards, Opening Hand, and Combos distinguish a genuine empty filter result from a Minimum plays/keeps threshold that removed otherwise-valid rows; only the latter temporarily pulses the minimum input, stopping after five seconds or immediately on focus.
+
+Every Filter-bar player/opponent Elo minimum serializes a cleared input as numeric `0`. Initial and Reset values remain page-specific (normally 300); clearing a minimum deliberately prevents use of a 300-minimum default snapshot.
 
 Cards, Opening Hand, and all Combo views calculate `#` globally among rows that
 meet the current Minimum plays/keeps threshold. Secondary client-side filters
@@ -1217,7 +1230,7 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-Expected result: JSON with `status: ok`, `home_bootstrap: ok`, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, and all three Combinations views for MW/Base. Do not paste the token or command output if it includes secrets.
+Expected result: JSON with `status: ok`, `home_bootstrap: ok`, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build populations, and all four Combinations views for MW/Base. Do not paste the token or command output if it includes secrets.
 ## Maintenance Token Rotation
 
 If the maintenance token is exposed, rotate it immediately.

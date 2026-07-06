@@ -206,9 +206,9 @@ function params() {
     stats_page: 'icons',
     is_mw: isMW,
     maps: selectedMaps,
-    player_elo_min: Number(value('playerEloMin') || 300),
+    player_elo_min: value('playerEloMin') === '' ? 0 : Number(value('playerEloMin')),
     player_elo_max: value('playerEloMax') ? Number(value('playerEloMax')) : null,
-    opponent_elo_min: Number(value('opponentEloMin') || 300),
+    opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
     opponent_elo_max: value('opponentEloMax') ? Number(value('opponentEloMax')) : null,
     date_from: value('dateFrom') || '2025-01-01',
     date_to: value('dateTo') || null,
@@ -780,20 +780,22 @@ const tooltip = document.getElementById('col-tooltip');
 document.addEventListener('mouseover', event => {
   if (!mounted || !tooltip) return;
   const cell = event.target.closest?.('.icons-value-tooltip');
-  if (!cell) return;
-  tooltip.textContent = cell.dataset.valueTooltip || '';
+  const tipEl = event.target.closest?.('th')?.querySelector('.col-tip');
+  if (!cell && !tipEl) return;
+  tooltip.textContent = cell?.dataset.valueTooltip || tipEl?.dataset.tip || '';
   tooltip.style.display = 'block';
 });
 document.addEventListener('mousemove', event => {
   if (!mounted || !tooltip) return;
   const cell = event.target.closest?.('.icons-value-tooltip');
-  if (!cell) return;
+  const tipEl = event.target.closest?.('th')?.querySelector('.col-tip');
+  if (!cell && !tipEl) return;
   tooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 8))}px`;
   tooltip.style.top = `${event.clientY + 18}px`;
 });
 document.addEventListener('mouseout', event => {
   if (!mounted || !tooltip) return;
-  const source = event.target.closest?.('.icons-value-tooltip');
-  const destination = event.relatedTarget?.closest?.('.icons-value-tooltip');
+  const source = event.target.closest?.('.icons-value-tooltip, th');
+  const destination = event.relatedTarget?.closest?.('.icons-value-tooltip, th');
   if (source && destination !== source) tooltip.style.display = 'none';
 });

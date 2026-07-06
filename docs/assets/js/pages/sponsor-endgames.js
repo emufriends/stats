@@ -5,7 +5,6 @@ import {
   numericRange,
   orangeGreenRangeColor,
   playrateColor,
-  relativeEloColor,
 } from '../color-scales.js?v=20260704-9';
 
 export const title = 'Sponsor Endgames';
@@ -34,7 +33,7 @@ export const mainHtml = `
       <table id="statsTable" class="sponsor-endgames-table">
         <thead id="tableHead"></thead>
         <tbody id="tableBody">
-          <tr><td colspan="9">
+          <tr><td colspan="10">
             <div class="state-overlay">
               <div class="spinner"></div>
               <div class="state-title">Fetching data...</div>
@@ -232,9 +231,9 @@ function getParams() {
     sponsor_endgames_view: activeView,
     is_mw: isMW,
     maps: selectedMaps,
-    player_elo_min: Number(val('playerEloMin') || 300),
+    player_elo_min: val('playerEloMin') === '' ? 0 : Number(val('playerEloMin')),
     player_elo_max: val('playerEloMax') ? Number(val('playerEloMax')) : null,
-    opponent_elo_min: Number(val('opponentEloMin') || 300),
+    opponent_elo_min: val('opponentEloMin') === '' ? 0 : Number(val('opponentEloMin')),
     opponent_elo_max: val('opponentEloMax') ? Number(val('opponentEloMax')) : null,
     date_from: val('dateFrom') || '2025-01-01',
     date_to: val('dateTo') || null,
@@ -323,9 +322,6 @@ function renderTable() {
   const scores = sortedRows.map(row => Number(row[averageField])).filter(Number.isFinite);
   const minScore = scores.length ? Math.min(...scores) : null;
   const maxScore = scores.length ? Math.max(...scores) : null;
-  const elos = sortedRows.map(row => Number(row.avg_elo)).filter(Number.isFinite);
-  const minElo = elos.length ? Math.min(...elos) : null;
-  const maxElo = elos.length ? Math.max(...elos) : null;
   const buckets = bucketsForView();
   const frequencyRanges = Object.fromEntries(buckets.map(([field]) => [
     field,
@@ -339,7 +335,7 @@ function renderTable() {
     ),
   ]));
   tbody.innerHTML = sortedRows.map(row => rowHtml(
-    row, row.current_rank, minElo, maxElo, minScore, maxScore, frequencyRanges, deltaRanges,
+    row, row.current_rank, minScore, maxScore, frequencyRanges, deltaRanges,
   )).join('');
 }
 
@@ -368,9 +364,8 @@ function renderTableHead() {
   thead.innerHTML = `
     <tr>
       <th style="width:5%;text-align:center;">#</th>
-      ${sortableHeader('sponsor', 'Sponsor', '18%')}
+      ${sortableHeader('sponsor', 'Sponsor', '25%')}
       ${sortableHeader(averageField, activeView === 'cp' ? 'CP' : 'Appeal', '10%')}
-      ${sortableHeader('avg_elo', 'Elo', '7%', 'average player elo in these sponsor endgame observations')}
       ${bucketHeaders.map(([field, label, tooltip]) => sortableHeader(
         field, label, activeView === 'cp' ? '15%' : '8.5714%', tooltip,
       )).join('')}
@@ -387,7 +382,7 @@ function sortableHeader(field, label, width = '', tooltip = '') {
   </th>`;
 }
 
-function rowHtml(row, rank, minElo, maxElo, minScore, maxScore, frequencyRanges, deltaRanges) {
+function rowHtml(row, rank, minScore, maxScore, frequencyRanges, deltaRanges) {
   const avg = activeView === 'cp' ? row.avg_cp : row.avg_appeal;
   const buckets = bucketsForView();
   return `
@@ -395,7 +390,6 @@ function rowHtml(row, rank, minElo, maxElo, minScore, maxScore, frequencyRanges,
       <td class="rank-cell">${rank ?? '\u2014'}</td>
       <td class="sponsor-name-cell">${escapeHtml(row.sponsor)}</td>
       <td class="sponsor-avg-cell" style="color:${scoreColor(avg, minScore, maxScore)}">${formatNumber(avg, 2)}</td>
-      <td class="elo-cell" style="color:${eloColor(row.avg_elo, minElo, maxElo)}">${formatNumber(row.avg_elo, 0)}</td>
       ${buckets.map(([field, value]) => bucketCell(
         row, field, value, buckets, frequencyRanges[field], deltaRanges[field],
       )).join('')}
@@ -484,7 +478,6 @@ function frequencyForSort(row, field) {
   return total > 0 ? (100 * bucketCount(row, field)) / total : Number.NaN;
 }
 
-const eloColor = relativeEloColor;
 
 function scoreColor(raw, minScore, maxScore) {
   const value = Number(raw);
@@ -511,7 +504,7 @@ function renderLoading() {
   });
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="${activeView === 'cp' ? 8 : 11}">
+  tbody.innerHTML = `<tr><td colspan="${activeView === 'cp' ? 7 : 10}">
     <div class="state-overlay">
       <div class="spinner"></div>
       <div class="state-title">Fetching data...</div>
@@ -524,7 +517,7 @@ function renderError(error) {
   renderMetaPlaceholder();
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="${activeView === 'cp' ? 8 : 11}">
+  tbody.innerHTML = `<tr><td colspan="${activeView === 'cp' ? 7 : 10}">
     <div class="state-overlay">
       <div class="state-title">Could not load sponsor endgames</div>
       <div class="state-sub">${escapeHtml(error.message || String(error))}</div>

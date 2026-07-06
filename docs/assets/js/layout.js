@@ -72,12 +72,12 @@ const sideNavContentHtml = `
       <span>Predictors</span>
     </button>
     <div class="nav-divider"></div>
-    <button type="button" class="side-nav-link nav-placeholder">
+    <a class="side-nav-link" href="#/build" data-page-id="build">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
         <path d="m7 3 10 10M15.5 11.5l3-3M5 19l6-6 3 3-6 6H5v-3Z" />
       </svg>
-      <span>Buildings</span>
-    </button>
+      <span>Build</span>
+    </a>
     <div class="nav-divider"></div>
     <button type="button" class="side-nav-link nav-placeholder">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
