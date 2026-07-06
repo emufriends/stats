@@ -50,7 +50,7 @@ VALID_ROUNDS = {"1", "2", "3", "4", "5", "6+"}
 
 CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 CACHE_PREFIX = os.environ.get("CACHE_PREFIX", "card-stats")
-FILTER_CACHE_VERSION = "v6"
+FILTER_CACHE_VERSION = "v7"
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -59,6 +59,7 @@ STATS_PAGE_MAPS = "maps"
 STATS_PAGE_SPONSOR_ENDGAMES = "sponsor_endgames"
 STATS_PAGE_COMBINATIONS = "combinations"
 STATS_PAGE_ICONS = "icons"
+STATS_PAGE_BUILD = "build"
 VALID_STATS_PAGES = {
     STATS_PAGE_CARDS,
     STATS_PAGE_HOME,
@@ -68,6 +69,7 @@ VALID_STATS_PAGES = {
     STATS_PAGE_SPONSOR_ENDGAMES,
     STATS_PAGE_COMBINATIONS,
     STATS_PAGE_ICONS,
+    STATS_PAGE_BUILD,
 }
 ENDGAMES_VIEW_GENERAL = "general"
 ENDGAMES_VIEW_CP_DISTRIBUTION = "cp_distribution"
@@ -86,10 +88,12 @@ VALID_SPONSOR_ENDGAMES_VIEWS = {SPONSOR_ENDGAMES_VIEW_CP, SPONSOR_ENDGAMES_VIEW_
 COMBINATIONS_VIEW_CARD_CARD = "card_card"
 COMBINATIONS_VIEW_CARD_MAP = "card_map"
 COMBINATIONS_VIEW_CARD_ROUND = "card_round"
+COMBINATIONS_VIEW_CARD_ENDGAME = "card_endgame"
 VALID_COMBINATIONS_VIEWS = {
     COMBINATIONS_VIEW_CARD_CARD,
     COMBINATIONS_VIEW_CARD_MAP,
     COMBINATIONS_VIEW_CARD_ROUND,
+    COMBINATIONS_VIEW_CARD_ENDGAME,
 }
 
 ALL_MAPS_FOR_METRICS = [
@@ -379,7 +383,7 @@ def _parse_stats_page(raw_value):
     if value not in VALID_STATS_PAGES:
         raise ValueError(
             "stats_page must be cards, home, opening_hand, endgames, maps, "
-            "sponsor_endgames, combinations, or icons"
+            "sponsor_endgames, combinations, icons, or build"
         )
     return value
 
@@ -416,7 +420,7 @@ def _parse_combinations_view(raw_value):
         return COMBINATIONS_VIEW_CARD_CARD
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_COMBINATIONS_VIEWS:
-        raise ValueError("combinations_view must be card_card, card_map, or card_round")
+        raise ValueError("combinations_view must be card_card, card_map, card_round, or card_endgame")
     return value
 
 
@@ -496,6 +500,8 @@ def _cache_blob_name(
         return f"{CACHE_PREFIX}/sponsor-endgames/{sponsor_endgames_view}/default-{dataset}.json"
     if stats_page == STATS_PAGE_ICONS:
         return f"{CACHE_PREFIX}/icons/default-{dataset}.json"
+    if stats_page == STATS_PAGE_BUILD:
+        return f"{CACHE_PREFIX}/build/enclosures/delta/default-{dataset}.json"
     if stats_page == STATS_PAGE_COMBINATIONS:
         view_slug = combinations_view.replace("_", "-")
         return f"{CACHE_PREFIX}/combinations/{view_slug}/default-{dataset}.json"
@@ -788,6 +794,15 @@ def _refresh_prepared_logs_table():
       l.endgame_scores,
       l.`2cp_worker` AS two_cp_worker,
       l.petting_zoo_built,
+      l.`1_size_enclosure_built` AS one_size_enclosure_built,
+      l.`2_size_enclosure_built` AS two_size_enclosure_built,
+      l.`3_size_enclosure_built` AS three_size_enclosure_built,
+      l.`4_size_enclosure_built` AS four_size_enclosure_built,
+      l.`5_size_enclosure_built` AS five_size_enclosure_built,
+      l.aviary_built,
+      l.reptile_house_built,
+      l.large_aquarium_built,
+      l.small_aquarium_built,
       l.chosen_5cp_bonus,
       l.chosen_8cp_bonus,
       l.endgame_from_sponsors
@@ -2117,6 +2132,114 @@ def _build_home_stats_query(where_sql):
     """
 
 
+def _build_build_enclosures_query(where_sql):
+    bucket_fields = [
+        ("0", "enclosure_count = 0"),
+        ("1", "enclosure_count = 1"),
+        ("2", "enclosure_count = 2"),
+        ("3", "enclosure_count = 3"),
+        ("4", "enclosure_count = 4"),
+        ("5_plus", "enclosure_count >= 5"),
+    ]
+    aggregates = []
+    for suffix, condition in bucket_fields:
+        aggregates.extend([
+            f"ROUND(AVG(IF({condition}, elo_delta, NULL)), 3) AS delta_{suffix}",
+            f"COUNTIF({condition}) AS count_{suffix}",
+            f"AVG(IF({condition}, elo_delta, NULL)) AS delta_{suffix}_ci_mean",
+            f"STDDEV_SAMP(IF({condition}, elo_delta, NULL)) AS delta_{suffix}_ci_sd",
+            f"COUNTIF(({condition}) AND elo_delta IS NOT NULL) AS delta_{suffix}_ci_n",
+        ])
+    aggregate_sql = ",\n        ".join(aggregates)
+    return f"""
+    WITH log_filtered AS (
+      SELECT *
+      FROM `{PREPARED_LOGS_TABLE}`
+      WHERE {where_sql}
+    ),
+    observations AS (
+      SELECT
+        l.table_id,
+        l.player,
+        l.elo_delta,
+        f.Petting_Zoo_icons,
+        enclosure,
+        category,
+        CASE enclosure
+          WHEN '1-size' THEN SAFE_CAST(l.one_size_enclosure_built AS INT64)
+          WHEN '2-size' THEN SAFE_CAST(l.two_size_enclosure_built AS INT64)
+          WHEN '3-size' THEN SAFE_CAST(l.three_size_enclosure_built AS INT64)
+          WHEN '4-size' THEN SAFE_CAST(l.four_size_enclosure_built AS INT64)
+          WHEN '5-size' THEN SAFE_CAST(l.five_size_enclosure_built AS INT64)
+          WHEN 'Aviary' THEN SAFE_CAST(l.aviary_built AS INT64)
+          WHEN 'Reptile House' THEN SAFE_CAST(l.reptile_house_built AS INT64)
+          WHEN 'Petting Zoo' THEN SAFE_CAST(l.petting_zoo_built AS INT64)
+          WHEN 'Large Aquarium' THEN SAFE_CAST(l.large_aquarium_built AS INT64)
+          WHEN 'Small Aquarium' THEN SAFE_CAST(l.small_aquarium_built AS INT64)
+        END AS enclosure_count
+      FROM log_filtered l
+      JOIN `{PREPARED_FULL_STATS_TABLE}` f
+        ON l.table_id = f.table_id AND l.player = f.player
+      CROSS JOIN UNNEST([
+        STRUCT('1-size' AS enclosure, 'standard' AS category),
+        STRUCT('2-size', 'standard'),
+        STRUCT('3-size', 'standard'),
+        STRUCT('4-size', 'standard'),
+        STRUCT('5-size', 'standard'),
+        STRUCT('Aviary', 'unique'),
+        STRUCT('Reptile House', 'unique'),
+        STRUCT('Petting Zoo', 'unique'),
+        STRUCT('Large Aquarium', 'unique'),
+        STRUCT('Small Aquarium', 'unique')
+      ])
+    ),
+    aggregated AS (
+      SELECT
+        enclosure,
+        category,
+        COUNT(enclosure_count) AS n_total,
+        {aggregate_sql},
+        ROUND(AVG(IF(
+          enclosure = 'Petting Zoo' AND enclosure_count = 1
+            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0,
+          elo_delta, NULL
+        )), 3) AS delta_empty,
+        COUNTIF(
+          enclosure = 'Petting Zoo' AND enclosure_count = 1
+            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0
+        ) AS count_empty,
+        COUNTIF(enclosure = 'Petting Zoo' AND enclosure_count = 1) AS empty_denominator,
+        AVG(IF(
+          enclosure = 'Petting Zoo' AND enclosure_count = 1
+            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0,
+          elo_delta, NULL
+        )) AS delta_empty_ci_mean,
+        STDDEV_SAMP(IF(
+          enclosure = 'Petting Zoo' AND enclosure_count = 1
+            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0,
+          elo_delta, NULL
+        )) AS delta_empty_ci_sd,
+        COUNTIF(
+          enclosure = 'Petting Zoo' AND enclosure_count = 1
+            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0
+            AND elo_delta IS NOT NULL
+        ) AS delta_empty_ci_n
+      FROM observations
+      WHERE enclosure_count IS NOT NULL
+      GROUP BY enclosure, category
+    )
+    SELECT *
+    FROM aggregated
+    ORDER BY IF(category = 'standard', 0, 1),
+      CASE enclosure
+        WHEN '1-size' THEN 1 WHEN '2-size' THEN 2 WHEN '3-size' THEN 3
+        WHEN '4-size' THEN 4 WHEN '5-size' THEN 5 WHEN 'Aviary' THEN 6
+        WHEN 'Reptile House' THEN 7 WHEN 'Petting Zoo' THEN 8
+        WHEN 'Large Aquarium' THEN 9 ELSE 10
+      END
+    """
+
+
 def _sponsor_cp_config_sql():
     parts = []
     for sponsor in SPONSOR_CP_CARDS:
@@ -2280,7 +2403,6 @@ def _build_sponsor_endgames_query(where_sql, sponsor_endgames_view):
         s.table_id,
         s.player,
         played.sponsor,
-        s.elo,
         s.elo_delta
       FROM scoped s
       CROSS JOIN UNNEST(IFNULL(s.played_sponsors, [])) AS played
@@ -2303,7 +2425,6 @@ def _build_sponsor_endgames_query(where_sql, sponsor_endgames_view):
       SELECT
         p.sponsor,
         COALESCE(e.value, 0) AS value,
-        p.elo,
         p.elo_delta
       FROM played p
       LEFT JOIN endgame_values e
@@ -2316,7 +2437,6 @@ def _build_sponsor_endgames_query(where_sql, sponsor_endgames_view):
         c.sponsor,
         c.possible_values,
         ROUND(AVG(o.value), 2) AS {avg_alias},
-        ROUND(AVG(o.elo), 0) AS avg_elo,
         COUNT(o.sponsor) AS n_played,
         {delta_selects},
         {count_selects},
@@ -2407,6 +2527,80 @@ def _build_combinations_query(
         ELSE 'Project + Sponsor'
       END
     """
+
+    if combinations_view == COMBINATIONS_VIEW_CARD_ENDGAME:
+        return f"""
+        WITH
+        {common_ctes},
+        log_filtered AS (
+          SELECT table_id, player, is_mw, Map, game_date, end_game_triggered,
+                 elo, opponent_elo, elo_delta, concede, endgame_scores
+          FROM `{PREPARED_LOGS_TABLE}`
+          WHERE {where_sql}
+        ),
+        table_scope AS (
+          SELECT table_id FROM log_filtered GROUP BY table_id
+        ),
+        non_conceded_tables AS (
+          SELECT p.table_id
+          FROM `{PREPARED_LOGS_TABLE}` p
+          JOIN table_scope s USING(table_id)
+          GROUP BY p.table_id
+          HAVING COUNTIF(COALESCE(p.concede, 0) != 0) = 0
+        ),
+        scored AS (
+          SELECT DISTINCT
+            l.table_id, l.player, TRIM(score.endgame) AS endgame_name,
+            l.elo_delta, l.elo
+          FROM log_filtered l
+          JOIN non_conceded_tables n USING(table_id)
+          CROSS JOIN UNNEST(IFNULL(l.endgame_scores, [])) AS score
+          WHERE TRIM(score.endgame) != ''
+        ),
+        individual_endgames AS (
+          SELECT endgame_name, AVG(elo_delta) AS endgame_delta
+          FROM scored
+          GROUP BY endgame_name
+        ),
+        pair_observations AS (
+          SELECT DISTINCT
+            p.table_id, p.player, p.card_name, p.card_type,
+            s.endgame_name, p.elo_delta, p.elo
+          FROM played p
+          JOIN scored s USING(table_id, player)
+        ),
+        pair_agg AS (
+          SELECT
+            card_name,
+            ANY_VALUE(card_type) AS card_type,
+            endgame_name,
+            AVG(elo_delta) AS delta_actual,
+            STDDEV_SAMP(elo_delta) AS delta_actual_ci_sd,
+            COUNT(elo_delta) AS delta_actual_ci_n,
+            AVG(elo) AS avg_elo,
+            COUNT(*) AS n_played
+          FROM pair_observations
+          GROUP BY card_name, endgame_name
+        )
+        SELECT
+          p.card_name,
+          p.card_type,
+          ROUND(c.individual_delta, 3) AS delta_card,
+          p.endgame_name,
+          ROUND(e.endgame_delta, 3) AS delta_endgame,
+          ROUND(c.individual_delta + e.endgame_delta, 3) AS delta_combined,
+          ROUND(p.delta_actual, 3) AS delta_actual,
+          p.delta_actual AS delta_actual_ci_mean,
+          p.delta_actual_ci_sd,
+          p.delta_actual_ci_n,
+          ROUND(p.delta_actual - (c.individual_delta + e.endgame_delta), 3) AS interaction,
+          ROUND(p.avg_elo, 0) AS avg_elo,
+          p.n_played
+        FROM pair_agg p
+        JOIN individual c USING(card_name)
+        JOIN individual_endgames e USING(endgame_name)
+        ORDER BY interaction DESC, n_played DESC, card_name, endgame_name
+        """
 
     if combinations_view == COMBINATIONS_VIEW_CARD_MAP:
         return f"""
@@ -2603,6 +2797,8 @@ def _query_card_stats(
         )
     if stats_page == STATS_PAGE_SPONSOR_ENDGAMES:
         query = _build_sponsor_endgames_query(where_sql, sponsor_endgames_view)
+    if stats_page == STATS_PAGE_BUILD:
+        query = _build_build_enclosures_query(where_sql)
     if stats_page == STATS_PAGE_COMBINATIONS:
         query = _build_combinations_query(
             where_sql,
@@ -2705,13 +2901,47 @@ def _query_card_stats(
         }
         return rows, timing
 
+    if stats_page == STATS_PAGE_BUILD:
+        schema_field_names = {field.name for field in results.schema}
+        for row in results:
+            item = {
+                "enclosure": row.enclosure,
+                "category": row.category,
+                "n_total": row.n_total,
+                "empty_denominator": row.empty_denominator,
+            }
+            for prefix in (
+                "delta_0", "delta_1", "delta_2", "delta_3",
+                "delta_4", "delta_5_plus", "delta_empty",
+            ):
+                item[prefix] = getattr(row, prefix, None)
+                item[prefix.replace("delta_", "count_")] = getattr(
+                    row, prefix.replace("delta_", "count_"), 0
+                )
+                _attach_ci95(item, row, schema_field_names, prefix)
+            rows.append(item)
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+
     if stats_page == STATS_PAGE_SPONSOR_ENDGAMES:
         schema_field_names = {field.name for field in results.schema}
         for row in results:
             item = {
                 "sponsor": row.sponsor,
                 "possible_values": list(row.possible_values or []),
-                "avg_elo": row.avg_elo,
                 "n_played": row.n_played,
             }
             if "avg_cp" in schema_field_names:
@@ -2785,7 +3015,21 @@ def _query_card_stats(
     if stats_page == STATS_PAGE_COMBINATIONS:
         schema_field_names = {field.name for field in results.schema}
         for row in results:
-            if combinations_view == COMBINATIONS_VIEW_CARD_MAP:
+            if combinations_view == COMBINATIONS_VIEW_CARD_ENDGAME:
+                item = {
+                    "card_name": row.card_name,
+                    "card_type": row.card_type,
+                    "delta_card": row.delta_card,
+                    "endgame_name": row.endgame_name,
+                    "delta_endgame": row.delta_endgame,
+                    "delta_combined": row.delta_combined,
+                    "delta_actual": row.delta_actual,
+                    "interaction": row.interaction,
+                    "avg_elo": row.avg_elo,
+                    "n_played": row.n_played,
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_actual")
+            elif combinations_view == COMBINATIONS_VIEW_CARD_MAP:
                 item = {
                     "card_name": row.card_name,
                     "card_type": row.card_type,
@@ -2895,6 +3139,8 @@ def _refresh_default_snapshot_from_prepared(
     maps_view=MAPS_VIEW_METRICS,
     sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP,
     combinations_view=COMBINATIONS_VIEW_CARD_CARD,
+    end_game_triggered_override=None,
+    cache_blob_override=None,
 ):
     started_at = time.perf_counter()
     is_home = stats_page == STATS_PAGE_HOME
@@ -2916,7 +3162,7 @@ def _refresh_default_snapshot_from_prepared(
         None,
         snapshot_date_from,
         None,
-        None,
+        end_game_triggered_override,
         endgames_view=endgames_view,
         maps_view=maps_view,
         sponsor_endgames_view=sponsor_endgames_view,
@@ -2959,9 +3205,13 @@ def _refresh_default_snapshot_from_prepared(
         "job_total_bytes_processed": timing["job_total_bytes_processed"],
         "job_total_slot_ms": timing["job_total_slot_ms"],
     }
-    cache_write_ok = _write_cached_snapshot(
-        is_mw, payload, stats_page, endgames_view, maps_view,
-        sponsor_endgames_view, combinations_view
+    cache_write_ok = (
+        _write_cache_blob(cache_blob_override, payload, "refreshed")
+        if cache_blob_override
+        else _write_cached_snapshot(
+            is_mw, payload, stats_page, endgames_view, maps_view,
+            sponsor_endgames_view, combinations_view
+        )
     )
     return {
         "status": "ok" if cache_write_ok else "error",
@@ -3031,6 +3281,16 @@ def _run_daily_refresh():
     )
     icons_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_ICONS)
     icons_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_ICONS)
+    build_delta_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_BUILD)
+    build_delta_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_BUILD)
+    build_frequency_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_BUILD, end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/build/enclosures/frequency/default-mw.json",
+    )
+    build_frequency_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_BUILD, end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/build/enclosures/frequency/default-base.json",
+    )
     combinations_card_card_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_CARD
     )
@@ -3049,16 +3309,24 @@ def _run_daily_refresh():
     combinations_card_map_base = _refresh_default_snapshot_from_prepared(
         0, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_MAP
     )
+    combinations_card_endgame_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_ENDGAME
+    )
+    combinations_card_endgame_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_ENDGAME
+    )
     snapshots = [
         home_mw, home_base, mw, base, opening_hand_mw, opening_hand_base, endgames_mw, endgames_base,
         endgames_cp_distribution_mw, endgames_cp_distribution_base,
         endgames_cp_by_map_mw, endgames_cp_by_map_base, maps_metrics_mw, maps_metrics_base,
         maps_h2h_mw, maps_h2h_base, sponsor_endgames_cp_mw, sponsor_endgames_cp_base,
         sponsor_endgames_appeal_mw, sponsor_endgames_appeal_base,
-        icons_mw, icons_base,
+        icons_mw, icons_base, build_delta_mw, build_delta_base,
+        build_frequency_mw, build_frequency_base,
         combinations_card_card_mw, combinations_card_card_base,
         combinations_card_round_mw, combinations_card_round_base,
         combinations_card_map_mw, combinations_card_map_base,
+        combinations_card_endgame_mw, combinations_card_endgame_base,
     ]
     status = (
         "ok"
@@ -3093,12 +3361,18 @@ def _run_daily_refresh():
         "sponsor_endgames_appeal_base": sponsor_endgames_appeal_base,
         "icons_mw": icons_mw,
         "icons_base": icons_base,
+        "build_delta_mw": build_delta_mw,
+        "build_delta_base": build_delta_base,
+        "build_frequency_mw": build_frequency_mw,
+        "build_frequency_base": build_frequency_base,
         "combinations_card_card_mw": combinations_card_card_mw,
         "combinations_card_card_base": combinations_card_card_base,
         "combinations_card_round_mw": combinations_card_round_mw,
         "combinations_card_round_base": combinations_card_round_base,
         "combinations_card_map_mw": combinations_card_map_mw,
         "combinations_card_map_base": combinations_card_map_base,
+        "combinations_card_endgame_mw": combinations_card_endgame_mw,
+        "combinations_card_endgame_base": combinations_card_endgame_base,
     }
 
 
@@ -3220,6 +3494,7 @@ def get_card_stats(request):
         STATS_PAGE_MAPS,
         STATS_PAGE_SPONSOR_ENDGAMES,
         STATS_PAGE_ICONS,
+        STATS_PAGE_BUILD,
     ):
         selected_rounds, round_filter_active = [], False
     if stats_page == STATS_PAGE_COMBINATIONS and combinations_view == COMBINATIONS_VIEW_CARD_ROUND:
