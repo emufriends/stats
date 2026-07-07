@@ -50,7 +50,7 @@ VALID_ROUNDS = {"1", "2", "3", "4", "5", "6+"}
 
 CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 CACHE_PREFIX = os.environ.get("CACHE_PREFIX", "card-stats")
-FILTER_CACHE_VERSION = "v7"
+FILTER_CACHE_VERSION = "v8"
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -60,6 +60,8 @@ STATS_PAGE_SPONSOR_ENDGAMES = "sponsor_endgames"
 STATS_PAGE_COMBINATIONS = "combinations"
 STATS_PAGE_ICONS = "icons"
 STATS_PAGE_BUILD = "build"
+STATS_PAGE_PREDICTORS = "predictors"
+STATS_PAGE_ACTIONS = "actions"
 VALID_STATS_PAGES = {
     STATS_PAGE_CARDS,
     STATS_PAGE_HOME,
@@ -70,6 +72,8 @@ VALID_STATS_PAGES = {
     STATS_PAGE_COMBINATIONS,
     STATS_PAGE_ICONS,
     STATS_PAGE_BUILD,
+    STATS_PAGE_PREDICTORS,
+    STATS_PAGE_ACTIONS,
 }
 ENDGAMES_VIEW_GENERAL = "general"
 ENDGAMES_VIEW_CP_DISTRIBUTION = "cp_distribution"
@@ -85,6 +89,27 @@ VALID_ENDGAMES_VIEWS = {
 }
 VALID_MAPS_VIEWS = {MAPS_VIEW_METRICS, MAPS_VIEW_TOURNAMENT_H2H}
 VALID_SPONSOR_ENDGAMES_VIEWS = {SPONSOR_ENDGAMES_VIEW_CP, SPONSOR_ENDGAMES_VIEW_APPEAL}
+BUILD_VIEW_ENCLOSURES = "enclosures"
+BUILD_VIEW_COVERED_HEXES = "covered_hexes"
+VALID_BUILD_VIEWS = {BUILD_VIEW_ENCLOSURES, BUILD_VIEW_COVERED_HEXES}
+PREDICTORS_VIEW_GENERAL = "general"
+PREDICTORS_VIEW_ICON = "icon"
+PREDICTORS_VIEW_SPECIFIC = "specific"
+VALID_PREDICTORS_VIEWS = {
+    PREDICTORS_VIEW_GENERAL,
+    PREDICTORS_VIEW_ICON,
+    PREDICTORS_VIEW_SPECIFIC,
+}
+ACTIONS_VIEW_STARTING_POSITION = "starting_position"
+ACTIONS_VIEW_UPGRADES = "upgrades"
+ACTIONS_VIEW_UPGRADE_ORDER = "upgrade_order"
+ACTIONS_VIEW_UPGRADES_PER_MAP = "upgrades_per_map"
+VALID_ACTIONS_VIEWS = {
+    ACTIONS_VIEW_STARTING_POSITION,
+    ACTIONS_VIEW_UPGRADES,
+    ACTIONS_VIEW_UPGRADE_ORDER,
+    ACTIONS_VIEW_UPGRADES_PER_MAP,
+}
 COMBINATIONS_VIEW_CARD_CARD = "card_card"
 COMBINATIONS_VIEW_CARD_MAP = "card_map"
 COMBINATIONS_VIEW_CARD_ROUND = "card_round"
@@ -383,7 +408,7 @@ def _parse_stats_page(raw_value):
     if value not in VALID_STATS_PAGES:
         raise ValueError(
             "stats_page must be cards, home, opening_hand, endgames, maps, "
-            "sponsor_endgames, combinations, icons, or build"
+            "sponsor_endgames, combinations, icons, build, predictors, or actions"
         )
     return value
 
@@ -421,6 +446,33 @@ def _parse_combinations_view(raw_value):
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_COMBINATIONS_VIEWS:
         raise ValueError("combinations_view must be card_card, card_map, card_round, or card_endgame")
+    return value
+
+
+def _parse_build_view(raw_value):
+    if raw_value in (None, ""):
+        return BUILD_VIEW_ENCLOSURES
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_BUILD_VIEWS:
+        raise ValueError("build_view must be enclosures or covered_hexes")
+    return value
+
+
+def _parse_predictors_view(raw_value):
+    if raw_value in (None, ""):
+        return PREDICTORS_VIEW_GENERAL
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_PREDICTORS_VIEWS:
+        raise ValueError("predictors_view must be general, icon, or specific")
+    return value
+
+
+def _parse_actions_view(raw_value):
+    if raw_value in (None, ""):
+        return ACTIONS_VIEW_STARTING_POSITION
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_ACTIONS_VIEWS:
+        raise ValueError("actions_view must be starting_position, upgrades, upgrade_order, or upgrades_per_map")
     return value
 
 
@@ -488,6 +540,9 @@ def _cache_blob_name(
     maps_view=MAPS_VIEW_METRICS,
     sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP,
     combinations_view=COMBINATIONS_VIEW_CARD_CARD,
+    build_view=BUILD_VIEW_ENCLOSURES,
+    predictors_view=PREDICTORS_VIEW_GENERAL,
+    actions_view=ACTIONS_VIEW_STARTING_POSITION,
 ):
     dataset = "mw" if int(is_mw) == 1 else "base"
     if stats_page == STATS_PAGE_HOME:
@@ -501,7 +556,11 @@ def _cache_blob_name(
     if stats_page == STATS_PAGE_ICONS:
         return f"{CACHE_PREFIX}/icons/default-{dataset}.json"
     if stats_page == STATS_PAGE_BUILD:
-        return f"{CACHE_PREFIX}/build/enclosures/delta/default-{dataset}.json"
+        return f"{CACHE_PREFIX}/build/{build_view}/delta/default-{dataset}.json"
+    if stats_page == STATS_PAGE_PREDICTORS:
+        return f"{CACHE_PREFIX}/predictors/{predictors_view}/default-{dataset}.json"
+    if stats_page == STATS_PAGE_ACTIONS:
+        return f"{CACHE_PREFIX}/actions/{actions_view}/delta/default-{dataset}.json"
     if stats_page == STATS_PAGE_COMBINATIONS:
         view_slug = combinations_view.replace("_", "-")
         return f"{CACHE_PREFIX}/combinations/{view_slug}/default-{dataset}.json"
@@ -615,11 +674,15 @@ def _read_cached_snapshot(
     maps_view=MAPS_VIEW_METRICS,
     sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP,
     combinations_view=COMBINATIONS_VIEW_CARD_CARD,
+    build_view=BUILD_VIEW_ENCLOSURES,
+    predictors_view=PREDICTORS_VIEW_GENERAL,
+    actions_view=ACTIONS_VIEW_STARTING_POSITION,
 ):
     return _read_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
-            sponsor_endgames_view, combinations_view
+            sponsor_endgames_view, combinations_view,
+            build_view, predictors_view, actions_view
         ),
         "hit",
     )
@@ -633,11 +696,15 @@ def _write_cached_snapshot(
     maps_view=MAPS_VIEW_METRICS,
     sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP,
     combinations_view=COMBINATIONS_VIEW_CARD_CARD,
+    build_view=BUILD_VIEW_ENCLOSURES,
+    predictors_view=PREDICTORS_VIEW_GENERAL,
+    actions_view=ACTIONS_VIEW_STARTING_POSITION,
 ):
     return _write_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
-            sponsor_endgames_view, combinations_view
+            sponsor_endgames_view, combinations_view,
+            build_view, predictors_view, actions_view
         ),
         payload,
         "refreshed",
@@ -710,6 +777,9 @@ def _filter_cache_blob_name(
 def _is_default_cache_request(
     stats_page,
     maps_view,
+    build_view,
+    predictors_view,
+    actions_view,
     is_mw,
     selected_maps,
     player_elo_min,
@@ -803,6 +873,14 @@ def _refresh_prepared_logs_table():
       l.reptile_house_built,
       l.large_aquarium_built,
       l.small_aquarium_built,
+      l.association_starting_strength,
+      l.build_starting_strength,
+      l.cards_starting_strength,
+      l.sponsors_starting_strength,
+      l.first_upgrade,
+      l.second_upgrade,
+      l.third_upgrade,
+      l.fourth_upgrade,
       l.chosen_5cp_bonus,
       l.chosen_8cp_bonus,
       l.endgame_from_sponsors
@@ -1862,8 +1940,19 @@ def _build_maps_metrics_query(where_sql):
         AVG(SAFE_CAST(Conservation_project_association_tasks AS FLOAT64)) AS projects,
         AVG(SAFE_CAST(Upgraded_action_cards AS FLOAT64)) AS upgrades,
         AVG(SAFE_CAST(Association_workers AS FLOAT64)) AS workers,
-        AVG(100 * SAFE_DIVIDE(SAFE_CAST(Covered_hexes AS FLOAT64), IF(Map IN ('Map 5: Park Restaurant', 'Map 5a: Park Restaurant'), 43, 42))) AS cover_pct,
-        AVG(100 * IF(SAFE_CAST(Covered_hexes AS INT64) >= IF(Map IN ('Map 5: Park Restaurant', 'Map 5a: Park Restaurant'), 43, 42), 1, 0)) AS fill_pct,
+        AVG(100 * SAFE_DIVIDE(
+          CASE
+            WHEN Map IN ('Map 5: Park Restaurant', 'Map 5a: Park Restaurant', 'Map 10: Rescue Station') THEN 43
+            WHEN Map = 'Map 0' THEN 39
+            ELSE 42
+          END - SAFE_CAST(Empty_hexes AS FLOAT64),
+          CASE
+            WHEN Map IN ('Map 5: Park Restaurant', 'Map 5a: Park Restaurant', 'Map 10: Rescue Station') THEN 43
+            WHEN Map = 'Map 0' THEN 39
+            ELSE 42
+          END
+        )) AS cover_pct,
+        AVG(100 * IF(SAFE_CAST(Empty_hexes AS INT64) = 0, 1, 0)) AS fill_pct,
         AVG(100 * CAST(COALESCE(Upgraded_Animals_action_card, FALSE) AS INT64)) AS animals_pct,
         AVG(100 * CAST(COALESCE(Upgraded_Association_action_card, FALSE) AS INT64)) AS association_pct,
         AVG(100 * CAST(COALESCE(Upgraded_Build_action_card, FALSE) AS INT64)) AS build_pct,
@@ -2061,6 +2150,7 @@ def _build_home_stats_query(where_sql):
         f.player,
         f.Petting_Zoo_icons,
         l.played_animals,
+        l.played_sponsors,
         l.played_projects,
         l.cards_drawn,
         l.two_cp_worker,
@@ -2110,7 +2200,15 @@ def _build_home_stats_query(where_sql):
       SELECT
         COUNT(DISTINCT table_id) AS games_logged,
         COUNTIF(COALESCE(two_cp_worker, FALSE)) AS two_cp_workers_taken,
-        COUNTIF(COALESCE(petting_zoo_built, 0) = 1 AND COALESCE(Petting_Zoo_icons, 0) = 0) AS empty_petting_zoos_played,
+        COUNTIF(
+          COALESCE(petting_zoo_built, 0) = 1
+          AND COALESCE(Petting_Zoo_icons, 0) = 0
+          AND NOT EXISTS (
+            SELECT 1
+            FROM UNNEST(IFNULL(played_sponsors, [])) AS ps
+            WHERE ps.sponsor = 'Horse Whisperer'
+          )
+        ) AS empty_petting_zoos_played,
         SUM(
           IF(chosen_5cp_bonus IN ('1 University', '1 Partner-Zoo'), 1, 0)
           + IF(chosen_8cp_bonus IN ('1 University', '1 Partner-Zoo'), 1, 0)
@@ -2162,6 +2260,7 @@ def _build_build_enclosures_query(where_sql):
         l.table_id,
         l.player,
         l.elo_delta,
+        l.played_sponsors,
         f.Petting_Zoo_icons,
         enclosure,
         category,
@@ -2201,27 +2300,52 @@ def _build_build_enclosures_query(where_sql):
         {aggregate_sql},
         ROUND(AVG(IF(
           enclosure = 'Petting Zoo' AND enclosure_count = 1
-            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0,
+            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0
+            AND NOT EXISTS (
+              SELECT 1
+              FROM UNNEST(IFNULL(played_sponsors, [])) AS ps
+              WHERE ps.sponsor = 'Horse Whisperer'
+            ),
           elo_delta, NULL
         )), 3) AS delta_empty,
         COUNTIF(
           enclosure = 'Petting Zoo' AND enclosure_count = 1
             AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0
+            AND NOT EXISTS (
+              SELECT 1
+              FROM UNNEST(IFNULL(played_sponsors, [])) AS ps
+              WHERE ps.sponsor = 'Horse Whisperer'
+            )
         ) AS count_empty,
         COUNTIF(enclosure = 'Petting Zoo' AND enclosure_count = 1) AS empty_denominator,
         AVG(IF(
           enclosure = 'Petting Zoo' AND enclosure_count = 1
-            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0,
+            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0
+            AND NOT EXISTS (
+              SELECT 1
+              FROM UNNEST(IFNULL(played_sponsors, [])) AS ps
+              WHERE ps.sponsor = 'Horse Whisperer'
+            ),
           elo_delta, NULL
         )) AS delta_empty_ci_mean,
         STDDEV_SAMP(IF(
           enclosure = 'Petting Zoo' AND enclosure_count = 1
-            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0,
+            AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0
+            AND NOT EXISTS (
+              SELECT 1
+              FROM UNNEST(IFNULL(played_sponsors, [])) AS ps
+              WHERE ps.sponsor = 'Horse Whisperer'
+            ),
           elo_delta, NULL
         )) AS delta_empty_ci_sd,
         COUNTIF(
           enclosure = 'Petting Zoo' AND enclosure_count = 1
             AND COALESCE(SAFE_CAST(Petting_Zoo_icons AS INT64), 0) = 0
+            AND NOT EXISTS (
+              SELECT 1
+              FROM UNNEST(IFNULL(played_sponsors, [])) AS ps
+              WHERE ps.sponsor = 'Horse Whisperer'
+            )
             AND elo_delta IS NOT NULL
         ) AS delta_empty_ci_n
       FROM observations
@@ -2238,6 +2362,479 @@ def _build_build_enclosures_query(where_sql):
         WHEN 'Large Aquarium' THEN 9 ELSE 10
       END
     """
+
+
+def _build_build_covered_hexes_query(where_sql):
+    buckets = [
+        ("0", "0", "empty_hexes = 0"),
+        ("1_5", "1-5", "empty_hexes BETWEEN 1 AND 5"),
+        ("6_11", "6-11", "empty_hexes BETWEEN 6 AND 11"),
+        ("12_17", "12-17", "empty_hexes BETWEEN 12 AND 17"),
+        ("18_23", "18-23", "empty_hexes BETWEEN 18 AND 23"),
+        ("24_plus", "24+", "empty_hexes >= 24"),
+    ]
+    map_selects = []
+    for map_meta in ALL_MAPS_FOR_METRICS[:15]:
+        key = map_meta["key"]
+        full = _sql_string(map_meta["full"])
+        map_selects.extend([
+            f"ROUND(AVG(IF(Map = {full} AND bucket_condition, elo_delta, NULL)), 3) AS {key}",
+            f"COUNTIF(Map = {full} AND bucket_condition) AS count_{key}",
+            f"COUNTIF(Map = {full} AND empty_hexes IS NOT NULL) AS denom_{key}",
+            f"AVG(IF(Map = {full} AND bucket_condition, elo_delta, NULL)) AS {key}_ci_mean",
+            f"STDDEV_SAMP(IF(Map = {full} AND bucket_condition, elo_delta, NULL)) AS {key}_ci_sd",
+            f"COUNTIF(Map = {full} AND bucket_condition AND elo_delta IS NOT NULL) AS {key}_ci_n",
+        ])
+    map_select_sql = ",\n        ".join(map_selects)
+    bucket_structs = ",\n        ".join(
+        f"STRUCT({_sql_string(key)} AS bucket_key, {_sql_string(label)} AS bucket_label, {order} AS sort_order)"
+        for order, (key, label, _) in enumerate(buckets, 1)
+    )
+    condition_case = "\n          ".join(
+        f"WHEN b.bucket_key = {_sql_string(key)} THEN {condition}"
+        for key, _, condition in buckets
+    )
+    return f"""
+    WITH filtered AS (
+      SELECT
+        f.Map,
+        SAFE_CAST(f.Empty_hexes AS INT64) AS empty_hexes,
+        SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+    ),
+    bucketed AS (
+      SELECT
+        filtered.*,
+        b.bucket_key,
+        b.bucket_label,
+        b.sort_order,
+        CASE
+          {condition_case}
+          ELSE FALSE
+        END AS bucket_condition
+      FROM filtered
+      CROSS JOIN UNNEST([
+        {bucket_structs}
+      ]) AS b
+    )
+    SELECT
+      bucket_key,
+      bucket_label,
+      sort_order,
+      ROUND(AVG(IF(bucket_condition, elo_delta, NULL)), 3) AS avg,
+      COUNTIF(bucket_condition) AS count_avg,
+      COUNTIF(empty_hexes IS NOT NULL) AS denom_avg,
+      AVG(IF(bucket_condition, elo_delta, NULL)) AS avg_ci_mean,
+      STDDEV_SAMP(IF(bucket_condition, elo_delta, NULL)) AS avg_ci_sd,
+      COUNTIF(bucket_condition AND elo_delta IS NOT NULL) AS avg_ci_n,
+      {map_select_sql}
+    FROM bucketed
+    GROUP BY bucket_key, bucket_label, sort_order
+    ORDER BY sort_order
+    """
+
+
+PREDICTOR_GENERAL_FIELDS = [
+    ("More conservation", "Conservation"),
+    ("More appeal", "Appeal"),
+    ("More reputation", "Reputation"),
+    ("More conservation projects", "Conservation_project_association_tasks"),
+    ("More release projects", "Released_animals"),
+    ("More money gained", "Money_gained"),
+    ("More money gained through income", "Money_gained_through_income"),
+    ("More money spent on animals", "Money_spent_on_animals"),
+    ("More money spent on enclosures", "Money_spent_on_enclosures"),
+    ("More money spent on donations", "Money_spent_on_donations"),
+    ("More money spent on playing from range", "Money_spent_for_playing_cards_from_reputation_range"),
+    ("More breaks triggered", "Number_of_breaks_triggered"),
+    ("More sponsors played", "Played_sponsors"),
+    ("More animals played", "Played_animals"),
+    ("More cards drawn", "Cards_drawn_from_deck"),
+    ("More cards snapped", "Snapped_cards"),
+    ("More cards discarded", "Discarded_cards"),
+    ("More Animals actions", "Animals_actions"),
+    ("More Association actions", "Association_actions"),
+    ("More Build actions", "Build_actions"),
+    ("More Cards actions", "Cards_actions"),
+    ("More Sponsors actions", "Sponsors_actions"),
+    ("More determinations", "determinations"),
+    ("More X-backs", "X_Tokens_gained_instead_of_action"),
+    ("More X-tokens gained", "X_Tokens_gained"),
+    ("More X-tokens used", "X_Tokens_used"),
+    ("More empty hexes", "Empty_hexes"),
+    ("More pavilions built", "Built_pavilions"),
+    ("More kiosks built", "Built_kiosks"),
+    ("More special buildings", "Built_unique_buildings"),
+]
+
+PREDICTOR_SPECIFIC_CONDITIONS = [
+    "Triggered endgame",
+    "More endgame points",
+    "More endgame CP",
+    "More ingame CP",
+    "More reefers",
+    "Round 1: Release",
+    "Round 1: Upgrade",
+    "Round 1: Humphead Wrasse",
+    "Round 1/2: New Zealand Fur Seal",
+    "First to 5 CP",
+    "First to 5 CP (with exactly one university/partner zoo bonus)",
+    "First to 8 CP",
+    "First to 8 CP (with exactly one university/partner zoo bonus)",
+    "No sponsor in starting hand",
+    "No project in starting hand",
+]
+
+
+def _build_predictors_query(where_sql, predictors_view):
+    if predictors_view == PREDICTORS_VIEW_SPECIFIC:
+        rows = "\n      UNION ALL\n      ".join(
+            f"SELECT {idx} AS sort_order, {_sql_string(label)} AS condition, NULL AS delta, 0 AS count, NULL AS delta_ci_mean, NULL AS delta_ci_sd, 0 AS delta_ci_n"
+            for idx, label in enumerate(PREDICTOR_SPECIFIC_CONDITIONS, 1)
+        )
+        return rows
+    fields = ICON_FIELDS if predictors_view == PREDICTORS_VIEW_ICON else PREDICTOR_GENERAL_FIELDS
+    condition_structs = ",\n        ".join(
+        f"STRUCT({idx} AS sort_order, {_sql_string(label)} AS condition, {_sql_string(field)} AS field_name)"
+        for idx, (label, field) in enumerate(fields, 1)
+    )
+    return f"""
+    WITH scoped AS (
+      SELECT f.*
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+        AND COALESCE(f.table_conceded, 0) = 0
+    ),
+    paired AS (
+      SELECT
+        me.table_id,
+        me.player,
+        me.elo_delta,
+        config.sort_order,
+        config.condition,
+        CASE config.field_name
+          {" ".join(f"WHEN {_sql_string(field)} THEN SAFE_CAST(me.{field} AS FLOAT64) > SAFE_CAST(opp.{field} AS FLOAT64)" for _, field in fields)}
+          ELSE FALSE
+        END AS condition_met
+      FROM scoped me
+      JOIN scoped opp
+        ON me.table_id = opp.table_id
+       AND me.player != opp.player
+      CROSS JOIN UNNEST([
+        {condition_structs}
+      ]) AS config
+    )
+    SELECT
+      sort_order,
+      condition,
+      ROUND(AVG(IF(condition_met, elo_delta, NULL)), 3) AS delta,
+      COUNTIF(condition_met) AS count,
+      AVG(IF(condition_met, elo_delta, NULL)) AS delta_ci_mean,
+      STDDEV_SAMP(IF(condition_met, elo_delta, NULL)) AS delta_ci_sd,
+      COUNTIF(condition_met AND elo_delta IS NOT NULL) AS delta_ci_n
+    FROM paired
+    GROUP BY sort_order, condition
+    ORDER BY sort_order
+    """
+
+
+def _build_actions_starting_position_query(where_sql):
+    return f"""
+    WITH base_logs AS (
+      SELECT *
+      FROM `{PREPARED_LOGS_TABLE}`
+      WHERE {where_sql}
+    ),
+    log_filtered AS (
+      SELECT l.*, f.table_conceded, f.Starting_position_in_first_round
+      FROM base_logs l
+      JOIN `{PREPARED_FULL_STATS_TABLE}` f
+        ON l.table_id = f.table_id AND l.player = f.player
+      WHERE COALESCE(f.table_conceded, 0) = 0
+    ),
+    action_observations AS (
+      SELECT 'strength' AS section, 1 AS sort_order, 'Association' AS label, SAFE_CAST(association_starting_strength AS INT64) AS bucket, elo_delta FROM log_filtered
+      UNION ALL SELECT 'strength', 2, 'Build', SAFE_CAST(build_starting_strength AS INT64), elo_delta FROM log_filtered
+      UNION ALL SELECT 'strength', 3, 'Cards', SAFE_CAST(cards_starting_strength AS INT64), elo_delta FROM log_filtered
+      UNION ALL SELECT 'strength', 4, 'Sponsors', SAFE_CAST(sponsors_starting_strength AS INT64), elo_delta FROM log_filtered
+    ),
+    strength AS (
+      SELECT
+        section, sort_order, label,
+        ROUND(AVG(IF(bucket = 2, elo_delta, NULL)), 3) AS delta_2,
+        COUNTIF(bucket = 2) AS count_2,
+        AVG(IF(bucket = 2, elo_delta, NULL)) AS delta_2_ci_mean,
+        STDDEV_SAMP(IF(bucket = 2, elo_delta, NULL)) AS delta_2_ci_sd,
+        COUNTIF(bucket = 2 AND elo_delta IS NOT NULL) AS delta_2_ci_n,
+        ROUND(AVG(IF(bucket = 3, elo_delta, NULL)), 3) AS delta_3,
+        COUNTIF(bucket = 3) AS count_3,
+        AVG(IF(bucket = 3, elo_delta, NULL)) AS delta_3_ci_mean,
+        STDDEV_SAMP(IF(bucket = 3, elo_delta, NULL)) AS delta_3_ci_sd,
+        COUNTIF(bucket = 3 AND elo_delta IS NOT NULL) AS delta_3_ci_n,
+        ROUND(AVG(IF(bucket = 4, elo_delta, NULL)), 3) AS delta_4,
+        COUNTIF(bucket = 4) AS count_4,
+        AVG(IF(bucket = 4, elo_delta, NULL)) AS delta_4_ci_mean,
+        STDDEV_SAMP(IF(bucket = 4, elo_delta, NULL)) AS delta_4_ci_sd,
+        COUNTIF(bucket = 4 AND elo_delta IS NOT NULL) AS delta_4_ci_n,
+        ROUND(AVG(IF(bucket = 5, elo_delta, NULL)), 3) AS delta_5,
+        COUNTIF(bucket = 5) AS count_5,
+        AVG(IF(bucket = 5, elo_delta, NULL)) AS delta_5_ci_mean,
+        STDDEV_SAMP(IF(bucket = 5, elo_delta, NULL)) AS delta_5_ci_sd,
+        COUNTIF(bucket = 5 AND elo_delta IS NOT NULL) AS delta_5_ci_n
+      FROM action_observations
+      GROUP BY section, sort_order, label
+    ),
+    paired AS (
+      SELECT
+        me.*,
+        opp.association_starting_strength AS opp_association_starting_strength,
+        opp.build_starting_strength AS opp_build_starting_strength,
+        opp.cards_starting_strength AS opp_cards_starting_strength,
+        opp.sponsors_starting_strength AS opp_sponsors_starting_strength
+      FROM log_filtered me
+      JOIN log_filtered opp
+        ON me.table_id = opp.table_id
+       AND me.player != opp.player
+    ),
+    comparison_conditions AS (
+      SELECT 1 AS sort_order, 'Higher Association strength' AS label,
+        SAFE_CAST(association_starting_strength AS INT64) > SAFE_CAST(opp_association_starting_strength AS INT64) AS condition_met,
+        elo_delta FROM paired
+      UNION ALL SELECT 2, 'Higher Build strength',
+        SAFE_CAST(build_starting_strength AS INT64) > SAFE_CAST(opp_build_starting_strength AS INT64), elo_delta FROM paired
+      UNION ALL SELECT 3, 'Higher Cards strength',
+        SAFE_CAST(cards_starting_strength AS INT64) > SAFE_CAST(opp_cards_starting_strength AS INT64), elo_delta FROM paired
+      UNION ALL SELECT 4, 'Higher Sponsors strength',
+        SAFE_CAST(sponsors_starting_strength AS INT64) > SAFE_CAST(opp_sponsors_starting_strength AS INT64), elo_delta FROM paired
+      UNION ALL SELECT 5, 'First player',
+        LOWER(TRIM(CAST(Starting_position_in_first_round AS STRING))) = 'first player', elo_delta FROM log_filtered
+    ),
+    comparison AS (
+      SELECT
+        'comparison' AS section,
+        sort_order,
+        label,
+        ROUND(AVG(IF(condition_met, elo_delta, NULL)), 3) AS delta,
+        COUNTIF(condition_met) AS count,
+        AVG(IF(condition_met, elo_delta, NULL)) AS delta_ci_mean,
+        STDDEV_SAMP(IF(condition_met, elo_delta, NULL)) AS delta_ci_sd,
+        COUNTIF(condition_met AND elo_delta IS NOT NULL) AS delta_ci_n
+      FROM comparison_conditions
+      GROUP BY sort_order, label
+    )
+    SELECT * FROM strength
+    UNION ALL
+    SELECT
+      section, sort_order, label,
+      delta AS delta_2, count AS count_2, delta_ci_mean AS delta_2_ci_mean,
+      delta_ci_sd AS delta_2_ci_sd, delta_ci_n AS delta_2_ci_n,
+      NULL AS delta_3, NULL AS count_3, NULL AS delta_3_ci_mean, NULL AS delta_3_ci_sd, NULL AS delta_3_ci_n,
+      NULL AS delta_4, NULL AS count_4, NULL AS delta_4_ci_mean, NULL AS delta_4_ci_sd, NULL AS delta_4_ci_n,
+      NULL AS delta_5, NULL AS count_5, NULL AS delta_5_ci_mean, NULL AS delta_5_ci_sd, NULL AS delta_5_ci_n
+    FROM comparison
+    ORDER BY section DESC, sort_order
+    """
+
+
+def _build_actions_upgrades_query(where_sql):
+    return f"""
+    WITH scoped AS (
+      SELECT f.*
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+        AND COALESCE(f.table_conceded, 0) = 0
+    ),
+    number_rows AS (
+      SELECT
+        'number' AS section,
+        SAFE_CAST(count_value AS INT64) + 1 AS sort_order,
+        CAST(count_value AS STRING) AS label,
+        ROUND(AVG(IF(SAFE_CAST(Upgraded_action_cards AS INT64) = count_value, elo_delta, NULL)), 3) AS delta,
+        COUNTIF(SAFE_CAST(Upgraded_action_cards AS INT64) = count_value) AS count,
+        COUNT(Upgraded_action_cards) AS denominator,
+        AVG(IF(SAFE_CAST(Upgraded_action_cards AS INT64) = count_value, elo_delta, NULL)) AS delta_ci_mean,
+        STDDEV_SAMP(IF(SAFE_CAST(Upgraded_action_cards AS INT64) = count_value, elo_delta, NULL)) AS delta_ci_sd,
+        COUNTIF(SAFE_CAST(Upgraded_action_cards AS INT64) = count_value AND elo_delta IS NOT NULL) AS delta_ci_n
+      FROM scoped
+      CROSS JOIN UNNEST([0, 1, 2, 3, 4, 5]) AS count_value
+      GROUP BY count_value
+    ),
+    upgrade_config AS (
+      SELECT * FROM UNNEST([
+        STRUCT(1 AS sort_order, 'Animals' AS label, 'Upgraded_Animals_action_card' AS field_name),
+        STRUCT(2, 'Association', 'Upgraded_Association_action_card'),
+        STRUCT(3, 'Build', 'Upgraded_Build_action_card'),
+        STRUCT(4, 'Cards', 'Upgraded_Cards_action_card'),
+        STRUCT(5, 'Sponsors', 'Upgraded_Sponsors_action_card')
+      ])
+    ),
+    upgrade_rows AS (
+      SELECT
+        'upgrade' AS section,
+        c.sort_order,
+        c.label,
+        ROUND(AVG(IF(
+          CASE c.field_name
+            WHEN 'Upgraded_Animals_action_card' THEN COALESCE(Upgraded_Animals_action_card, FALSE)
+            WHEN 'Upgraded_Association_action_card' THEN COALESCE(Upgraded_Association_action_card, FALSE)
+            WHEN 'Upgraded_Build_action_card' THEN COALESCE(Upgraded_Build_action_card, FALSE)
+            WHEN 'Upgraded_Cards_action_card' THEN COALESCE(Upgraded_Cards_action_card, FALSE)
+            WHEN 'Upgraded_Sponsors_action_card' THEN COALESCE(Upgraded_Sponsors_action_card, FALSE)
+            ELSE FALSE
+          END, elo_delta, NULL
+        )), 3) AS delta,
+        COUNTIF(
+          CASE c.field_name
+            WHEN 'Upgraded_Animals_action_card' THEN COALESCE(Upgraded_Animals_action_card, FALSE)
+            WHEN 'Upgraded_Association_action_card' THEN COALESCE(Upgraded_Association_action_card, FALSE)
+            WHEN 'Upgraded_Build_action_card' THEN COALESCE(Upgraded_Build_action_card, FALSE)
+            WHEN 'Upgraded_Cards_action_card' THEN COALESCE(Upgraded_Cards_action_card, FALSE)
+            WHEN 'Upgraded_Sponsors_action_card' THEN COALESCE(Upgraded_Sponsors_action_card, FALSE)
+            ELSE FALSE
+          END
+        ) AS count,
+        COUNT(*) AS denominator,
+        AVG(IF(
+          CASE c.field_name
+            WHEN 'Upgraded_Animals_action_card' THEN COALESCE(Upgraded_Animals_action_card, FALSE)
+            WHEN 'Upgraded_Association_action_card' THEN COALESCE(Upgraded_Association_action_card, FALSE)
+            WHEN 'Upgraded_Build_action_card' THEN COALESCE(Upgraded_Build_action_card, FALSE)
+            WHEN 'Upgraded_Cards_action_card' THEN COALESCE(Upgraded_Cards_action_card, FALSE)
+            WHEN 'Upgraded_Sponsors_action_card' THEN COALESCE(Upgraded_Sponsors_action_card, FALSE)
+            ELSE FALSE
+          END, elo_delta, NULL
+        )) AS delta_ci_mean,
+        STDDEV_SAMP(IF(
+          CASE c.field_name
+            WHEN 'Upgraded_Animals_action_card' THEN COALESCE(Upgraded_Animals_action_card, FALSE)
+            WHEN 'Upgraded_Association_action_card' THEN COALESCE(Upgraded_Association_action_card, FALSE)
+            WHEN 'Upgraded_Build_action_card' THEN COALESCE(Upgraded_Build_action_card, FALSE)
+            WHEN 'Upgraded_Cards_action_card' THEN COALESCE(Upgraded_Cards_action_card, FALSE)
+            WHEN 'Upgraded_Sponsors_action_card' THEN COALESCE(Upgraded_Sponsors_action_card, FALSE)
+            ELSE FALSE
+          END, elo_delta, NULL
+        )) AS delta_ci_sd,
+        COUNTIF(
+          CASE c.field_name
+            WHEN 'Upgraded_Animals_action_card' THEN COALESCE(Upgraded_Animals_action_card, FALSE)
+            WHEN 'Upgraded_Association_action_card' THEN COALESCE(Upgraded_Association_action_card, FALSE)
+            WHEN 'Upgraded_Build_action_card' THEN COALESCE(Upgraded_Build_action_card, FALSE)
+            WHEN 'Upgraded_Cards_action_card' THEN COALESCE(Upgraded_Cards_action_card, FALSE)
+            WHEN 'Upgraded_Sponsors_action_card' THEN COALESCE(Upgraded_Sponsors_action_card, FALSE)
+            ELSE FALSE
+          END AND elo_delta IS NOT NULL
+        ) AS delta_ci_n
+      FROM scoped
+      CROSS JOIN upgrade_config c
+      GROUP BY c.sort_order, c.label
+    )
+    SELECT * FROM number_rows
+    UNION ALL SELECT * FROM upgrade_rows
+    ORDER BY section, sort_order
+    """
+
+
+def _build_actions_upgrade_order_query(where_sql):
+    order_slots = [("1", "first_upgrade"), ("2", "second_upgrade"), ("3", "third_upgrade"), ("4", "fourth_upgrade")]
+    actions = ["Animals", "Association", "Build", "Cards", "Sponsors"]
+    aggregates = []
+    for suffix, field in order_slots:
+        aggregates.extend([
+            f"ROUND(AVG(IF({field} = action_name, elo_delta, NULL)), 3) AS delta_{suffix}",
+            f"COUNTIF({field} = action_name) AS count_{suffix}",
+            f"AVG(IF({field} = action_name, elo_delta, NULL)) AS delta_{suffix}_ci_mean",
+            f"STDDEV_SAMP(IF({field} = action_name, elo_delta, NULL)) AS delta_{suffix}_ci_sd",
+            f"COUNTIF({field} = action_name AND elo_delta IS NOT NULL) AS delta_{suffix}_ci_n",
+        ])
+    aggregate_sql = ",\n        ".join(aggregates)
+    action_structs = ",\n        ".join(
+        f"STRUCT({idx} AS sort_order, {_sql_string(action)} AS action_name)"
+        for idx, action in enumerate(actions, 1)
+    )
+    return f"""
+    WITH base_logs AS (
+      SELECT *
+      FROM `{PREPARED_LOGS_TABLE}`
+      WHERE {where_sql}
+    ),
+    scoped AS (
+      SELECT l.*, f.table_conceded
+      FROM base_logs l
+      JOIN `{PREPARED_FULL_STATS_TABLE}` f
+        ON l.table_id = f.table_id AND l.player = f.player
+      WHERE COALESCE(f.table_conceded, 0) = 0
+    ),
+    action_rows AS (
+      SELECT *
+      FROM scoped
+      CROSS JOIN UNNEST([
+        {action_structs}
+      ])
+    )
+    SELECT
+      sort_order,
+      action_name AS label,
+      COUNTIF(first_upgrade = action_name OR second_upgrade = action_name OR third_upgrade = action_name OR fourth_upgrade = action_name) AS denominator,
+      {aggregate_sql}
+    FROM action_rows
+    GROUP BY sort_order, action_name
+    ORDER BY sort_order
+    """
+
+
+def _build_actions_upgrades_per_map_query(where_sql):
+    map_selects = []
+    for map_meta in ALL_MAPS_FOR_METRICS[:15]:
+        key = map_meta["key"]
+        full = _sql_string(map_meta["full"])
+        map_selects.extend([
+            f"ROUND(AVG(IF(Map = {full} AND upgraded, elo_delta, NULL)), 3) AS {key}",
+            f"COUNTIF(Map = {full} AND upgraded) AS count_{key}",
+            f"COUNTIF(Map = {full}) AS denom_{key}",
+            f"AVG(IF(Map = {full} AND upgraded, elo_delta, NULL)) AS {key}_ci_mean",
+            f"STDDEV_SAMP(IF(Map = {full} AND upgraded, elo_delta, NULL)) AS {key}_ci_sd",
+            f"COUNTIF(Map = {full} AND upgraded AND elo_delta IS NOT NULL) AS {key}_ci_n",
+        ])
+    map_select_sql = ",\n        ".join(map_selects)
+    return f"""
+    WITH scoped AS (
+      SELECT f.*
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+        AND COALESCE(f.table_conceded, 0) = 0
+    ),
+    observations AS (
+      SELECT 1 AS sort_order, 'Animals' AS label, Map, elo_delta, COALESCE(Upgraded_Animals_action_card, FALSE) AS upgraded FROM scoped
+      UNION ALL SELECT 2, 'Association', Map, elo_delta, COALESCE(Upgraded_Association_action_card, FALSE) FROM scoped
+      UNION ALL SELECT 3, 'Build', Map, elo_delta, COALESCE(Upgraded_Build_action_card, FALSE) FROM scoped
+      UNION ALL SELECT 4, 'Cards', Map, elo_delta, COALESCE(Upgraded_Cards_action_card, FALSE) FROM scoped
+      UNION ALL SELECT 5, 'Sponsors', Map, elo_delta, COALESCE(Upgraded_Sponsors_action_card, FALSE) FROM scoped
+    )
+    SELECT
+      sort_order,
+      label,
+      ROUND(AVG(IF(upgraded, elo_delta, NULL)), 3) AS avg,
+      COUNTIF(upgraded) AS count_avg,
+      COUNT(*) AS denom_avg,
+      AVG(IF(upgraded, elo_delta, NULL)) AS avg_ci_mean,
+      STDDEV_SAMP(IF(upgraded, elo_delta, NULL)) AS avg_ci_sd,
+      COUNTIF(upgraded AND elo_delta IS NOT NULL) AS avg_ci_n,
+      {map_select_sql}
+    FROM observations
+    GROUP BY sort_order, label
+    ORDER BY sort_order
+    """
+
+
+def _build_actions_query(where_sql, actions_view):
+    if actions_view == ACTIONS_VIEW_UPGRADES:
+        return _build_actions_upgrades_query(where_sql)
+    if actions_view == ACTIONS_VIEW_UPGRADE_ORDER:
+        return _build_actions_upgrade_order_query(where_sql)
+    if actions_view == ACTIONS_VIEW_UPGRADES_PER_MAP:
+        return _build_actions_upgrades_per_map_query(where_sql)
+    return _build_actions_starting_position_query(where_sql)
 
 
 def _sponsor_cp_config_sql():
@@ -2736,6 +3333,9 @@ def _query_card_stats(
     maps_view=MAPS_VIEW_METRICS,
     sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP,
     combinations_view=COMBINATIONS_VIEW_CARD_CARD,
+    build_view=BUILD_VIEW_ENCLOSURES,
+    predictors_view=PREDICTORS_VIEW_GENERAL,
+    actions_view=ACTIONS_VIEW_STARTING_POSITION,
     use_query_cache=True,
 ):
     if stats_page == STATS_PAGE_HOME:
@@ -2783,6 +3383,48 @@ def _query_card_stats(
             None,
         )
         query = _build_icons_query(where_sql)
+    elif stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_COVERED_HEXES:
+        where_sql, query_parameters = _build_full_sample_where_sql(
+            is_mw,
+            selected_maps,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            end_game_triggered,
+        )
+        query = _build_build_covered_hexes_query(where_sql)
+    elif stats_page == STATS_PAGE_PREDICTORS:
+        where_sql, query_parameters = _build_full_sample_where_sql(
+            is_mw,
+            selected_maps,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            end_game_triggered,
+        )
+        query = _build_predictors_query(where_sql, predictors_view)
+    elif stats_page == STATS_PAGE_ACTIONS and actions_view in (
+        ACTIONS_VIEW_UPGRADES,
+        ACTIONS_VIEW_UPGRADES_PER_MAP,
+    ):
+        where_sql, query_parameters = _build_full_sample_where_sql(
+            is_mw,
+            selected_maps,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            end_game_triggered,
+        )
+        query = _build_actions_query(where_sql, actions_view)
     else:
         where_sql, query_parameters = _build_where_sql(
             is_mw,
@@ -2798,7 +3440,10 @@ def _query_card_stats(
     if stats_page == STATS_PAGE_SPONSOR_ENDGAMES:
         query = _build_sponsor_endgames_query(where_sql, sponsor_endgames_view)
     if stats_page == STATS_PAGE_BUILD:
-        query = _build_build_enclosures_query(where_sql)
+        if build_view == BUILD_VIEW_ENCLOSURES:
+            query = _build_build_enclosures_query(where_sql)
+    if stats_page == STATS_PAGE_ACTIONS:
+        query = _build_actions_query(where_sql, actions_view)
     if stats_page == STATS_PAGE_COMBINATIONS:
         query = _build_combinations_query(
             where_sql,
@@ -2903,22 +3548,113 @@ def _query_card_stats(
 
     if stats_page == STATS_PAGE_BUILD:
         schema_field_names = {field.name for field in results.schema}
+        if build_view == BUILD_VIEW_COVERED_HEXES:
+            for row in results:
+                item = {
+                    "bucket_key": row.bucket_key,
+                    "bucket_label": row.bucket_label,
+                    "sort_order": row.sort_order,
+                    "avg": row.avg,
+                    "count_avg": row.count_avg,
+                    "denom_avg": row.denom_avg,
+                }
+                _attach_ci95(item, row, schema_field_names, "avg")
+                for map_meta in ALL_MAPS_FOR_METRICS[:15]:
+                    key = map_meta["key"]
+                    item[key] = getattr(row, key, None)
+                    item[f"count_{key}"] = getattr(row, f"count_{key}", 0)
+                    item[f"denom_{key}"] = getattr(row, f"denom_{key}", 0)
+                    _attach_ci95(item, row, schema_field_names, key)
+                rows.append(item)
+        else:
+            for row in results:
+                item = {
+                    "enclosure": row.enclosure,
+                    "category": row.category,
+                    "n_total": row.n_total,
+                    "empty_denominator": row.empty_denominator,
+                }
+                for prefix in (
+                    "delta_0", "delta_1", "delta_2", "delta_3",
+                    "delta_4", "delta_5_plus", "delta_empty",
+                ):
+                    item[prefix] = getattr(row, prefix, None)
+                    item[prefix.replace("delta_", "count_")] = getattr(
+                        row, prefix.replace("delta_", "count_"), 0
+                    )
+                    _attach_ci95(item, row, schema_field_names, prefix)
+                rows.append(item)
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+
+    if stats_page == STATS_PAGE_PREDICTORS:
+        schema_field_names = {field.name for field in results.schema}
         for row in results:
             item = {
-                "enclosure": row.enclosure,
-                "category": row.category,
-                "n_total": row.n_total,
-                "empty_denominator": row.empty_denominator,
+                "sort_order": row.sort_order,
+                "condition": row.condition,
+                "delta": row.delta,
+                "count": row.count,
             }
+            _attach_ci95(item, row, schema_field_names, "delta")
+            rows.append(item)
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+
+    if stats_page == STATS_PAGE_ACTIONS:
+        schema_field_names = {field.name for field in results.schema}
+        for row in results:
+            item = {
+                "sort_order": getattr(row, "sort_order", None),
+                "label": getattr(row, "label", None),
+            }
+            if "section" in schema_field_names:
+                item["section"] = row.section
+            if "denominator" in schema_field_names:
+                item["denominator"] = row.denominator
+            if "count" in schema_field_names:
+                item["count"] = row.count
             for prefix in (
-                "delta_0", "delta_1", "delta_2", "delta_3",
-                "delta_4", "delta_5_plus", "delta_empty",
+                "delta", "delta_1", "delta_2", "delta_3", "delta_4", "delta_5",
+                "map_1a", "map_2a", "map_3a", "map_4a", "map_5a",
+                "map_6a", "map_7a", "map_8a", "map_9", "map_10",
+                "map_11", "map_12", "map_13", "map_14", "map_t1", "avg",
             ):
-                item[prefix] = getattr(row, prefix, None)
-                item[prefix.replace("delta_", "count_")] = getattr(
-                    row, prefix.replace("delta_", "count_"), 0
-                )
-                _attach_ci95(item, row, schema_field_names, prefix)
+                if prefix in schema_field_names:
+                    item[prefix] = getattr(row, prefix, None)
+                    count_field = f"count_{prefix}"
+                    denom_field = f"denom_{prefix}"
+                    if count_field in schema_field_names:
+                        item[count_field] = getattr(row, count_field, 0)
+                    if denom_field in schema_field_names:
+                        item[denom_field] = getattr(row, denom_field, 0)
+                    _attach_ci95(item, row, schema_field_names, prefix)
             rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
@@ -3139,6 +3875,9 @@ def _refresh_default_snapshot_from_prepared(
     maps_view=MAPS_VIEW_METRICS,
     sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP,
     combinations_view=COMBINATIONS_VIEW_CARD_CARD,
+    build_view=BUILD_VIEW_ENCLOSURES,
+    predictors_view=PREDICTORS_VIEW_GENERAL,
+    actions_view=ACTIONS_VIEW_STARTING_POSITION,
     end_game_triggered_override=None,
     cache_blob_override=None,
 ):
@@ -3167,6 +3906,9 @@ def _refresh_default_snapshot_from_prepared(
         maps_view=maps_view,
         sponsor_endgames_view=sponsor_endgames_view,
         combinations_view=combinations_view,
+        build_view=build_view,
+        predictors_view=predictors_view,
+        actions_view=actions_view,
         use_query_cache=False,
     )
     payload = {
@@ -3181,7 +3923,14 @@ def _refresh_default_snapshot_from_prepared(
         "combinations_view": (
             combinations_view if stats_page == STATS_PAGE_COMBINATIONS else None
         ),
-        "maps": ALL_MAPS_FOR_METRICS if stats_page == STATS_PAGE_MAPS else None,
+        "build_view": build_view if stats_page == STATS_PAGE_BUILD else None,
+        "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
+        "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
+        "maps": (
+            ALL_MAPS_FOR_METRICS
+            if stats_page in (STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS)
+            else None
+        ),
         "data": rows,
         "cache_status": "refreshed",
         "source": (
@@ -3193,6 +3942,12 @@ def _refresh_default_snapshot_from_prepared(
             if stats_page == STATS_PAGE_SPONSOR_ENDGAMES
             else f"{stats_page}_{combinations_view}_default_snapshot"
             if stats_page == STATS_PAGE_COMBINATIONS
+            else f"{stats_page}_{build_view}_default_snapshot"
+            if stats_page == STATS_PAGE_BUILD
+            else f"{stats_page}_{predictors_view}_default_snapshot"
+            if stats_page == STATS_PAGE_PREDICTORS
+            else f"{stats_page}_{actions_view}_default_snapshot"
+            if stats_page == STATS_PAGE_ACTIONS
             else f"{stats_page}_default_snapshot"
         ),
         "is_mw": int(is_mw),
@@ -3210,7 +3965,8 @@ def _refresh_default_snapshot_from_prepared(
         if cache_blob_override
         else _write_cached_snapshot(
             is_mw, payload, stats_page, endgames_view, maps_view,
-            sponsor_endgames_view, combinations_view
+            sponsor_endgames_view, combinations_view,
+            build_view, predictors_view, actions_view
         )
     )
     return {
@@ -3225,6 +3981,9 @@ def _refresh_default_snapshot_from_prepared(
         "combinations_view": (
             combinations_view if stats_page == STATS_PAGE_COMBINATIONS else None
         ),
+        "build_view": build_view if stats_page == STATS_PAGE_BUILD else None,
+        "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
+        "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
         "cache_status": "refreshed" if cache_write_ok else "cache_write_failed",
         "rows": len(rows),
         "total_ms": payload["total_ms"],
@@ -3291,6 +4050,88 @@ def _run_daily_refresh():
         0, STATS_PAGE_BUILD, end_game_triggered_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/build/enclosures/frequency/default-base.json",
     )
+    build_covered_delta_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_BUILD, build_view=BUILD_VIEW_COVERED_HEXES
+    )
+    build_covered_delta_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_BUILD, build_view=BUILD_VIEW_COVERED_HEXES
+    )
+    build_covered_frequency_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_BUILD, build_view=BUILD_VIEW_COVERED_HEXES,
+        end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/build/covered_hexes/frequency/default-mw.json",
+    )
+    build_covered_frequency_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_BUILD, build_view=BUILD_VIEW_COVERED_HEXES,
+        end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/build/covered_hexes/frequency/default-base.json",
+    )
+    predictors_general_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_GENERAL
+    )
+    predictors_general_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_GENERAL
+    )
+    predictors_icon_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_ICON
+    )
+    predictors_icon_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_ICON
+    )
+    actions_starting_position_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_STARTING_POSITION
+    )
+    actions_starting_position_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_STARTING_POSITION
+    )
+    actions_upgrades_delta_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES
+    )
+    actions_upgrades_delta_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES
+    )
+    actions_upgrades_frequency_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES,
+        end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades/frequency/default-mw.json",
+    )
+    actions_upgrades_frequency_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES,
+        end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades/frequency/default-base.json",
+    )
+    actions_upgrade_order_delta_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER
+    )
+    actions_upgrade_order_delta_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER
+    )
+    actions_upgrade_order_frequency_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER,
+        end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrade_order/frequency/default-mw.json",
+    )
+    actions_upgrade_order_frequency_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER,
+        end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrade_order/frequency/default-base.json",
+    )
+    actions_upgrades_per_map_delta_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_PER_MAP
+    )
+    actions_upgrades_per_map_delta_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_PER_MAP
+    )
+    actions_upgrades_per_map_frequency_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_PER_MAP,
+        end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_per_map/frequency/default-mw.json",
+    )
+    actions_upgrades_per_map_frequency_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_PER_MAP,
+        end_game_triggered_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_per_map/frequency/default-base.json",
+    )
     combinations_card_card_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_CARD
     )
@@ -3323,6 +4164,17 @@ def _run_daily_refresh():
         sponsor_endgames_appeal_mw, sponsor_endgames_appeal_base,
         icons_mw, icons_base, build_delta_mw, build_delta_base,
         build_frequency_mw, build_frequency_base,
+        build_covered_delta_mw, build_covered_delta_base,
+        build_covered_frequency_mw, build_covered_frequency_base,
+        predictors_general_mw, predictors_general_base,
+        predictors_icon_mw, predictors_icon_base,
+        actions_starting_position_mw, actions_starting_position_base,
+        actions_upgrades_delta_mw, actions_upgrades_delta_base,
+        actions_upgrades_frequency_mw, actions_upgrades_frequency_base,
+        actions_upgrade_order_delta_mw, actions_upgrade_order_delta_base,
+        actions_upgrade_order_frequency_mw, actions_upgrade_order_frequency_base,
+        actions_upgrades_per_map_delta_mw, actions_upgrades_per_map_delta_base,
+        actions_upgrades_per_map_frequency_mw, actions_upgrades_per_map_frequency_base,
         combinations_card_card_mw, combinations_card_card_base,
         combinations_card_round_mw, combinations_card_round_base,
         combinations_card_map_mw, combinations_card_map_base,
@@ -3365,6 +4217,28 @@ def _run_daily_refresh():
         "build_delta_base": build_delta_base,
         "build_frequency_mw": build_frequency_mw,
         "build_frequency_base": build_frequency_base,
+        "build_covered_delta_mw": build_covered_delta_mw,
+        "build_covered_delta_base": build_covered_delta_base,
+        "build_covered_frequency_mw": build_covered_frequency_mw,
+        "build_covered_frequency_base": build_covered_frequency_base,
+        "predictors_general_mw": predictors_general_mw,
+        "predictors_general_base": predictors_general_base,
+        "predictors_icon_mw": predictors_icon_mw,
+        "predictors_icon_base": predictors_icon_base,
+        "actions_starting_position_mw": actions_starting_position_mw,
+        "actions_starting_position_base": actions_starting_position_base,
+        "actions_upgrades_delta_mw": actions_upgrades_delta_mw,
+        "actions_upgrades_delta_base": actions_upgrades_delta_base,
+        "actions_upgrades_frequency_mw": actions_upgrades_frequency_mw,
+        "actions_upgrades_frequency_base": actions_upgrades_frequency_base,
+        "actions_upgrade_order_delta_mw": actions_upgrade_order_delta_mw,
+        "actions_upgrade_order_delta_base": actions_upgrade_order_delta_base,
+        "actions_upgrade_order_frequency_mw": actions_upgrade_order_frequency_mw,
+        "actions_upgrade_order_frequency_base": actions_upgrade_order_frequency_base,
+        "actions_upgrades_per_map_delta_mw": actions_upgrades_per_map_delta_mw,
+        "actions_upgrades_per_map_delta_base": actions_upgrades_per_map_delta_base,
+        "actions_upgrades_per_map_frequency_mw": actions_upgrades_per_map_frequency_mw,
+        "actions_upgrades_per_map_frequency_base": actions_upgrades_per_map_frequency_base,
         "combinations_card_card_mw": combinations_card_card_mw,
         "combinations_card_card_base": combinations_card_card_base,
         "combinations_card_round_mw": combinations_card_round_mw,
@@ -3443,6 +4317,21 @@ def get_card_stats(request):
             if stats_page == STATS_PAGE_COMBINATIONS
             else COMBINATIONS_VIEW_CARD_CARD
         )
+        build_view = (
+            _parse_build_view(params.get("build_view"))
+            if stats_page == STATS_PAGE_BUILD
+            else BUILD_VIEW_ENCLOSURES
+        )
+        predictors_view = (
+            _parse_predictors_view(params.get("predictors_view"))
+            if stats_page == STATS_PAGE_PREDICTORS
+            else PREDICTORS_VIEW_GENERAL
+        )
+        actions_view = (
+            _parse_actions_view(params.get("actions_view"))
+            if stats_page == STATS_PAGE_ACTIONS
+            else ACTIONS_VIEW_STARTING_POSITION
+        )
         is_mw = _parse_is_mw(params.get("is_mw", 1))
         default_elo_min = None if stats_page == STATS_PAGE_HOME else 300
         player_elo_min = _parse_int_param(
@@ -3495,6 +4384,8 @@ def get_card_stats(request):
         STATS_PAGE_SPONSOR_ENDGAMES,
         STATS_PAGE_ICONS,
         STATS_PAGE_BUILD,
+        STATS_PAGE_PREDICTORS,
+        STATS_PAGE_ACTIONS,
     ):
         selected_rounds, round_filter_active = [], False
     if stats_page == STATS_PAGE_COMBINATIONS and combinations_view == COMBINATIONS_VIEW_CARD_ROUND:
@@ -3504,6 +4395,7 @@ def get_card_stats(request):
         STATS_PAGE_MAPS,
         STATS_PAGE_SPONSOR_ENDGAMES,
         STATS_PAGE_ICONS,
+        STATS_PAGE_PREDICTORS,
     ):
         end_game_triggered = None
     if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_TOURNAMENT_H2H:
@@ -3517,6 +4409,9 @@ def get_card_stats(request):
     cacheable_default_request = _is_default_cache_request(
         stats_page,
         maps_view,
+        build_view,
+        predictors_view,
+        actions_view,
         is_mw,
         selected_maps,
         player_elo_min,
@@ -3532,12 +4427,20 @@ def get_card_stats(request):
     if cacheable_default_request and not refresh_data:
         cached_payload = _read_cached_snapshot(
             is_mw, stats_page, endgames_view, maps_view,
-            sponsor_endgames_view, combinations_view
+            sponsor_endgames_view, combinations_view,
+            build_view, predictors_view, actions_view
         )
         if cached_payload:
             return (json.dumps(cached_payload), 200, headers)
 
     data_version = _read_data_version()
+    filter_subview = (
+        combinations_view if stats_page == STATS_PAGE_COMBINATIONS else
+        build_view if stats_page == STATS_PAGE_BUILD else
+        predictors_view if stats_page == STATS_PAGE_PREDICTORS else
+        actions_view if stats_page == STATS_PAGE_ACTIONS else
+        None
+    )
     filter_cache_blob_name = None
     if (
         CACHE_BUCKET
@@ -3561,7 +4464,7 @@ def get_card_stats(request):
             date_to,
             end_game_triggered,
             data_version,
-            combinations_view if stats_page == STATS_PAGE_COMBINATIONS else None,
+            filter_subview,
         )
         cached_payload = _read_cache_blob(filter_cache_blob_name, "filter_hit")
         if cached_payload:
@@ -3586,6 +4489,9 @@ def get_card_stats(request):
             maps_view=maps_view,
             sponsor_endgames_view=sponsor_endgames_view,
             combinations_view=combinations_view,
+            build_view=build_view,
+            predictors_view=predictors_view,
+            actions_view=actions_view,
             use_query_cache=(stats_page != STATS_PAGE_ENDGAMES and not debug_timing),
         )
         payload = {
@@ -3600,7 +4506,14 @@ def get_card_stats(request):
             "combinations_view": (
                 combinations_view if stats_page == STATS_PAGE_COMBINATIONS else None
             ),
-            "maps": ALL_MAPS_FOR_METRICS if stats_page == STATS_PAGE_MAPS else None,
+            "build_view": build_view if stats_page == STATS_PAGE_BUILD else None,
+            "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
+            "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
+            "maps": (
+                ALL_MAPS_FOR_METRICS
+                if stats_page in (STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS)
+                else None
+            ),
             "data": rows,
             "cache_status": "live",
         }
@@ -3608,7 +4521,8 @@ def get_card_stats(request):
         if cacheable_default_request:
             cache_write_ok = _write_cached_snapshot(
                 is_mw, payload, stats_page, endgames_view, maps_view,
-                sponsor_endgames_view, combinations_view
+                sponsor_endgames_view, combinations_view,
+                build_view, predictors_view, actions_view
             )
             payload["cache_status"] = "refreshed" if refresh_data and cache_write_ok else "miss"
             if not cache_write_ok:
