@@ -39,23 +39,23 @@ const sideNavContentHtml = `
       <span>Sponsor<br />endgames</span>
     </a>
     <div class="nav-divider"></div>
-    <button type="button" class="side-nav-link nav-placeholder">
+    <a class="side-nav-link" href="#/actions" data-page-id="actions">
       <svg class="nav-icon" viewBox="0 0 30 24" aria-hidden="true" fill="none">
         <rect x="1" y="6" width="5" height="12" rx="1" /><rect x="7" y="5" width="5" height="13" rx="1" />
         <rect x="13" y="4" width="5" height="14" rx="1" /><rect x="19" y="5" width="5" height="13" rx="1" />
         <rect x="25" y="6" width="4" height="12" rx="1" />
       </svg>
       <span>Actions</span>
-    </button>
+    </a>
     <div class="nav-divider"></div>
-    <button type="button" class="side-nav-link nav-placeholder">
+    <a class="side-nav-link" href="#/predictors" data-page-id="predictors">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
         <rect x="5" y="2.5" width="14" height="19" rx="2" />
         <path d="M8 12c2-3 5-3 7 0-2 3-5 3-7 0Zm7 0 2-2v4l-2-2Z" />
         <circle cx="11" cy="11.5" r=".6" fill="currentColor" stroke="none" />
       </svg>
       <span>MW Action<br />Cards</span>
-    </button>
+    </a>
     <div class="nav-divider"></div>
     <a class="side-nav-link" href="#/icons" data-page-id="icons">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">

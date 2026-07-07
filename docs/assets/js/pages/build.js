@@ -2,42 +2,50 @@ import {
   cappedNumericRange,
   deltaRangeColor,
   numericRange,
+  orangeGreenRangeColor,
   playrateColor,
-} from '../color-scales.js?v=20260704-9';
+  violetRangeColor,
+} from '../color-scales.js?v=20260707-1';
 
 export const id = 'build';
 export const title = 'Build';
 export const navLabel = 'Build';
 
 const MAPS = [
-  ['1a', 'Map 1a: Observation Tower'], ['2a', 'Map 2a: Outdoor Areas'],
-  ['3a', 'Map 3a: Silver Lake'], ['4a', 'Map 4a: Commercial Harbor'],
-  ['5a', 'Map 5a: Park Restaurant'], ['6a', 'Map 6a: Research Institute'],
-  ['7a', 'Map 7a: Ice Cream Parlors'], ['8a', 'Map 8a: Hollywood Hills'],
-  ['9', 'Map 9: Geographical Zoo'], ['10', 'Map 10: Rescue Station'],
-  ['11', 'Map 11: Caves'], ['12', 'Map 12: Artificial Intelligence'],
-  ['13', 'Map 13: Drawing Board'], ['14', 'Map 14: Lagoon'],
-  ['T1', 'Map T1: Tournament 1'],
+  ['1a', 'map_1a', 'Map 1a: Observation Tower'], ['2a', 'map_2a', 'Map 2a: Outdoor Areas'],
+  ['3a', 'map_3a', 'Map 3a: Silver Lake'], ['4a', 'map_4a', 'Map 4a: Commercial Harbor'],
+  ['5a', 'map_5a', 'Map 5a: Park Restaurant'], ['6a', 'map_6a', 'Map 6a: Research Institute'],
+  ['7a', 'map_7a', 'Map 7a: Ice Cream Parlors'], ['8a', 'map_8a', 'Map 8a: Hollywood Hills'],
+  ['9', 'map_9', 'Map 9: Geographical Zoo'], ['10', 'map_10', 'Map 10: Rescue Station'],
+  ['11', 'map_11', 'Map 11: Caves'], ['12', 'map_12', 'Map 12: Artificial Intelligence'],
+  ['13', 'map_13', 'Map 13: Drawing Board'], ['14', 'map_14', 'Map 14: Lagoon'],
+  ['T1', 'map_t1', 'Map T1: Tournament 1'],
 ];
 const STANDARD_BUCKETS = [['delta_0', '0'], ['delta_1', '1'], ['delta_2', '2'],
   ['delta_3', '3'], ['delta_4', '4'], ['delta_5_plus', '5+']];
 const UNIQUE_BUCKETS = [['delta_0', 'No'], ['delta_1', 'Yes'], ['delta_empty', 'Empty']];
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
-const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/build/enclosures';
+const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/build';
 
 export const mainHtml = `
-  <div class="main-header sponsor-endgames-main-header">
+  <div class="main-header sponsor-endgames-main-header build-main-header">
     <div class="table-meta" id="tableMeta"></div>
-    <div class="maps-h2h-mode build-mode" role="group" aria-label="Build metric">
-      <button type="button" class="active" data-mode="delta" onclick="setBuildMode('delta')">Elo &Delta;</button>
-      <button type="button" data-mode="frequency" onclick="setBuildMode('frequency')">Frequency</button>
+    <div class="build-switches">
+      <div class="maps-h2h-mode build-compare-mode" role="group" aria-label="Build comparison mode">
+        <button type="button" class="active" data-compare="raw" onclick="setBuildCompareMode('raw')">Raw</button>
+        <button type="button" data-compare="average" onclick="setBuildCompareMode('average')">vs. avg</button>
+      </div>
+      <div class="maps-h2h-mode build-mode" role="group" aria-label="Build metric">
+        <button type="button" class="active" data-mode="delta" onclick="setBuildMode('delta')">Elo &Delta;</button>
+        <button type="button" data-mode="frequency" onclick="setBuildMode('frequency')">Frequency</button>
+      </div>
     </div>
   </div>
   <div class="attributes-bar endgames-tabs-bar">
     <div class="attributes-bar-header endgames-tabs-header">
       <div class="endgames-tabs build-tabs" role="tablist" aria-label="Build views">
         <button class="endgames-tab active" type="button" data-view="enclosures" onclick="setBuildView('enclosures')">Enclosures</button>
-        <button class="endgames-tab" type="button" data-view="covered" onclick="setBuildView('covered')">Covered hexes</button>
+        <button class="endgames-tab" type="button" data-view="covered_hexes" onclick="setBuildView('covered_hexes')">Covered hexes</button>
       </div>
     </div>
   </div>
@@ -79,8 +87,9 @@ let token = 0;
 let isMW = 1;
 let mode = 'delta';
 let view = 'enclosures';
+let compareMode = 'raw';
 let rows = [];
-let selectedMaps = MAPS.map(([, full]) => full);
+let selectedMaps = MAPS.map(([, , full]) => full);
 let completedByMode = { delta: false, frequency: true };
 
 export function mount({ dataset = 1 } = {}) {
@@ -89,13 +98,13 @@ export function mount({ dataset = 1 } = {}) {
   isMW = Number(dataset) === 0 ? 0 : 1;
   mode = 'delta';
   view = 'enclosures';
+  compareMode = 'raw';
   rows = [];
-  selectedMaps = MAPS.map(([, full]) => full);
+  selectedMaps = MAPS.map(([, , full]) => full);
   completedByMode = { delta: false, frequency: true };
   bindHandlers();
   renderMapChips();
-  syncCompleted();
-  renderTabs();
+  syncControls();
   loadData(token);
 }
 
@@ -107,7 +116,7 @@ export function setDataset(value) {
 
 function bindHandlers() {
   Object.assign(window, {
-    setBuildMode, setBuildView, rememberBuildCompleted, resetFilters,
+    setBuildMode, setBuildView, setBuildCompareMode, rememberBuildCompleted, resetFilters,
     applyFiltersFromSidebar, selectAllMaps, selectNoneMaps, toggleBuildMap,
   });
 }
@@ -115,24 +124,27 @@ function bindHandlers() {
 function setBuildMode(next) {
   rememberBuildCompleted();
   mode = next === 'frequency' ? 'frequency' : 'delta';
-  document.querySelectorAll('.build-mode button').forEach(button => button.classList.toggle('active', button.dataset.mode === mode));
-  syncCompleted();
-  if (view === 'enclosures') loadData(++token);
+  syncControls();
+  loadData(++token);
 }
-
 function setBuildView(next) {
-  view = next === 'covered' ? 'covered' : 'enclosures';
-  renderTabs();
-  if (view === 'covered') renderCovered();
-  else if (rows.length) renderTables();
-  else loadData(++token);
+  view = next === 'covered_hexes' ? 'covered_hexes' : 'enclosures';
+  compareMode = 'raw';
+  syncControls();
+  loadData(++token);
 }
-
-function renderTabs() {
+function setBuildCompareMode(next) {
+  compareMode = next === 'average' ? 'average' : 'raw';
+  syncControls();
+  render();
+}
+function syncControls() {
+  document.querySelectorAll('.build-mode button').forEach(button => button.classList.toggle('active', button.dataset.mode === mode));
+  document.querySelectorAll('.build-compare-mode button').forEach(button => button.classList.toggle('active', button.dataset.compare === compareMode));
   document.querySelectorAll('.build-tabs .endgames-tab').forEach(button => button.classList.toggle('active', button.dataset.view === view));
-  document.querySelector('.build-mode')?.classList.toggle('is-hidden', view !== 'enclosures');
+  document.querySelector('.build-compare-mode')?.classList.toggle('is-hidden', view !== 'covered_hexes');
+  syncCompleted();
 }
-
 function syncCompleted() {
   const input = document.getElementById('endGameToggle');
   if (input) input.checked = completedByMode[mode];
@@ -144,7 +156,7 @@ function rememberBuildCompleted() {
 function getParams() {
   const value = id => document.getElementById(id)?.value ?? '';
   return {
-    stats_page: 'build', is_mw: isMW, maps: selectedMaps,
+    stats_page: 'build', build_view: view, is_mw: isMW, maps: selectedMaps,
     player_elo_min: value('playerEloMin') === '' ? 0 : Number(value('playerEloMin')),
     player_elo_max: value('playerEloMax') === '' ? null : Number(value('playerEloMax')),
     opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
@@ -162,6 +174,11 @@ function isDefault(params) {
     params.end_game_triggered === (mode === 'frequency' ? true : null);
 }
 
+function snapshotUrl() {
+  const dataset = isMW ? 'mw' : 'base';
+  return `${SNAPSHOT_ROOT}/${view}/${mode}/default-${dataset}.json`;
+}
+
 async function loadData(activeToken) {
   renderLoading();
   try {
@@ -169,7 +186,7 @@ async function loadData(activeToken) {
     let response;
     if (isDefault(params)) {
       try {
-        response = await fetch(`${SNAPSHOT_ROOT}/${mode}/default-${isMW ? 'mw' : 'base'}.json`, { cache: 'no-store' });
+        response = await fetch(snapshotUrl(), { cache: 'no-store' });
         if (!response.ok) throw new Error('Snapshot unavailable');
       } catch {
         response = await fetch(API_URL, {
@@ -185,38 +202,40 @@ async function loadData(activeToken) {
     if (!response.ok || payload.status !== 'ok') throw new Error(payload.message || `Request failed (${response.status})`);
     if (!mounted || activeToken !== token) return;
     rows = payload.data || [];
-    renderTables();
+    render();
   } catch (error) {
     if (mounted && activeToken === token) renderError(error);
   }
 }
 
-function renderTables() {
-  if (view !== 'enclosures') return;
+function render() {
+  if (view === 'covered_hexes') renderCovered();
+  else renderEnclosures();
+}
+
+function renderEnclosures() {
   const standard = rows.filter(row => row.category === 'standard');
   const unique = rows.filter(row => row.category === 'unique');
   document.getElementById('tableMeta').innerHTML = `<strong>${rows.length}</strong> enclosure types`;
-  const host = document.getElementById('buildContent');
-  host.innerHTML = `<div class="build-tables">
-    ${tableHtml('Standard enclosures', standard, STANDARD_BUCKETS, false)}
-    ${tableHtml('Unique enclosures', unique, UNIQUE_BUCKETS, true)}
+  document.getElementById('buildContent').innerHTML = `<div class="build-tables">
+    ${enclosureTableHtml('Standard enclosures', standard, STANDARD_BUCKETS, false)}
+    ${enclosureTableHtml('Unique enclosures', unique, UNIQUE_BUCKETS, true)}
   </div>`;
 }
 
-function tableHtml(titleText, data, buckets, unique) {
-  const ranges = Object.fromEntries(buckets.map(([field]) => [
-    field,
-    mode === 'delta'
-      ? cappedNumericRange(data.filter(row => count(row, field) >= 1000), row => row[field])
-      : numericRange(data.filter(row => possible(row, field)), row => frequency(row, field)),
-  ]));
+function enclosureTableHtml(titleText, data, buckets, unique) {
+  const usable = data.flatMap(row => buckets.map(([field]) => ({ row, field })))
+    .filter(({ row, field }) => possible(row, field));
+  const range = mode === 'delta'
+    ? cappedNumericRange(usable.filter(({ row, field }) => count(row, field) >= 1000), item => item.row[item.field])
+    : numericRange(usable.filter(({ field }) => field !== 'delta_empty'), item => frequency(item.row, item.field));
   const prefix = mode === 'delta' ? '\u0394' : 'f';
   return `<div class="build-table-panel"><div class="build-table-title">${titleText}</div><div class="table-scroll">
     <table class="sponsor-endgames-table build-table"><thead><tr>
       <th>${unique ? 'Enclosure' : 'Size'}</th>
       ${buckets.map(([, label]) => `<th>${prefix} (${label})</th>`).join('')}
     </tr></thead><tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${row.enclosure}</td>
-      ${buckets.map(([field]) => buildCell(row, field, ranges[field])).join('')}</tr>`).join('')}
+      ${buckets.map(([field]) => enclosureCell(row, field, range)).join('')}</tr>`).join('')}
     </tbody></table></div></div>`;
 }
 
@@ -231,8 +250,7 @@ function frequency(row, field) {
   const total = denominator(row, field);
   return total > 0 ? 100 * count(row, field) / total : Number.NaN;
 }
-
-function buildCell(row, field, range) {
+function enclosureCell(row, field, range) {
   if (!possible(row, field)) return '<td class="unavailable-cell">-</td>';
   const occurrences = count(row, field);
   if (mode === 'frequency') {
@@ -240,47 +258,124 @@ function buildCell(row, field, range) {
     if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
     const total = denominator(row, field);
     const color = field === 'delta_empty' ? 'rgba(153, 102, 204, .72)' : playrateColor(pct, range.min, range.max);
-    return `<td class="build-value-tooltip" data-value-tooltip="${occurrences.toLocaleString('en-US')} / ${total.toLocaleString('en-US')}" style="color:${color}">${pct.toFixed(2)}%</td>`;
+    return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(occurrences)} / ${fmtInt(total)}" style="color:${color}">${pct.toFixed(2)}%</td>`;
   }
-  const value = Number(row[field]);
-  if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
-  if (occurrences < 1000) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="Insufficient data (fewer than 1,000 observations).">(${signed(value)})</td>`;
-  return `<td class="delta delta-ci-cell"
-    data-ci-low="${escapeHtml(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeHtml(row[`${field}_ci95_high`] ?? '')}"
-    data-ci-n="${escapeHtml(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeHtml(range.min ?? '')}"
-    data-ci-color-max="${escapeHtml(range.max ?? '')}" style="color:${deltaRangeColor(value, range.min, range.max)}">${signed(value)}</td>`;
+  return deltaCell(row, field, occurrences, range);
 }
 
 function renderCovered() {
-  document.getElementById('tableMeta').textContent = '';
-  document.getElementById('buildContent').innerHTML = '<div class="build-placeholder"><div class="state-title">Covered hexes</div><div class="state-sub">Statistics for this view will be added later.</div></div>';
+  document.getElementById('tableMeta').innerHTML = `<strong>${rows.length}</strong> empty-hex buckets`;
+  const mapFields = MAPS.map(([, key]) => key);
+  const mapValues = rows.flatMap(row => mapFields.map(field => ({ value: displayedMapValue(row, field) })));
+  const mapRange = mode === 'delta'
+    ? cappedNumericRange(mapValues, row => row.value)
+    : numericRange(mapValues, row => row.value);
+  const avgRange = mode === 'delta'
+    ? numericRange(rows, row => row.avg)
+    : numericRange(rows, row => frequencyFor(row, 'avg'));
+  const prefix = mode === 'delta' ? '\u0394' : 'f';
+  document.getElementById('buildContent').innerHTML = `<div class="table-wrap build-covered-wrap"><div class="table-scroll">
+    <table class="maps-table build-covered-table" id="statsTable">
+      <thead><tr>
+        <th style="width:10%">Empty hexes</th>
+        ${MAPS.map(([short, , full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%">${short}</th>`).join('')}
+        <th style="width:7.5%">Avg</th>
+      </tr></thead>
+      <tbody>${rows.map(row => `<tr>
+        <td class="sponsor-name-cell">${escapeHtml(row.bucket_label)}</td>
+        ${MAPS.map(([, key]) => coveredCell(row, key, mapRange)).join('')}
+        ${coveredAvgCell(row, avgRange)}
+      </tr>`).join('')}</tbody>
+    </table>
+  </div></div>`;
+  void prefix;
 }
+
+function displayedMapValue(row, field) {
+  if (mode === 'frequency') {
+    const mapPct = frequencyFor(row, field);
+    if (compareMode !== 'average') return mapPct;
+    const avgPct = frequencyFor(row, 'avg');
+    return Number.isFinite(mapPct) && Number.isFinite(avgPct) ? mapPct - avgPct : Number.NaN;
+  }
+  const raw = Number(row[field]);
+  if (!Number.isFinite(raw)) return Number.NaN;
+  if (compareMode !== 'average') return raw;
+  const avg = Number(row.avg);
+  return Number.isFinite(avg) ? raw - avg : Number.NaN;
+}
+function frequencyFor(row, field) {
+  const total = Number(row[`denom_${field}`]);
+  const occurrences = Number(row[`count_${field}`]);
+  return total > 0 ? 100 * occurrences / total : Number.NaN;
+}
+function coveredCell(row, field, range) {
+  const value = displayedMapValue(row, field);
+  const occurrences = Number(row[`count_${field}`]) || 0;
+  if (mode === 'frequency') {
+    if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
+    const rawPct = frequencyFor(row, field);
+    const total = Number(row[`denom_${field}`]) || 0;
+    const text = compareMode === 'average' ? fmtSigned(value, 2, true) : `${rawPct.toFixed(2)}%`;
+    const tip = `${fmtInt(occurrences)} / ${fmtInt(total)}`;
+    return `<td class="build-value-tooltip" data-value-tooltip="${tip}" style="color:${playrateColor(value, range.min, range.max)}">${text}</td>`;
+  }
+  const text = compareMode === 'average' ? fmtSigned(value, 2, true) : (Number.isFinite(value) ? value.toFixed(3) : '\u2014');
+  if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
+  if (compareMode === 'average') {
+    return `<td class="delta cp-map-comparison" style="color:${deltaRangeColor(value, range.min, range.max)}">${text}</td>`;
+  }
+  return deltaCell(row, field, occurrences, range, text);
+}
+function coveredAvgCell(row, range) {
+  if (mode === 'frequency') {
+    const pct = frequencyFor(row, 'avg');
+    if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
+    return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count_avg)} / ${fmtInt(row.denom_avg)}" style="color:${violetRangeColor(pct, range.min, range.max)}">${pct.toFixed(2)}%</td>`;
+  }
+  const value = Number(row.avg);
+  if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
+  return `<td class="delta cp-cell" style="color:${orangeGreenRangeColor(value, range.min, range.max)}">${value.toFixed(3)}</td>`;
+}
+
+function deltaCell(row, field, occurrences, range, text = null) {
+  const value = Number(row[field]);
+  if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
+  if (occurrences < 1000) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="Insufficient data (fewer than 1,000 observations).">(${fmtSigned(value)})</td>`;
+  return `<td class="delta delta-ci-cell"
+    data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}"
+    data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(range.min ?? '')}"
+    data-ci-color-max="${escapeAttr(range.max ?? '')}" style="color:${deltaRangeColor(value, range.min, range.max)}">${text ?? fmtSigned(value)}</td>`;
+}
+
 function renderLoading() {
-  document.getElementById('buildContent').innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching enclosure statistics...</div></div>';
+  document.getElementById('tableMeta').textContent = '';
+  document.getElementById('buildContent').innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching build statistics...</div></div>';
 }
 function renderError(error) {
-  document.getElementById('buildContent').innerHTML = `<div class="state-overlay"><div class="state-title">Could not load enclosure statistics</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div>`;
+  document.getElementById('buildContent').innerHTML = `<div class="state-overlay"><div class="state-title">Could not load build statistics</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div>`;
 }
 
 function renderMapChips() {
   const host = document.getElementById('mapChips');
   if (!host) return;
-  host.innerHTML = MAPS.map(([short, full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeHtml(full)}" onclick="toggleBuildMap(this.dataset.map)">${short}</button>`).join('');
+  host.innerHTML = MAPS.map(([short, , full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="toggleBuildMap(this.dataset.map)">${short}</button>`).join('');
 }
 function toggleBuildMap(map) {
   selectedMaps = selectedMaps.includes(map) ? selectedMaps.filter(item => item !== map) : [...selectedMaps, map];
   renderMapChips();
 }
-function selectAllMaps() { selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); }
+function selectAllMaps() { selectedMaps = MAPS.map(([, , full]) => full); renderMapChips(); }
 function selectNoneMaps() { selectedMaps = []; renderMapChips(); }
 
 function resetFilters() {
   const set = (id, value) => { const element = document.getElementById(id); if (element) element.value = value; };
   set('playerEloMin', '300'); set('playerEloMax', ''); set('opponentEloMin', '300'); set('opponentEloMax', '');
   set('dateFrom', '2025-01-01'); set('dateTo', '');
-  selectedMaps = MAPS.map(([, full]) => full);
+  selectedMaps = MAPS.map(([, , full]) => full);
   completedByMode = { delta: false, frequency: true };
-  syncCompleted(); renderMapChips(); loadData(++token);
+  compareMode = 'raw';
+  syncControls(); renderMapChips(); loadData(++token);
 }
 function applyFiltersFromSidebar() {
   rememberBuildCompleted();
@@ -288,11 +383,19 @@ function applyFiltersFromSidebar() {
   document.getElementById('sidebar')?.classList.remove('open');
   document.getElementById('sidebarOverlay')?.classList.remove('active');
 }
-function signed(value) { return `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(3)}`; }
+
+function fmtSigned(value, decimals = 3, plusMinusZero = false) {
+  const number = Math.abs(Number(value)) < 0.5 * 10 ** -decimals ? 0 : Number(value);
+  if (!Number.isFinite(number)) return '\u2014';
+  if (number === 0 && plusMinusZero) return `\u00b1${number.toFixed(decimals)}`;
+  return `${number >= 0 ? '+' : '\u2212'}${Math.abs(number).toFixed(decimals)}`;
+}
+function fmtInt(value) { return Number(value || 0).toLocaleString('en-US'); }
 function escapeHtml(value) {
   return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
+const escapeAttr = escapeHtml;
 
 const valueTooltip = document.getElementById('col-tooltip');
 document.addEventListener('mouseover', event => {

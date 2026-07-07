@@ -7,7 +7,7 @@ import {
   normalizeToRange,
   numericRange,
   orangeGreenRangeColor,
-} from '../color-scales.js?v=20260704-9';
+} from '../color-scales.js?v=20260707-1';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';
@@ -158,9 +158,10 @@ let h2hSortByOverall = false;
 let currentSortMetric = 'Turns';
 let useNaturalMapOrder = false;
 let mapVisibilityModes = {
+  mapPack1: 'include',
+  mapPack2: 'include',
   legacy: 'exclude',
   beginner: 'exclude',
-  mapPack2: 'include',
 };
 const defaultSnapshotCache = {
   metrics: { 0: null, 1: null },
@@ -178,9 +179,10 @@ export function mount({ dataset = 1 } = {}) {
   currentSortMetric = 'Turns';
   useNaturalMapOrder = false;
   mapVisibilityModes = {
+    mapPack1: 'include',
+    mapPack2: 'include',
     legacy: 'exclude',
     beginner: 'exclude',
-    mapPack2: 'include',
   };
   viewRows = { metrics: [], tournament_h2h: [] };
   mapMeta = FALLBACK_MAPS;
@@ -231,13 +233,14 @@ function setMapsH2hMode(mode) {
 }
 
 function setMapVisibilityMode(category, mode) {
-  if (!['legacy', 'beginner', 'mapPack2'].includes(category)) return;
+  if (!['mapPack1', 'mapPack2', 'legacy', 'beginner'].includes(category)) return;
   if (!['exclude', 'include', 'only'].includes(mode)) return;
   if (mode === 'only') {
     mapVisibilityModes = {
+      mapPack1: 'exclude',
+      mapPack2: 'exclude',
       legacy: 'exclude',
       beginner: 'exclude',
-      mapPack2: 'exclude',
       [category]: 'only',
     };
   } else {
@@ -448,6 +451,7 @@ function updateVisibleMaps() {
 function mapVisibilityCategory(map) {
   if (/^Map [1-8]:/.test(map.full)) return 'legacy';
   if (map.full === 'Map A' || map.full === 'Map 0') return 'beginner';
+  if (['9', '10'].includes(map.code)) return 'mapPack1';
   if (['11', '12', '13', '14', 'T1'].includes(map.code)) return 'mapPack2';
   return null;
 }
@@ -473,6 +477,16 @@ function renderMetricsControls() {
   meta.innerHTML = `
     <div class="maps-metrics-options">
       ${mapOptionToggle(
+        'Map Pack 1',
+        'Maps 9 & 10',
+        'mapPack1',
+      )}
+      ${mapOptionToggle(
+        'Map Pack 2',
+        'Maps 11-14 & T1',
+        'mapPack2',
+      )}
+      ${mapOptionToggle(
         'Legacy Maps',
         'Maps 1-8 (non-alternate map version)',
         'legacy',
@@ -481,11 +495,6 @@ function renderMetricsControls() {
         'Beginner Maps',
         'Maps A & 0',
         'beginner',
-      )}
-      ${mapOptionToggle(
-        'Map Pack 2',
-        'Maps 11-14 & T1',
-        'mapPack2',
       )}
     </div>`;
 }

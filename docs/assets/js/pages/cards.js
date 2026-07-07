@@ -5,7 +5,7 @@ import {
   numericRange,
   playrateColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260704-9';
+} from '../color-scales.js?v=20260707-1';
 
 export const title = 'Cards';
 export const navLabel = 'Cards';

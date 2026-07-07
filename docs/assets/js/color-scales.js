@@ -181,6 +181,16 @@ export function orangeGreenRangeColor(value, min, max) {
   return t === null ? 'var(--text-muted)' : orangeGreenColor(t);
 }
 
+export function violetRangeColor(value, min, max) {
+  const t = normalizeToRange(value, min, max);
+  if (t === null) return 'var(--text-muted)';
+  return colorFromStops(t, [
+    [0, '#6f5aa6'],
+    [0.5, '#9b72cf'],
+    [1, '#c59af2'],
+  ]);
+}
+
 export function greenIntensityColor(normalized, withAlpha = false) {
   const t = clamp(Number(normalized));
   const color = mixHex('#628f72', '#78e38f', t);

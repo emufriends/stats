@@ -5,7 +5,7 @@ import {
   numericRange,
   relativeEloColor,
   synergyRangeColor,
-} from '../color-scales.js?v=20260704-9';
+} from '../color-scales.js?v=20260707-1';
 
 export const title = 'Combos';
 export const navLabel = 'Combos';
@@ -1219,7 +1219,7 @@ function reopenCombinationPopup(kind) {
       const anchor = document.querySelector('.combination-single-type-header');
       if (!popup || !anchor) return;
       popup.classList.add('open');
-      positionCombinationCenteredPopup(popup, anchor, 110);
+      positionCombinationCenteredPopup(popup, anchor, Math.max(110, anchor.getBoundingClientRect().width));
       return;
     }
     const popup = document.getElementById('combinationTypePopup');
@@ -1234,7 +1234,7 @@ function repositionOpenCombinationPopups() {
   const placements = [
     ['#combinationMapPopup', 250, false],
     ['#combinationRoundPopup', 250, false],
-    ['#combinationSingleTypePopup', 110, true],
+    ['#combinationSingleTypePopup', null, true],
     ['#combinationCardPopup1', 280, false],
     ['#combinationCardPopup2', 280, false],
   ];
@@ -1242,7 +1242,7 @@ function repositionOpenCombinationPopups() {
     const popup = document.querySelector(popupSelector);
     const anchor = popup?.closest('th');
     if (!popup?.classList.contains('open') || !anchor) return;
-    if (centered) positionCombinationCenteredPopup(popup, anchor, width);
+    if (centered) positionCombinationCenteredPopup(popup, anchor, width || Math.max(110, anchor.getBoundingClientRect().width));
     else positionCombinationPopup(popup, anchor, width);
   });
   const pairTypePopup = document.getElementById('combinationTypePopup');

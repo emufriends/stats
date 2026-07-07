@@ -4,7 +4,7 @@ import {
   numericRange,
   orangeGreenRangeColor,
   playrateColor,
-} from '../color-scales.js?v=20260704-9';
+} from '../color-scales.js?v=20260707-1';
 
 export const id = 'icons';
 export const title = 'Icons';
@@ -344,18 +344,20 @@ function renderTable() {
     return;
   }
   const amountRange = numericRange(universe, row => row.amount);
-  const deltaRanges = Object.fromEntries(BUCKETS.map(([field]) => [
-    field, cappedNumericRange(
-      universe.filter(row => !isImpossibleBucket(row, field) && count(row, field) >= 1000),
-      row => row[field],
-    ),
-  ]));
-  const frequencyRanges = Object.fromEntries(BUCKETS.map(([field]) => [
-    field, numericRange(
-      universe.filter(row => !isImpossibleBucket(row, field)),
-      row => frequency(row, field),
-    ),
-  ]));
+  const sharedDeltaRange = cappedNumericRange(
+    universe.flatMap(row => BUCKETS.map(([field]) => ({
+      value: !isImpossibleBucket(row, field) && count(row, field) >= 1000 ? row[field] : null,
+    }))),
+    row => row.value,
+  );
+  const sharedFrequencyRange = numericRange(
+    universe.flatMap(row => BUCKETS.map(([field]) => ({
+      value: !isImpossibleBucket(row, field) ? frequency(row, field) : null,
+    }))),
+    row => row.value,
+  );
+  const deltaRanges = Object.fromEntries(BUCKETS.map(([field]) => [field, sharedDeltaRange]));
+  const frequencyRanges = Object.fromEntries(BUCKETS.map(([field]) => [field, sharedFrequencyRange]));
   body.innerHTML = data.map(row => `
     <tr>
       <td class="rank-cell">${row.current_rank ?? '\u2014'}</td>

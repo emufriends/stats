@@ -1800,6 +1800,10 @@
       box-shadow: inset 0 -2px 0 rgba(108,138,130,0.55);
     }
 
+    #statsTable.combinations-table thead th.type-filter-header.type-filter-active {
+      box-shadow: none;
+    }
+
     .type-filter-popup {
       display: none;
       position: fixed;
@@ -2941,6 +2945,22 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .predictors-tabs {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .actions-tabs {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .build-switches {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-left: auto;
+    }
+
     .build-tables {
       display: grid;
       grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
@@ -2971,6 +2991,33 @@
       min-width: 500px;
     }
 
+    .build-covered-table,
+    .actions-map-table {
+      table-layout: fixed;
+      width: 100%;
+      min-width: 1080px;
+    }
+
+    .actions-tables {
+      display: grid;
+      grid-template-columns: minmax(0, 3fr) minmax(0, 1.5fr);
+      gap: 10%;
+      align-items: start;
+    }
+
+    .actions-upgrade-tables {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .actions-table {
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    .actions-double-separator td {
+      border-top: 3px double var(--border-light);
+    }
+
     .build-table th:first-child,
     .build-table td:first-child {
       width: 22%;
@@ -2991,6 +3038,12 @@
       .build-tables {
         grid-template-columns: 1fr;
         gap: 18px;
+      }
+
+      .actions-tables,
+      .actions-upgrade-tables {
+        grid-template-columns: 1fr;
+        gap: 16px;
       }
     }
 
@@ -3578,6 +3631,11 @@
       width: 172px;
       padding: 8px;
     }
+    .combination-single-type-popup {
+      width: auto;
+      min-width: 110px;
+      box-sizing: border-box;
+    }
     .combination-type-popup .chip { padding-left: 9px; padding-right: 9px; }
     .combination-type-popup.open { display: grid; gap: 5px; }
     .combination-type-popup .combination-popup-actions {
@@ -4105,6 +4163,16 @@
       #statsTable tbody tr:hover td:nth-child(1),
       #statsTable tbody tr:hover td:nth-child(2) {
         background: var(--bg-hover);
+      }
+
+      #statsTable:has(tbody .rank-cell) th:nth-child(1),
+      #statsTable:has(tbody .rank-cell) td.rank-cell {
+        display: none !important;
+      }
+
+      #statsTable:has(tbody .rank-cell) th:nth-child(2),
+      #statsTable:has(tbody .rank-cell) td:nth-child(2) {
+        left: 0 !important;
       }
 
       /* Maps and Combos need every data column to scroll normally on phones.

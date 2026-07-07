@@ -5,7 +5,7 @@ import {
   numericRange,
   orangeGreenRangeColor,
   playrateColor,
-} from '../color-scales.js?v=20260704-9';
+} from '../color-scales.js?v=20260707-1';
 
 export const title = 'Sponsor Endgames';
 export const navLabel = 'Sponsor Endgames';
@@ -323,17 +323,20 @@ function renderTable() {
   const minScore = scores.length ? Math.min(...scores) : null;
   const maxScore = scores.length ? Math.max(...scores) : null;
   const buckets = bucketsForView();
-  const frequencyRanges = Object.fromEntries(buckets.map(([field]) => [
-    field,
-    numericRange(sortedRows, row => frequencyForSort(row, field)),
-  ]));
-  const deltaRanges = Object.fromEntries(buckets.map(([field]) => [
-    field,
-    cappedNumericRange(
-      sortedRows.filter(row => bucketCount(row, field) >= 1000),
-      row => row[field],
-    ),
-  ]));
+  const sharedFrequencyRange = numericRange(
+    sortedRows.flatMap(row => buckets.map(([field]) => ({ value: frequencyForSort(row, field) }))),
+    row => row.value,
+  );
+  const sharedDeltaRange = cappedNumericRange(
+    sortedRows.flatMap(row => buckets.map(([field, value]) => ({
+      value: Array.isArray(row.possible_values) &&
+        row.possible_values.includes(value) &&
+        bucketCount(row, field) >= 1000 ? row[field] : null,
+    }))),
+    row => row.value,
+  );
+  const frequencyRanges = Object.fromEntries(buckets.map(([field]) => [field, sharedFrequencyRange]));
+  const deltaRanges = Object.fromEntries(buckets.map(([field]) => [field, sharedDeltaRange]));
   tbody.innerHTML = sortedRows.map(row => rowHtml(
     row, row.current_rank, minScore, maxScore, frequencyRanges, deltaRanges,
   )).join('');

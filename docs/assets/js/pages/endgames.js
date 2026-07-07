@@ -7,7 +7,7 @@ import {
   orangeGreenRangeColor,
   playrateColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260704-9';
+} from '../color-scales.js?v=20260707-1';
 
 export const title = 'Endgames';
 export const navLabel = 'Endgames';
@@ -17,7 +17,7 @@ export const mainHtml = `
     <div class="table-meta" id="tableMeta"></div>
     <div class="maps-h2h-mode cp-map-mode" id="cpMapMode" style="display:none" role="group" aria-label="CP by map metric">
       <button type="button" class="active" data-mode="raw" onclick="setCpMapMode('raw')">Raw</button>
-      <button type="button" data-mode="average" onclick="setCpMapMode('average')">vs. average</button>
+      <button type="button" data-mode="average" onclick="setCpMapMode('average')">vs. avg</button>
     </div>
   </div>
 
@@ -676,7 +676,7 @@ function cpByMapHeadHtml() {
       <th style="width:4%;text-align:center;cursor:default;">#</th>
       ${nameHeaderHtml('16%')}
       ${VALID_MAPS.map(map => `<th onclick="sortBy('${map.field}')" title="${map.full}" style="width:5%;text-align:center">${map.short}<span class="sort-arrow" id="sort-${map.field}">\u2195</span></th>`).join('')}
-      <th onclick="sortBy('avg_cp')" style="width:5%;text-align:center">Avg CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
+      <th onclick="sortBy('avg_cp')" style="width:5%;text-align:center">CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
     </tr>`;
 }
 
@@ -778,19 +778,24 @@ function renderTable(data) {
 }
 
 function buildColorRanges(data) {
-  const fields = ['avg_elo', 'playrate_pct', 'avg_cp'];
+  const ranges = {
+    avg_elo: numericRange(data, row => row.avg_elo),
+    playrate_pct: numericRange(data, row => row.playrate_pct),
+    avg_cp: numericRange(data, row => row.avg_cp),
+  };
   if (activeEndgamesView === ENDGAMES_VIEW_CP_DISTRIBUTION) {
-    CP_VALUES.forEach(cp => fields.push(`cp_${cp}_pct`));
+    ranges.cp_distribution = numericRange(
+      data.flatMap(row => CP_VALUES.map(cp => ({ value: row[`cp_${cp}_pct`] }))),
+      row => row.value,
+    );
   } else if (activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP) {
-    VALID_MAPS.forEach(map => fields.push(map.field));
+    const mapValues = data.flatMap(row => VALID_MAPS.map(map => ({
+      value: cpMapMode === 'average' ? cpMapValue(row, map.field) : row[map.field],
+    })));
+    ranges.cp_by_map = cpMapMode === 'average'
+      ? cappedNumericRange(mapValues, row => row.value)
+      : numericRange(mapValues, row => row.value);
   }
-  const ranges = Object.fromEntries(fields.map(field => [
-    field,
-    activeEndgamesView === ENDGAMES_VIEW_CP_BY_MAP && cpMapMode === 'average' &&
-      VALID_MAPS.some(map => map.field === field)
-      ? cappedNumericRange(data, row => cpMapValue(row, field))
-      : numericRange(data, row => row[field]),
-  ]));
   if (activeEndgamesView === ENDGAMES_VIEW_GENERAL) {
     ranges.delta_in_hand = cappedNumericRange(data, row => row.delta_in_hand);
     ranges.delta_played = cappedNumericRange(data, row => row.delta_played);
@@ -823,7 +828,7 @@ function renderCpDistributionRow(tr, row, ranges) {
   appendCell(tr, 'card-name', titleCase(row.card_name || ''));
   CP_VALUES.forEach(cp => {
     const pct = row[`cp_${cp}_pct`];
-    appendCell(tr, 'n-cell cp-pct-cell', fmtPercent(pct), cpPctColor(pct, ranges[`cp_${cp}_pct`]));
+    appendCell(tr, 'n-cell cp-pct-cell', fmtPercent(pct), cpPctColor(pct, ranges.cp_distribution));
   });
   appendCell(tr, 'delta cp-cell', row.avg_cp != null ? Number(row.avg_cp).toFixed(2) : '\u2014', cpColor(row.avg_cp, ranges.avg_cp));
 }
@@ -1257,8 +1262,8 @@ function renderCpByMapRow(tr, row, ranges) {
       `n-cell cp-map-cell${cpMapMode === 'average' ? ' cp-map-comparison' : ''}`,
       Number.isFinite(val) ? (cpMapMode === 'average' ? formatCpDifference(val) : val.toFixed(2)) : '\u2014',
       cpMapMode === 'average'
-        ? deltaRangeColor(val, ranges[map.field]?.min, ranges[map.field]?.max)
-        : cpMapColor(val, ranges[map.field]),
+        ? deltaRangeColor(val, ranges.cp_by_map?.min, ranges.cp_by_map?.max)
+        : cpMapColor(val, ranges.cp_by_map),
     );
   });
   appendCell(tr, 'delta cp-cell', row.avg_cp != null ? Number(row.avg_cp).toFixed(2) : '\u2014', cpColor(row.avg_cp, ranges.avg_cp));

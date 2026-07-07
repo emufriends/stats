@@ -252,7 +252,7 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Icons, and Build. Home has no rail item; the topbar logo links to it. Build uses the former Buildings shovel item and routes to `#/build`. The remaining future-page placeholders are Actions, MW Action Cards, Predictors, Projects, Workers, Records, and Players.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, and Build. Home has no rail item; the topbar logo links to it. Build uses the former Buildings shovel item and routes to `#/build`. The remaining future-page placeholders are MW Action Cards, Projects, Workers, Records, and Players.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Header topbar includes:
   - MW/Base switch
@@ -274,7 +274,7 @@ Central stylesheet for all pages. Important conventions:
   - collapsed = down
   - expanded = up
 - Phone table: outer `.table-wrap` is the framed table container, inner `.table-scroll` owns horizontal scrolling, and pagination sits outside `.table-scroll` so page buttons stay visible while columns scroll.
-- Phone table fixed width is currently `755px`; phone Card column is `110px`, rank column is `40px`, so the sticky left area is `150px`.
+- Phone table fixed width is currently `755px`; phone Card column is `110px`. Rank columns are hidden on phone layouts only; desktop and tablet retain them.
 - Avoid broad visual refactors unless requested. The user is happy with the current look.
 
 ## Current Pages
@@ -562,12 +562,11 @@ CP by map:
 
 - Rows are endgames; columns are the 15 maps plus final `CP`.
 - Map cells show average CP on that map.
-- Map cells use the red/neutral/green semantic scale, normalized independently within
-  each map column across the complete filtered CP-by-map result.
+- Map cells use the red/neutral/green semantic scale, normalized across all visible map columns together across the complete filtered CP-by-map result.
 - Final `CP` column keeps the normal CP color styling.
 - Map filter is hidden and ignored in this view because all maps must be shown as columns.
 - Graph mode uses the same payload, with maps ordered `1a` through `8a`, then `9` through `14`, then `T1` on the x-axis and average CP on a dynamically padded y-axis. Missing points break line segments. Legend selection and nearest-point tooltips match CP distribution.
-- The `Raw / vs. average` switch is frontend-only and applies to table and graph. Comparison values are `map CP - Avg CP`, display signed to two decimals, use zero-anchored capped Delta colors independently per map column, and retain raw `Avg CP` as the final reference column.
+- The `Raw / vs. avg` switch is frontend-only and applies to table and graph. Comparison values are `map CP - CP`, display signed to two decimals, use zero-anchored capped Delta colors with one shared range across all map columns, and retain raw `CP` as the final reference column.
 - CP-distribution frequency columns use the shared blue frequency scale rather than the former green intensity scale.
 
 Default snapshots:
@@ -597,13 +596,13 @@ In-page views:
 Metrics:
 
 - Uses map codes as columns and metric names as rows.
-- Maps General has three `- / O / +` segmented controls: Legacy Maps, Beginner Maps, and Map Pack 2. `-` excludes the category, `O` includes it with ordinary maps, and `+` shows only that category. Defaults are Legacy `-`, Beginner `-`, and Map Pack 2 `O`, producing columns 1a-8a, 9-14, and T1. Selecting `+` forces the other two controls to `-`; ordinary maps remain visible whenever no category is in `+` mode. Exclude/Include/Only labels use the shared dashboard tooltip, not native browser titles. These are client-side controls because the backend payload already contains all 25 maps.
+- Maps General has four `- / O / +` segmented controls in this order: Map Pack 1, Map Pack 2, Legacy Maps, and Beginner Maps. `-` excludes the category, `O` includes it with ordinary maps, and `+` shows only that category. Defaults are Map Pack 1 `O`, Map Pack 2 `O`, Legacy `-`, and Beginner `-`, producing columns 1a-8a, 9-14, and T1. Selecting `+` forces the other three controls to `-`; ordinary maps remain visible whenever no category is in `+` mode. Exclude/Include/Only labels use the shared dashboard tooltip, not native browser titles. These are client-side controls because the backend payload already contains all 25 maps.
 - Default sort is by `Turns` ascending. `Rounds` also sorts ascending because lower values are better; other metric rows sort descending.
 - Percentage metrics display one decimal. Body values have no hover detail; map headers and compact Games footer values use the dashboard tooltip, with Games showing the full comma-grouped integer.
 - Filters are MW/Base, Elo ranges, and date range only. No map filter, no round filter, no Completed games toggle.
 - Metrics default date is `2026-01-13` onward because Map Pack 2 was added on January 13th, 2026. Home is unrestricted; the remaining dated pages default to `2025-01-01`.
 - The visible end-date input stays blank by default; blank means no upper date limit.
-- Map Pack 1 consists of Maps 9 and 10. Map Pack 2 consists of Maps 11-14 and T1. Legacy maps are Maps 1-8 (the non-alternate versions); beginner maps are Maps A and 0.
+- Map Pack 1 consists of Maps 9 and 10. Map Pack 2 consists of Maps 11-14 and T1. Legacy maps are Maps 1-8 (the non-alternate versions); beginner maps are Maps A and 0. Fill% is calculated from `Empty_hexes`: total hexes default to 42, Maps 5/5a/10 use 43, and Map 0 uses 39.
 
 Tournament H2H:
 
@@ -655,11 +654,49 @@ Combo result metadata uses `combinations` on desktop and the shorter `combos` on
 
 ### Build Page
 
-`assets/js/pages/build.js` is routed at `#/build`; backend page id is `build`. Enclosures uses joined Full/Log observations at one player/game row. Standard rows are sizes 1-5 with exact buckets 0-4 and `5+`; unique rows are Aviary, Reptile House, Petting Zoo, Large Aquarium, and Small Aquarium with No/Yes buckets. Only Petting Zoo has Empty, defined exactly as built once with `COALESCE(Petting_Zoo_icons, 0) = 0`.
+`assets/js/pages/build.js` is routed at `#/build`; backend page id is `build`. The page has `Enclosures` and `Covered hexes` tabs. Enclosures uses joined Full/Log observations at one player/game row. Standard rows are sizes 1-5 with exact buckets 0-4 and `5+`; unique rows are Aviary, Reptile House, Petting Zoo, Large Aquarium, and Small Aquarium with No/Yes buckets. Only Petting Zoo has Empty, defined exactly as built once with `COALESCE(Petting_Zoo_icons, 0) = 0` and no Horse Whisperer in `played_sponsors`.
 
-Elo Delta and Frequency share the two-table layout. Delta cells expose the usual CI and use the 1,000-observation sufficiency rule. Ordinary frequency denominators are non-null observations for that enclosure field. Empty Petting Zoo frequency uniquely divides empty Petting Zoos by built Petting Zoos and uses violet. Elo Delta remembers Completed=false by default; Frequency separately remembers Completed=true. Default snapshots live under `card-stats/build/enclosures/{delta|frequency}/default-{mw|base}.json`. Covered hexes is an intentional empty placeholder.
+Elo Delta and Frequency share the two-table layout. Delta cells expose the usual CI and use the 1,000-observation sufficiency rule. Ordinary frequency denominators are non-null observations for that enclosure field. Empty Petting Zoo frequency uniquely divides empty Petting Zoos by built Petting Zoos and uses violet. Standard enclosures use one shared bucket color range across `0-5+`; unique enclosures use one shared range across No/Yes/Empty, except the violet Empty Petting Zoo frequency exception. Elo Delta remembers Completed=false by default; Frequency separately remembers Completed=true. Default snapshots live under `card-stats/build/enclosures/{delta|frequency}/default-{mw|base}.json`.
+
+Covered Hexes uses prepared Full Sample rows and `Empty_hexes` buckets `0`, `1-5`, `6-11`, `12-17`, `18-23`, and `24+`. Columns are the 15 map columns plus a final raw `Avg` reference. It has `Elo Δ / Frequency` and `Raw / vs. avg` switches. In comparison mode, each map cell shows `map value - row Avg`; `Avg` remains the raw reference. Delta cells use CI and the 1,000-observation rule in raw mode. Frequency cells show exact `count / denominator` tooltips. Map cells use one shared Delta or blue frequency range across all map cells; `Avg` uses CP-style orange-green in Delta mode and violet in Frequency mode. Default snapshots live under `card-stats/build/covered_hexes/{delta|frequency}/default-{mw|base}.json`.
 
 Prepared Logs includes numeric fields for all five standard sizes plus `aviary_built`, `reptile_house_built`, `petting_zoo_built`, `large_aquarium_built`, and `small_aquarium_built`.
+
+### Predictors Page
+
+`assets/js/pages/predictors.js` is routed at `#/predictors`; backend page id is `predictors`. It has three equal tabs: General, Icon, and Specific.
+
+General and Icon are backend-backed. One observation compares a player to their opponent in the same non-conceded table. A condition includes only rows where the player value is greater than the opponent value; ties do not count. Rows display the condition in the PDF-defined order plus Elo Delta with the normal CI tooltip and 1,000-observation sufficiency styling. Filters are player/opponent Elo, Maps, and Date Range. There is no Completed toggle for General/Icon.
+
+Specific is intentionally a frontend placeholder for now. It lists the Specific conditions in the requested order with dashes in Elo Delta and includes the Completed games toggle in the filter bar for future use.
+
+Default snapshots live under:
+
+```text
+card-stats/predictors/general/default-{mw|base}.json
+card-stats/predictors/icon/default-{mw|base}.json
+```
+
+### Actions Page
+
+`assets/js/pages/actions.js` is routed at `#/actions`; backend page id is `actions`. It has four equal tabs: Starting position, Upgrades, Upgrade order, and Upgrades per map.
+
+Starting position shows two non-sortable tables. The action-strength table compares Association, Build, Cards, and Sponsors at starting strengths 2-5. The comparison table covers Higher Association, Higher Build, Higher Cards, Higher Sponsors, and First player, with a double separator before First player. Delta cells use the usual CI and 1,000-observation rules, with one shared range across comparable Delta columns.
+
+Upgrades has an `Elo Δ / Frequency` switch and two equal-width tables: number of upgrades (`0-5`) and action upgrades (Animals, Association, Build, Cards, Sponsors). Frequency mode shows percentages with exact count tooltips and blue coloring.
+
+Upgrade order has the same mode switch, one row per action, and columns for 1st through 4th upgrade. Frequency denominators are all times that same action appears in any upgrade slot.
+
+Upgrades per map uses the map-grid framework with `Elo Δ / Frequency` and `Raw / vs. avg` switches. Rows are the five action upgrades, map columns are `1a-8a, 9-14, T1`, and the final `Avg` column stays as the raw reference when comparison mode is active.
+
+Default snapshots live under:
+
+```text
+card-stats/actions/starting_position/delta/default-{mw|base}.json
+card-stats/actions/upgrades/{delta|frequency}/default-{mw|base}.json
+card-stats/actions/upgrade_order/{delta|frequency}/default-{mw|base}.json
+card-stats/actions/upgrades_per_map/{delta|frequency}/default-{mw|base}.json
+```
 
 ### Shared Table UI
 
@@ -673,7 +710,7 @@ Cards, Opening Hand, and all Combo views calculate `#` globally among rows that
 meet the current Minimum plays/keeps threshold. Secondary client-side filters
 preserve those global ranks and therefore intentionally leave gaps.
 
-On phones, the navigation rail overlays rather than resizes the main content and collapses after selecting a route. The rail remains `84px` wide. Only its attached collapse/expand control is enlarged: the button is `21px × 60px`, sits at `right: -21px`, and uses a `15px` arrow glyph. Maps and Combos do not freeze left-side data columns on phones; their full tables scroll horizontally. Maps Metrics receives a computed readable width (`110px` metric column plus `64px` per currently visible map), so enabling Legacy, Beginner, or Map Pack 2 expands the scrollable table rather than compressing columns. Maps H2H uses a fixed `1025px` mobile table width. Combo result metadata hides only the `Showing` prefix on phones.
+On phones, the navigation rail overlays rather than resizes the main content and collapses after selecting a route. The rail remains `84px` wide. Only its attached collapse/expand control is enlarged: the button is `21px x 60px`, sits at `right: -21px`, and uses a `15px` arrow glyph. Rank columns (`#`) are hidden on phone layouts only. Maps and Combos do not freeze left-side data columns on phones; their full tables scroll horizontally. Maps Metrics receives a computed readable width (`110px` metric column plus `64px` per currently visible map), so enabling Map Pack 1, Map Pack 2, Legacy, or Beginner expands the scrollable table rather than compressing columns. Maps H2H uses a fixed `1025px` mobile table width. Combo result metadata hides only the `Showing` prefix on phones.
 
 ## Shared Page Module Pitfalls
 
@@ -1230,7 +1267,7 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-Expected result: JSON with `status: ok`, `home_bootstrap: ok`, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build populations, and all four Combinations views for MW/Base. Do not paste the token or command output if it includes secrets.
+Expected result: JSON with `status: ok`, `home_bootstrap: ok`, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build views, all four Combinations views, Predictors General/Icon, and all Actions views for MW/Base. Do not paste the token or command output if it includes secrets.
 ## Maintenance Token Rotation
 
 If the maintenance token is exposed, rotate it immediately.
@@ -1529,10 +1566,15 @@ active-view payload. Pagination never affects a range.
 
 There are deliberate exceptions:
 
-- Sponsor Endgames Delta bucket ranges exclude greyed buckets with fewer than 1,000
-  observations; those insufficient cells cannot distort the colors of valid buckets.
+- Sponsor Endgames use one shared range across all bucket columns for each CP/Appeal
+  table and mode. Delta ranges exclude greyed buckets with fewer than 1,000 observations;
+  those insufficient cells cannot distort the colors of valid buckets.
+- Icons use one shared range across all `0` through `7+` bucket columns for each mode.
+- Build Enclosures standard buckets share one range across `0` through `5+`; unique
+  buckets share one range across No/Yes/Empty, except Empty Petting Zoo frequency keeps
+  its fixed violet exception.
 - Maps Metrics treats each metric row as its own variable and recalculates across the
-  maps currently visible. The Legacy Maps, Beginner Maps, and Map Pack 2 three-state
+  maps currently visible. The Map Pack 1, Map Pack 2, Legacy Maps, and Beginner Maps three-state
   controls therefore do recolor the remaining/added maps even though they are frontend
   controls.
 - Maps H2H matchup cells and Overall cells have separate populations. Matchup Win%
@@ -1542,10 +1584,10 @@ There are deliberate exceptions:
 
 Other numeric scales use the minimum and maximum for that variable from the complete
 applicable payload: Elo uses `#2a5a5a` through `#2a8a7a` to `#4acfb0`;
-playrate/keeprate and Sponsor Frequency use `#2a4a6a` through `#3a7abf` to
-`#6bb5f0` (Sponsor bucket ranges are calculated in the same percentage units as their
-displayed values); CP and other orange-to-green measures use `#ff6027` to `#7cba43`;
-and CP-distribution prevalence uses `#628f72` to `#78e38f`. Maps metric/H2H
+playrate/keeprate and frequency buckets use `#2a4a6a` through `#3a7abf` to
+`#6bb5f0` (bucket ranges are calculated in the same percentage units as their
+displayed values); CP and other orange-to-green measures use `#ff6027` to `#7cba43`.
+Maps metric/H2H
 scales retain their metric-specific endpoint colors. Equal minimum/maximum values use
 the scale midpoint, and null/missing values retain the muted fallback.
 
