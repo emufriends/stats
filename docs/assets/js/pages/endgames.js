@@ -675,7 +675,7 @@ function cpByMapHeadHtml() {
     <tr>
       <th style="width:4%;text-align:center;cursor:default;">#</th>
       ${nameHeaderHtml('16%')}
-      ${VALID_MAPS.map(map => `<th onclick="sortBy('${map.field}')" title="${map.full}" style="width:5%;text-align:center">${map.short}<span class="sort-arrow" id="sort-${map.field}">\u2195</span></th>`).join('')}
+      ${VALID_MAPS.map(map => `<th class="maps-custom-tip" onclick="sortBy('${map.field}')" data-tip="${escapeAttr(map.full)}" style="width:5%;text-align:center">${escapeHtml(map.short)}<span class="sort-arrow" id="sort-${map.field}">\u2195</span></th>`).join('')}
       <th onclick="sortBy('avg_cp')" style="width:5%;text-align:center">CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
     </tr>`;
 }
@@ -1378,6 +1378,18 @@ function cpMapValue(row, field) {
   return Number.isFinite(average) ? raw - average : Number.NaN;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+}
+
+const escapeAttr = escapeHtml;
+
 function formatCpDifference(value) {
   const number = Math.abs(Number(value)) < 0.005 ? 0 : Number(value);
   if (number === 0) return '\u00b10.00';
@@ -1399,11 +1411,16 @@ function cpColor(val, range) {
 
 const _colTip = document.getElementById('col-tooltip');
 
+function endgamesHeaderTooltipSource(event) {
+  const mapTip = event.target.closest?.('.maps-custom-tip');
+  if (mapTip) return mapTip;
+  const th = event.target.closest?.('th');
+  return th?.querySelector('.col-tip') || null;
+}
+
 document.addEventListener('mouseover', e => {
   if (!isPageMounted || !_colTip) return;
-  const th = e.target.closest('th');
-  if (!th) return;
-  const tipEl = th.querySelector('.col-tip');
+  const tipEl = endgamesHeaderTooltipSource(e);
   if (!tipEl) return;
   if (tipEl.hasAttribute('data-tip-fraction')) {
     _colTip.innerHTML = `<div class="tip-combo"><div class="tip-fraction"><span class="tip-num">scored</span><span class="tip-den">dealt</span></div><div class="tip-note">(can exceed 100% due to<br>Elephants and Adapt)</div></div>`;
@@ -1417,8 +1434,7 @@ document.addEventListener('mouseover', e => {
 document.addEventListener('mousemove', e => {
   if (!isPageMounted || !_colTip || _colTip.style.display === 'none') return;
   if (e.target.closest('.delta-ci-cell')) return;
-  const th = e.target.closest('th');
-  if (!th || !th.querySelector('.col-tip')) {
+  if (!endgamesHeaderTooltipSource(e)) {
     _colTip.style.display = 'none';
     return;
   }
@@ -1428,10 +1444,9 @@ document.addEventListener('mousemove', e => {
 document.addEventListener('mouseout', e => {
   if (!isPageMounted || !_colTip) return;
   if (e.target.closest('.delta-ci-cell') || e.relatedTarget?.closest('.delta-ci-cell')) return;
-  const th = e.target.closest('th');
-  if (!th || !e.relatedTarget?.closest('th') || e.relatedTarget.closest('th') !== th) {
-    _colTip.style.display = 'none';
-  }
+  const source = endgamesHeaderTooltipSource(e);
+  const destination = e.relatedTarget?.closest?.('.maps-custom-tip') || e.relatedTarget?.closest?.('th')?.querySelector('.col-tip');
+  if (source && destination !== source) _colTip.style.display = 'none';
 });
 
 function positionColTip(e) {

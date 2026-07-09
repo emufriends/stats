@@ -76,12 +76,13 @@ export const mainHtml = `
     <div class="icons-filter-scroll">
       <div class="icons-filter-controls">
         <div class="icons-filter-groups" id="iconFilterChips"></div>
+        <div class="attr-separator icons-group-separator icons-graph-separator" aria-hidden="true"></div>
+        <button type="button" class="endgames-graph-toggle icons-graph-toggle" aria-label="Toggle icon graph"
+          title="Show graph" onclick="toggleIconsGraphView()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16" /><path d="M4 5v14" /><path d="M6.5 15.5 10 11l3.5 2.5L18 7" /></svg>
+        </button>
       </div>
     </div>
-    <button type="button" class="endgames-graph-toggle icons-graph-toggle" aria-label="Toggle icon graph"
-      title="Show graph" onclick="toggleIconsGraphView()">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16" /><path d="M4 5v14" /><path d="M6.5 15.5 10 11l3.5 2.5L18 7" /></svg>
-    </button>
   </div>
   <div class="table-wrap">
     <div class="table-scroll">

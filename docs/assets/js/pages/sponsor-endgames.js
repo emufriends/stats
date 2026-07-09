@@ -428,7 +428,7 @@ function bucketCell(row, field, value, buckets, frequencyRange, deltaRange) {
   if (!Number.isFinite(n)) return '<td class="unavailable-cell">-</td>';
   if (occurrences < 1000) {
     return `<td class="delta sponsor-delta-insufficient sponsor-value-tooltip"
-      data-value-tooltip="Insufficient data (fewer than 1,000 observations).">(${formatSigned(n)})</td>`;
+      data-value-tooltip="Insufficient data (fewer than 1,000 observations).">${formatInsufficientSigned(n)}</td>`;
   }
   const ciAttrs = ` data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(deltaRange?.min ?? '')}" data-ci-color-max="${escapeAttr(deltaRange?.max ?? '')}"`;
   return `<td class="delta delta-ci-cell"${ciAttrs} style="color:${deltaRangeColor(n, deltaRange?.min, deltaRange?.max)}">${formatSigned(n)}</td>`;
@@ -595,6 +595,12 @@ function formatSigned(raw) {
   const value = Number(raw);
   if (!Number.isFinite(value)) return '-';
   return `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+}
+
+function formatInsufficientSigned(raw) {
+  // Low-sample values use the same signed number text as sufficient values.
+  // Do not wrap them in parentheses; visual dimming communicates insufficiency.
+  return formatSigned(raw).replace(/^\((.*)\)$/, '$1');
 }
 
 function escapeHtml(value) {

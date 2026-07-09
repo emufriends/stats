@@ -44,7 +44,7 @@ export const mainHtml = `
         <button class="endgames-tab active" data-view="starting_position" onclick="setActionsView('starting_position')">Starting position</button>
         <button class="endgames-tab" data-view="upgrades" onclick="setActionsView('upgrades')">Upgrades</button>
         <button class="endgames-tab" data-view="upgrade_order" onclick="setActionsView('upgrade_order')">Upgrade order</button>
-        <button class="endgames-tab" data-view="upgrades_per_map" onclick="setActionsView('upgrades_per_map')">Upgrades per map</button>
+        <button class="endgames-tab" data-view="upgrades_per_map" onclick="setActionsView('upgrades_per_map')">Upgrades by map</button>
       </div>
     </div>
   </div>
@@ -149,7 +149,7 @@ async function loadData(activeToken) {
   } catch (error) { if (mounted && activeToken === token) renderError(error); }
 }
 function render() {
-  document.getElementById('tableMeta').innerHTML = `<strong>${rows.length}</strong> rows`;
+  document.getElementById('tableMeta').textContent = '';
   if (view === 'starting_position') renderStarting();
   else if (view === 'upgrades') renderUpgrades();
   else if (view === 'upgrade_order') renderUpgradeOrder();
@@ -158,40 +158,57 @@ function render() {
 function renderStarting() {
   const strength = rows.filter(row => row.section === 'strength');
   const comparison = rows.filter(row => row.section === 'comparison');
-  const strengthRange = cappedNumericRange(strength.flatMap(row => [2, 3, 4, 5].map(v => ({ value: row[`delta_${v}`], count: row[`count_${v}`] }))).filter(item => item.count >= 1000), item => item.value);
-  const compRange = cappedNumericRange(comparison.filter(row => row.count_2 >= 1000), row => row.delta_2);
+  const strengthRange = cappedNumericRange(
+    strength.flatMap(row => [2, 3, 4, 5].map(v => ({
+      value: row[`delta_${v}`],
+      count: observationCount(row, `delta_${v}`, row[`count_${v}`]),
+    }))).filter(item => item.count >= 1000),
+    item => item.value,
+  );
+  const compRange = cappedNumericRange(
+    comparison.filter(row => observationCount(row, 'delta_2', row.count_2) >= 1000),
+    row => row.delta_2,
+  );
   document.getElementById('actionsContent').innerHTML = `<div class="actions-tables">
-    <div class="build-table-panel actions-strength-panel"><div class="build-table-title">Action strength</div><div class="table-scroll">
-      <table class="sponsor-endgames-table actions-table"><thead><tr><th style="width:40%">Action</th>${[2,3,4,5].map(v => `<th style="width:15%">\u0394 (${v})</th>`).join('')}</tr></thead>
-      <tbody>${strength.map(row => `<tr><td class="sponsor-name-cell">${row.label}</td>${[2,3,4,5].map(v => deltaCell(row, `delta_${v}`, row[`count_${v}`], strengthRange)).join('')}</tr>`).join('')}</tbody></table>
+    <div class="build-table-panel actions-strength-panel"><div class="table-scroll">
+      <table class="sponsor-endgames-table actions-table actions-strength-table"><thead><tr><th style="width:40%">Action</th>${[2,3,4,5].map(v => `<th style="width:15%">\u0394 (${v})<span class="col-tip" data-tip="average elo gain with an initial action strength of ${v}">?</span></th>`).join('')}</tr></thead>
+      <tbody>${strength.map(row => `<tr><td class="sponsor-name-cell">${escapeHtml(row.label)}</td>${[2,3,4,5].map(v => deltaCell(row, `delta_${v}`, row[`count_${v}`], strengthRange)).join('')}</tr>`).join('')}</tbody></table>
     </div></div>
-    <div class="build-table-panel actions-comparison-panel"><div class="build-table-title">Action strength comparison</div><div class="table-scroll">
-      <table class="sponsor-endgames-table actions-table"><thead><tr><th style="width:70%">Condition</th><th style="width:30%">Elo \u0394</th></tr></thead>
-      <tbody>${comparison.map(row => `<tr class="${row.label === 'First player' ? 'actions-double-separator' : ''}"><td class="sponsor-name-cell">${row.label}</td>${deltaCell(row, 'delta_2', row.count_2, compRange)}</tr>`).join('')}</tbody></table>
+    <div class="build-table-panel actions-comparison-panel"><div class="table-scroll">
+      <table class="sponsor-endgames-table actions-table actions-comparison-table"><thead><tr><th style="width:75%">Condition</th><th style="width:25%">Elo \u0394</th></tr></thead>
+      <tbody>${comparison.map(row => `<tr class="${row.label === 'First player' ? 'actions-double-separator' : ''}"><td class="sponsor-name-cell">${comparisonLabel(row.label)}</td>${deltaCell(row, 'delta_2', row.count_2, compRange)}</tr>`).join('')}</tbody></table>
     </div></div>
   </div>`;
 }
+
 function renderUpgrades() {
   const number = rows.filter(row => row.section === 'number');
   const upgrade = rows.filter(row => row.section === 'upgrade');
   document.getElementById('actionsContent').innerHTML = `<div class="build-tables actions-upgrade-tables">
-    ${simpleMetricTable('Number of upgrades', 'Count', number)}
-    ${simpleMetricTable('Action upgrades', 'Upgrade', upgrade)}
+    ${simpleMetricTable('Upgrade count', number)}
+    ${simpleMetricTable('Upgrade', upgrade)}
   </div>`;
 }
-function simpleMetricTable(title, firstHeader, data) {
+function simpleMetricTable(firstHeader, data) {
   const range = mode === 'delta'
     ? cappedNumericRange(data.filter(row => row.count >= 1000), row => row.delta)
     : numericRange(data, row => frequency(row));
   const header = mode === 'delta' ? 'Elo \u0394' : 'Frequency';
-  return `<div class="build-table-panel"><div class="build-table-title">${title}</div><div class="table-scroll">
+  return `<div class="build-table-panel"><div class="table-scroll">
     <table class="sponsor-endgames-table actions-table"><thead><tr><th style="width:50%">${firstHeader}</th><th style="width:50%">${header}</th></tr></thead>
-    <tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${row.label}</td>${mode === 'delta' ? deltaCell(row, 'delta', row.count, range) : frequencyCell(row, range)}</tr>`).join('')}</tbody></table>
+    <tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${escapeHtml(row.label)}</td>${mode === 'delta' ? deltaCell(row, 'delta', row.count, range) : frequencyCell(row, range)}</tr>`).join('')}</tbody></table>
   </div></div>`;
 }
+
 function renderUpgradeOrder() {
   const range = mode === 'delta'
-    ? cappedNumericRange(rows.flatMap(row => [1,2,3,4].map(v => ({ value: row[`delta_${v}`], count: row[`count_${v}`] }))).filter(item => item.count >= 1000), item => item.value)
+    ? cappedNumericRange(
+      rows.flatMap(row => [1,2,3,4].map(v => ({
+        value: row[`delta_${v}`],
+        count: observationCount(row, `delta_${v}`, row[`count_${v}`]),
+      }))).filter(item => item.count >= 1000),
+      item => item.value,
+    )
     : numericRange(rows.flatMap(row => [1,2,3,4].map(v => ({ value: orderFrequency(row, v) }))), item => item.value);
   const prefix = mode === 'delta' ? '\u0394' : 'f';
   document.getElementById('actionsContent').innerHTML = `<div class="table-wrap"><div class="table-scroll">
@@ -206,15 +223,29 @@ function renderPerMap() {
     : numericRange(rows.flatMap(row => mapKeys.map(field => ({ value: displayedMapValue(row, field) }))), item => item.value);
   const avgRange = mode === 'delta' ? numericRange(rows, row => row.avg) : numericRange(rows, row => frequencyFor(row, 'avg'));
   document.getElementById('actionsContent').innerHTML = `<div class="table-wrap build-covered-wrap"><div class="table-scroll">
-    <table id="statsTable" class="maps-table actions-map-table"><thead><tr><th style="width:10%">Upgrade</th>${MAPS.map(([short,,full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%">${short}</th>`).join('')}<th style="width:7.5%">Avg</th></tr></thead>
+    <table id="statsTable" class="maps-table actions-map-table ${mode === 'frequency' ? 'actions-map-frequency' : ''}"><thead><tr><th style="width:10%">Upgrade</th>${MAPS.map(([short,,full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%">${short}</th>`).join('')}<th style="width:7.5%">Avg</th></tr></thead>
     <tbody>${rows.map(row => `<tr><td class="sponsor-name-cell">${row.label}</td>${MAPS.map(([, key]) => mapCell(row, key, mapRange)).join('')}${mapAvgCell(row, avgRange)}</tr>`).join('')}</tbody></table>
   </div></div>`;
 }
 function deltaCell(row, field, count, range) {
   const value = Number(row[field]);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
-  if (Number(count) < 1000) return `<td class="delta sponsor-delta-insufficient">${fmtSigned(value)}</td>`;
-  return `<td class="delta delta-ci-cell" data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(range.min ?? '')}" data-ci-color-max="${escapeAttr(range.max ?? '')}" style="color:${deltaRangeColor(value, range.min, range.max)}">${fmtSigned(value)}</td>`;
+  const n = observationCount(row, field, count);
+  if (n < 1000) return `<td class="delta sponsor-delta-insufficient">${fmtSigned(value)}</td>`;
+  const colorRange = normalizedDeltaRange(range, value);
+  return `<td class="delta delta-ci-cell" data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(colorRange.min ?? '')}" data-ci-color-max="${escapeAttr(colorRange.max ?? '')}" style="color:${deltaRangeColor(value, colorRange.min, colorRange.max)}">${fmtSigned(value)}</td>`;
+}
+function observationCount(row, field, explicitCount) {
+  const direct = Number(explicitCount);
+  if (Number.isFinite(direct)) return direct;
+  const ciN = Number(row?.[`${field}_ci95_n`]);
+  return Number.isFinite(ciN) ? ciN : 0;
+}
+function normalizedDeltaRange(range, value) {
+  if (range && Number.isFinite(Number(range.min)) && Number.isFinite(Number(range.max))) return range;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return { min: -2, max: 2 };
+  return { min: Math.min(-0.001, numeric), max: Math.max(0.001, numeric) };
 }
 function frequency(row) { return Number(row.denominator) > 0 ? 100 * Number(row.count || 0) / Number(row.denominator) : Number.NaN; }
 function frequencyCell(row, range) {
@@ -247,19 +278,19 @@ function mapCell(row, field, range) {
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
   if (mode === 'frequency') {
     const raw = frequencyFor(row, field);
-    const text = compareMode === 'average' ? fmtSigned(value, 2, true) : `${raw.toFixed(2)}%`;
+    const text = compareMode === 'average' ? fmtSignedPercentAdaptive(value) : fmtPercentFixed(raw);
     return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row[`count_${field}`])} / ${fmtInt(row[`denom_${field}`])}" style="color:${playrateColor(value, range.min, range.max)}">${text}</td>`;
   }
-  if (compareMode === 'average') return `<td class="delta cp-map-comparison" style="color:${deltaRangeColor(value, range.min, range.max)}">${fmtSigned(value, 2, true)}</td>`;
+  if (compareMode === 'average') return `<td class="delta cp-map-comparison" style="color:${deltaRangeColor(value, range.min, range.max)}">${fmtSigned(value, 3, true)}</td>`;
   return deltaCell(row, field, row[`count_${field}`], range);
 }
 function mapAvgCell(row, range) {
   if (mode === 'frequency') {
     const pct = frequencyFor(row, 'avg');
-    return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count_avg)} / ${fmtInt(row.denom_avg)}" style="color:${violetRangeColor(pct, range.min, range.max)}">${pct.toFixed(2)}%</td>`;
+    return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count_avg)} / ${fmtInt(row.denom_avg)}" style="color:${violetRangeColor(pct, range.min, range.max)}">${fmtPercentFixed(pct)}</td>`;
   }
   const value = Number(row.avg);
-  return `<td class="delta cp-cell" style="color:${orangeGreenRangeColor(value, range.min, range.max)}">${Number.isFinite(value) ? value.toFixed(3) : '\u2014'}</td>`;
+  return `<td class="delta cp-cell" style="color:${orangeGreenRangeColor(value, range.min, range.max)}">${Number.isFinite(value) ? fmtSigned(value, 3) : '\u2014'}</td>`;
 }
 function renderLoading() { document.getElementById('actionsContent').innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching action statistics...</div></div>'; }
 function renderError(error) { document.getElementById('actionsContent').innerHTML = `<div class="state-overlay"><div class="state-title">Could not load action statistics</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div>`; }
@@ -269,26 +300,49 @@ function selectAllMaps() { selectedMaps = MAPS.map(([, , full]) => full); render
 function selectNoneMaps() { selectedMaps = []; renderMapChips(); }
 function resetFilters() { const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; }; set('playerEloMin','300'); set('playerEloMax',''); set('opponentEloMin','300'); set('opponentEloMax',''); set('dateFrom','2025-01-01'); set('dateTo',''); selectedMaps = MAPS.map(([, , full]) => full); renderMapChips(); loadData(++token); }
 function applyFiltersFromSidebar() { loadData(++token); document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('active'); }
+function comparisonLabel(label) {
+  const text = String(label ?? '');
+  if (/^Higher\s+/i.test(text) && !/than opponent/i.test(text)) return `${escapeHtml(text)} than opponent`;
+  return escapeHtml(text);
+}
 function ordinal(value) { return value === 1 ? 'st' : value === 2 ? 'nd' : value === 3 ? 'rd' : 'th'; }
+function percentDecimals(value) { return Math.abs(Number(value)) >= 10 ? 1 : 2; }
+function fmtPercentFixed(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${n.toFixed(2)}%` : '\u2014';
+}
+function fmtSignedPercentAdaptive(value) { return `${fmtSigned(value, percentDecimals(value), true)}%`; }
 function fmtSigned(value, decimals = 3, plusMinusZero = false) { const n = Math.abs(Number(value)) < 0.5 * 10 ** -decimals ? 0 : Number(value); if (!Number.isFinite(n)) return '\u2014'; if (n === 0 && plusMinusZero) return `\u00b1${n.toFixed(decimals)}`; return `${n >= 0 ? '+' : '\u2212'}${Math.abs(n).toFixed(decimals)}`; }
 function fmtInt(value) { return Number(value || 0).toLocaleString('en-US'); }
 function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
 const escapeAttr = escapeHtml;
 
 const valueTooltip = document.getElementById('col-tooltip');
-document.addEventListener('mouseover', event => {
-  if (!mounted || !valueTooltip) return;
-  const cell = event.target.closest?.('.build-value-tooltip');
-  if (!cell) return;
-  valueTooltip.textContent = cell.dataset.valueTooltip || '';
-  valueTooltip.style.display = 'block';
-});
-document.addEventListener('mousemove', event => {
-  if (!mounted || !valueTooltip || !event.target.closest?.('.build-value-tooltip')) return;
+function actionsTooltipSource(event) {
+  return event.target.closest?.('.build-value-tooltip, .maps-custom-tip')
+    || event.target.closest?.('th')?.querySelector('.col-tip');
+}
+function positionActionsTooltip(event) {
+  if (!valueTooltip) return;
   valueTooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - valueTooltip.offsetWidth - 8))}px`;
   valueTooltip.style.top = `${event.clientY + 18}px`;
+}
+document.addEventListener('mouseover', event => {
+  if (!mounted || !valueTooltip) return;
+  const source = actionsTooltipSource(event);
+  if (!source) return;
+  valueTooltip.textContent = source.dataset.valueTooltip || source.dataset.tip || '';
+  valueTooltip.style.display = 'block';
+  positionActionsTooltip(event);
+});
+document.addEventListener('mousemove', event => {
+  if (!mounted || !valueTooltip || !actionsTooltipSource(event)) return;
+  positionActionsTooltip(event);
 });
 document.addEventListener('mouseout', event => {
   if (!mounted || !valueTooltip) return;
-  if (event.target.closest?.('.build-value-tooltip') && !event.relatedTarget?.closest?.('.build-value-tooltip')) valueTooltip.style.display = 'none';
+  const source = actionsTooltipSource(event);
+  const destination = event.relatedTarget?.closest?.('.build-value-tooltip, .maps-custom-tip')
+    || event.relatedTarget?.closest?.('th')?.querySelector?.('.col-tip');
+  if (source && destination !== source) valueTooltip.style.display = 'none';
 });

@@ -45,7 +45,7 @@ export const mainHtml = `
     <div class="attributes-bar-header endgames-tabs-header">
       <div class="endgames-tabs build-tabs" role="tablist" aria-label="Build views">
         <button class="endgames-tab active" type="button" data-view="enclosures" onclick="setBuildView('enclosures')">Enclosures</button>
-        <button class="endgames-tab" type="button" data-view="covered_hexes" onclick="setBuildView('covered_hexes')">Covered hexes</button>
+        <button class="endgames-tab" type="button" data-view="covered_hexes" onclick="setBuildView('covered_hexes')">Hexes</button>
       </div>
     </div>
   </div>
@@ -216,7 +216,7 @@ function render() {
 function renderEnclosures() {
   const standard = rows.filter(row => row.category === 'standard');
   const unique = rows.filter(row => row.category === 'unique');
-  document.getElementById('tableMeta').innerHTML = `<strong>${rows.length}</strong> enclosure types`;
+  document.getElementById('tableMeta').textContent = '';
   document.getElementById('buildContent').innerHTML = `<div class="build-tables">
     ${enclosureTableHtml('Standard enclosures', standard, STANDARD_BUCKETS, false)}
     ${enclosureTableHtml('Unique enclosures', unique, UNIQUE_BUCKETS, true)}
@@ -230,13 +230,24 @@ function enclosureTableHtml(titleText, data, buckets, unique) {
     ? cappedNumericRange(usable.filter(({ row, field }) => count(row, field) >= 1000), item => item.row[item.field])
     : numericRange(usable.filter(({ field }) => field !== 'delta_empty'), item => frequency(item.row, item.field));
   const prefix = mode === 'delta' ? '\u0394' : 'f';
-  return `<div class="build-table-panel"><div class="build-table-title">${titleText}</div><div class="table-scroll">
-    <table class="sponsor-endgames-table build-table"><thead><tr>
-      <th>${unique ? 'Enclosure' : 'Size'}</th>
+  const tableClass = unique ? 'build-unique-enclosures-table' : 'build-standard-enclosures-table';
+  const colgroup = unique
+    ? '<colgroup><col style="width:40%"><col style="width:20%"><col style="width:20%"><col style="width:20%"></colgroup>'
+    : '<colgroup><col style="width:10%"><col style="width:15%"><col style="width:15%"><col style="width:15%"><col style="width:15%"><col style="width:15%"><col style="width:15%"></colgroup>';
+  void titleText;
+  return `<div class="build-table-panel"><div class="table-scroll">
+    <table class="sponsor-endgames-table build-table ${tableClass}">${colgroup}<thead><tr>
+      <th>${unique ? 'Unique enclosure' : 'Size'}</th>
       ${buckets.map(([, label]) => `<th>${prefix} (${label})</th>`).join('')}
-    </tr></thead><tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${row.enclosure}</td>
+    </tr></thead><tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${enclosureLabel(row, unique)}</td>
       ${buckets.map(([field]) => enclosureCell(row, field, range)).join('')}</tr>`).join('')}
     </tbody></table></div></div>`;
+}
+
+function enclosureLabel(row, unique) {
+  const label = String(row.enclosure ?? '');
+  if (unique) return escapeHtml(label);
+  return escapeHtml(label.replace(/\s*-?\s*size$/i, ''));
 }
 
 function possible(row, field) {
@@ -264,7 +275,7 @@ function enclosureCell(row, field, range) {
 }
 
 function renderCovered() {
-  document.getElementById('tableMeta').innerHTML = `<strong>${rows.length}</strong> empty-hex buckets`;
+  document.getElementById('tableMeta').textContent = '';
   const mapFields = MAPS.map(([, key]) => key);
   const mapValues = rows.flatMap(row => mapFields.map(field => ({ value: displayedMapValue(row, field) })));
   const mapRange = mode === 'delta'
@@ -275,14 +286,14 @@ function renderCovered() {
     : numericRange(rows, row => frequencyFor(row, 'avg'));
   const prefix = mode === 'delta' ? '\u0394' : 'f';
   document.getElementById('buildContent').innerHTML = `<div class="table-wrap build-covered-wrap"><div class="table-scroll">
-    <table class="maps-table build-covered-table" id="statsTable">
+    <table class="maps-table build-covered-table ${mode === 'frequency' ? 'build-covered-frequency' : ''}" id="statsTable">
       <thead><tr>
-        <th style="width:10%">Empty hexes</th>
-        ${MAPS.map(([short, , full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%">${short}</th>`).join('')}
+        <th class="build-covered-bucket-header" style="width:10%">Empty hexes</th>
+        ${MAPS.map(([short, , full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%;text-align:center">${escapeHtml(short)}</th>`).join('')}
         <th style="width:7.5%">Avg</th>
       </tr></thead>
       <tbody>${rows.map(row => `<tr>
-        <td class="sponsor-name-cell">${escapeHtml(row.bucket_label)}</td>
+        <td class="sponsor-name-cell build-covered-bucket-cell">${escapeHtml(row.bucket_label)}</td>
         ${MAPS.map(([, key]) => coveredCell(row, key, mapRange)).join('')}
         ${coveredAvgCell(row, avgRange)}
       </tr>`).join('')}</tbody>
@@ -316,13 +327,16 @@ function coveredCell(row, field, range) {
     if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
     const rawPct = frequencyFor(row, field);
     const total = Number(row[`denom_${field}`]) || 0;
-    const text = compareMode === 'average' ? fmtSigned(value, 2, true) : `${rawPct.toFixed(2)}%`;
+    const text = compareMode === 'average' ? fmtFrequencyComparison(value) : `${rawPct.toFixed(2)}%`;
     const tip = `${fmtInt(occurrences)} / ${fmtInt(total)}`;
     return `<td class="build-value-tooltip" data-value-tooltip="${tip}" style="color:${playrateColor(value, range.min, range.max)}">${text}</td>`;
   }
-  const text = compareMode === 'average' ? fmtSigned(value, 2, true) : (Number.isFinite(value) ? value.toFixed(3) : '\u2014');
+  const text = compareMode === 'average' ? fmtSigned(value, 3, true) : fmtSigned(value, 3, true);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
   if (compareMode === 'average') {
+    if (occurrences < 1000) {
+      return `<td class="delta cp-map-comparison sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="Insufficient data (fewer than 1,000 observations).">${text}</td>`;
+    }
     return `<td class="delta cp-map-comparison" style="color:${deltaRangeColor(value, range.min, range.max)}">${text}</td>`;
   }
   return deltaCell(row, field, occurrences, range, text);
@@ -335,13 +349,14 @@ function coveredAvgCell(row, range) {
   }
   const value = Number(row.avg);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
-  return `<td class="delta cp-cell" style="color:${orangeGreenRangeColor(value, range.min, range.max)}">${value.toFixed(3)}</td>`;
+  return `<td class="delta cp-cell" style="color:${orangeGreenRangeColor(value, range.min, range.max)}">${fmtSigned(value, 3, true)}</td>`;
 }
 
 function deltaCell(row, field, occurrences, range, text = null) {
   const value = Number(row[field]);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
-  if (occurrences < 1000) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="Insufficient data (fewer than 1,000 observations).">(${fmtSigned(value)})</td>`;
+  const displayText = text ?? fmtSigned(value);
+  if (occurrences < 1000) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="Insufficient data (fewer than 1,000 observations).">${displayText}</td>`;
   return `<td class="delta delta-ci-cell"
     data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}"
     data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(range.min ?? '')}"
@@ -384,6 +399,10 @@ function applyFiltersFromSidebar() {
   document.getElementById('sidebarOverlay')?.classList.remove('active');
 }
 
+function fmtFrequencyComparison(value) {
+  const decimals = Math.abs(Number(value)) >= 10 ? 1 : 2;
+  return `${fmtSigned(value, decimals, true)}%`;
+}
 function fmtSigned(value, decimals = 3, plusMinusZero = false) {
   const number = Math.abs(Number(value)) < 0.5 * 10 ** -decimals ? 0 : Number(value);
   if (!Number.isFinite(number)) return '\u2014';
@@ -398,21 +417,29 @@ function escapeHtml(value) {
 const escapeAttr = escapeHtml;
 
 const valueTooltip = document.getElementById('col-tooltip');
-document.addEventListener('mouseover', event => {
-  if (!mounted || !valueTooltip) return;
-  const cell = event.target.closest?.('.build-value-tooltip');
-  if (!cell) return;
-  valueTooltip.textContent = cell.dataset.valueTooltip || '';
-  valueTooltip.style.display = 'block';
-});
-document.addEventListener('mousemove', event => {
-  if (!mounted || !valueTooltip || !event.target.closest?.('.build-value-tooltip')) return;
+function buildTooltipSource(event) {
+  return event.target.closest?.('.build-value-tooltip, .maps-custom-tip');
+}
+function positionBuildTooltip(event) {
+  if (!valueTooltip) return;
   valueTooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - valueTooltip.offsetWidth - 8))}px`;
   valueTooltip.style.top = `${event.clientY + 18}px`;
+}
+document.addEventListener('mouseover', event => {
+  if (!mounted || !valueTooltip) return;
+  const source = buildTooltipSource(event);
+  if (!source) return;
+  valueTooltip.textContent = source.dataset.valueTooltip || source.dataset.tip || '';
+  valueTooltip.style.display = 'block';
+  positionBuildTooltip(event);
+});
+document.addEventListener('mousemove', event => {
+  if (!mounted || !valueTooltip || !buildTooltipSource(event)) return;
+  positionBuildTooltip(event);
 });
 document.addEventListener('mouseout', event => {
   if (!mounted || !valueTooltip) return;
-  const source = event.target.closest?.('.build-value-tooltip');
-  const destination = event.relatedTarget?.closest?.('.build-value-tooltip');
+  const source = buildTooltipSource(event);
+  const destination = event.relatedTarget?.closest?.('.build-value-tooltip, .maps-custom-tip');
   if (source && destination !== source) valueTooltip.style.display = 'none';
 });

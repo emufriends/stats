@@ -1141,9 +1141,12 @@ function positionCombinationCenteredPopup(popup, anchor, preferredWidth) {
     popup.classList.remove('open');
     return;
   }
-  const width = popup.offsetWidth || preferredWidth;
-  const left = rect.left + (rect.width / 2) - (width / 2);
-  popup.style.left = `${Math.max(margin, Math.min(left, window.innerWidth - width - margin))}px`;
+  // Used by the single-card Type filter on Card + Map/Round/Endgame views.
+  // Align the popup to the full header cell, rather than using its intrinsic
+  // 110px minimum width, so its border matches the Type column exactly.
+  const width = Math.max(0, Math.min(rect.width || preferredWidth || 110, window.innerWidth - (margin * 2)));
+  popup.style.width = `${width}px`;
+  popup.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin))}px`;
   popup.style.top = `${anchoredTop}px`;
 }
 

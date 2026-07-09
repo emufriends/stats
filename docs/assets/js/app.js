@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260707-1';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260708-11';
 import { deltaColor, deltaRangeColor } from './color-scales.js?v=20260707-1';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
@@ -10,7 +10,7 @@ import {
   setTopbarDataset,
   toggleNavCollapse,
   toggleSidebar,
-} from './layout.js?v=20260707-1';
+} from './layout.js?v=20260709-1';
 
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;
