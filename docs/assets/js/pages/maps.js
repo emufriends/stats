@@ -7,7 +7,8 @@ import {
   normalizeToRange,
   numericRange,
   orangeGreenRangeColor,
-} from '../color-scales.js?v=20260707-1';
+} from '../color-scales.js?v=20260711-1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-6';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';
@@ -140,6 +141,7 @@ const PAGE_WINDOW_HANDLERS = {
   setMapsView,
   setMapsH2hMode,
   setMapVisibilityMode,
+  resetMetricsSwitches,
   sortMapsByHeader,
   sortMapsByMetric,
   sortH2hByOverall,
@@ -250,6 +252,20 @@ function setMapVisibilityMode(category, mode) {
   renderActiveView();
 }
 
+function resetMetricsSwitches() {
+  if (activeView !== METRICS_VIEW) return;
+  mapVisibilityModes = {
+    mapPack1: 'include',
+    mapPack2: 'include',
+    legacy: 'exclude',
+    beginner: 'exclude',
+  };
+  useNaturalMapOrder = false;
+  currentSortMetric = 'Turns';
+  updateVisibleMaps();
+  renderActiveView();
+}
+
 function renderTabs() {
   document.querySelectorAll('.maps-tabs .endgames-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.view === activeView);
@@ -331,24 +347,13 @@ async function loadDefaultSnapshot(view, dataset) {
   if (defaultSnapshotCache[view]?.[dataset]) return defaultSnapshotCache[view][dataset];
   const url = DEFAULT_SNAPSHOT_URLS[view]?.[dataset];
   if (!url) throw new Error('Missing default snapshot');
-  const response = await fetch(url, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
-  const payload = await response.json();
+  const payload = await loadSnapshot(url);
   defaultSnapshotCache[view][dataset] = payload;
   return payload;
 }
 
 async function fetchApi(params) {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.status !== 'ok') {
-    throw new Error(payload.message || `API request failed (${response.status})`);
-  }
-  return payload;
+  return fetchStats(params);
 }
 
 function applyFiltersFromSidebar() {
@@ -496,6 +501,7 @@ function renderMetricsControls() {
         'Maps A & 0',
         'beginner',
       )}
+      <button type="button" class="reset-btn maps-metrics-reset-btn" onclick="resetMetricsSwitches()">Reset</button>
     </div>`;
 }
 
@@ -591,7 +597,15 @@ function mapCellHtml(row, map, min, max) {
   const raw = row[map.key];
   const value = Number(raw);
   const style = Number.isFinite(value) ? ` style="color:${rowColor(value, min, max, isLowerBetter(row))}"` : '';
-  return `<td class="maps-value-cell"${style}>${formatValue(raw, row.format)}</td>`;
+  const tooltip = metricCellTooltip(row, map.key);
+  return `<td class="maps-value-cell${tooltip ? ' maps-custom-tip' : ''}"${tooltip ? ` data-tip="${escapeAttr(tooltip)}"` : ''}${style}>${formatValue(raw, row.format)}</td>`;
+}
+
+function metricCellTooltip(row, mapKey) {
+  if (!String(row.metric || '').startsWith('Money spent (')) return '';
+  const value = Number(row[`tooltip_${mapKey}`]);
+  if (!Number.isFinite(value)) return '';
+  return value.toFixed(2);
 }
 
 function sortMapsByMetric(metric) {

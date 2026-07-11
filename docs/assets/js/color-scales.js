@@ -98,6 +98,12 @@ export function playrateColor(value, min, max) {
   ]);
 }
 
+// Frequency cells use a stable 0–50% blue domain so unusually common values
+// saturate without changing the meaning of the scale from table to table.
+export function frequencyColor(value, cap = 50) {
+  return playrateColor(value, 0, cap);
+}
+
 export function relativeEloColor(value, min, max) {
   const t = normalizeToRange(value, min, max);
   if (t === null) return 'var(--text-muted)';

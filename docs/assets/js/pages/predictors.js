@@ -1,4 +1,9 @@
-import { cappedNumericRange, deltaRangeColor } from '../color-scales.js?v=20260707-1';
+import { cappedNumericRange, deltaRangeColor, frequencyColor } from '../color-scales.js?v=20260711-1';
+import {
+  INSUFFICIENT_DATA_TOOLTIP,
+  isInsufficientObservationCount,
+} from '../table-cells.js?v=20260710-1';
+import { loadStats } from '../snapshot-cache.js?v=20260711-6';
 
 export const id = 'predictors';
 export const title = 'Predictors';
@@ -16,18 +21,13 @@ const MAPS = [
   ['13', 'Map 13: Drawing Board'], ['14', 'Map 14: Lagoon'],
   ['T1', 'Map T1: Tournament 1'],
 ];
-const SPECIFIC = [
-  'Triggered endgame', 'More endgame points', 'More endgame CP', 'More ingame CP',
-  'More reefers', 'Round 1: Release', 'Round 1: Upgrade', 'Round 1: Humphead Wrasse',
-  'Round 1/2: New Zealand Fur Seal', 'First to 5 CP',
-  'First to 5 CP (with exactly one university/partner zoo bonus)', 'First to 8 CP',
-  'First to 8 CP (with exactly one university/partner zoo bonus)',
-  'No sponsor in starting hand', 'No project in starting hand',
-];
-
 export const mainHtml = `
   <div class="main-header sponsor-endgames-main-header">
     <div class="table-meta" id="tableMeta"></div>
+    <div class="maps-h2h-mode predictors-mode is-hidden" role="group" aria-label="Specific predictor metric">
+      <button type="button" class="active" data-mode="delta" onclick="setPredictorsMode('delta')">Elo &Delta;</button>
+      <button type="button" data-mode="frequency" onclick="setPredictorsMode('frequency')">Frequency</button>
+    </div>
   </div>
   <div class="attributes-bar endgames-tabs-bar">
     <div class="attributes-bar-header endgames-tabs-header">
@@ -81,15 +81,16 @@ let mounted = false;
 let token = 0;
 let isMW = 1;
 let activeView = 'general';
+let mode = 'delta';
 let rows = [];
 let currentSort = { col: 'condition', dir: 'asc' };
 let selectedMaps = MAPS.map(([, full]) => full);
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true; token += 1; isMW = Number(dataset) === 0 ? 0 : 1;
-  activeView = 'general'; rows = []; currentSort = { col: 'condition', dir: 'asc' };
+  activeView = 'general'; mode = 'delta'; rows = []; currentSort = { col: 'condition', dir: 'asc' };
   selectedMaps = MAPS.map(([, full]) => full);
-  Object.assign(window, { setPredictorsView, sortPredictors, resetFilters, applyFiltersFromSidebar, selectAllMaps, selectNoneMaps, togglePredictorMap });
+  Object.assign(window, { setPredictorsView, setPredictorsMode, sortPredictors, resetFilters, applyFiltersFromSidebar, selectAllMaps, selectNoneMaps, togglePredictorMap });
   renderMapChips(); syncTabs(); loadData(token);
 }
 export function unmount() { mounted = false; token += 1; }
@@ -97,12 +98,21 @@ export function setDataset(value) { isMW = Number(value) === 0 ? 0 : 1; loadData
 
 function setPredictorsView(view) {
   activeView = ['general', 'icon', 'specific'].includes(view) ? view : 'general';
+  mode = 'delta';
   currentSort = { col: 'condition', dir: 'asc' };
   syncTabs(); loadData(++token);
+}
+function setPredictorsMode(next) {
+  if (activeView !== 'specific') return;
+  mode = next === 'frequency' ? 'frequency' : 'delta';
+  currentSort = { col: 'condition', dir: 'asc' };
+  syncTabs(); render();
 }
 function syncTabs() {
   document.querySelectorAll('.predictors-tabs .endgames-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.view === activeView));
   document.getElementById('predictorsCompletedBlock')?.classList.toggle('is-hidden', activeView !== 'specific');
+  document.querySelector('.predictors-mode')?.classList.toggle('is-hidden', activeView !== 'specific');
+  document.querySelectorAll('.predictors-mode button').forEach(button => button.classList.toggle('active', button.dataset.mode === mode));
 }
 function params() {
   const v = id => document.getElementById(id)?.value ?? '';
@@ -113,56 +123,51 @@ function params() {
     opponent_elo_min: v('opponentEloMin') === '' ? 0 : Number(v('opponentEloMin')),
     opponent_elo_max: v('opponentEloMax') === '' ? null : Number(v('opponentEloMax')),
     date_from: v('dateFrom') || '2025-01-01', date_to: v('dateTo') || null,
-    end_game_triggered: activeView === 'specific' && document.getElementById('endGameToggle')?.checked ? true : null,
+    completed_only: activeView === 'specific' && document.getElementById('endGameToggle')?.checked ? true : null,
   };
 }
 function isDefault(p) {
-  return activeView !== 'specific' && p.player_elo_min === 300 && p.player_elo_max === null &&
+  return p.player_elo_min === 300 && p.player_elo_max === null &&
     p.opponent_elo_min === 300 && p.opponent_elo_max === null &&
-    p.date_from === '2025-01-01' && p.date_to === null && selectedMaps.length === MAPS.length;
+    p.date_from === '2025-01-01' && p.date_to === null && p.completed_only === null &&
+    selectedMaps.length === MAPS.length;
 }
 async function loadData(activeToken) {
   renderLoading();
-  if (activeView === 'specific') {
-    rows = SPECIFIC.map((condition, index) => ({ sort_order: index + 1, condition, delta: null, count: 0 }));
-    render(); return;
-  }
   try {
     const p = params();
-    let response;
-    if (isDefault(p)) {
-      try {
-        response = await fetch(`${SNAPSHOT_ROOT}/${activeView}/default-${isMW ? 'mw' : 'base'}.json`, { cache: 'no-store' });
-        if (!response.ok) throw new Error('Snapshot unavailable');
-      } catch {
-        response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
-      }
-    } else response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
-    const payload = await response.json();
-    if (!response.ok || payload.status !== 'ok') throw new Error(payload.message || `Request failed (${response.status})`);
+    const payload = await loadStats(
+      p,
+      isDefault(p) ? `${SNAPSHOT_ROOT}/${activeView}/default-${isMW ? 'mw' : 'base'}.json` : null,
+    );
     if (!mounted || activeToken !== token) return;
     rows = payload.data || []; render();
   } catch (error) { if (mounted && activeToken === token) renderError(error); }
 }
 function renderHead() {
+  const metric = mode === 'frequency' && activeView === 'specific' ? 'frequency' : 'delta';
+  const metricHeader = metric === 'frequency'
+    ? 'Frequency<span class="col-tip" data-tip="percentage of filtered player observations where this condition is true">?</span>'
+    : 'Elo &Delta;<span class="col-tip" data-tip="average Elo delta when this condition is true">?</span>';
   document.getElementById('tableHead').innerHTML = `<tr>
     <th onclick="sortPredictors('condition')" style="width:80%">Condition<span class="sort-arrow">${arrow('condition')}</span></th>
-    <th onclick="sortPredictors('delta')" style="width:20%">Elo &Delta;<span class="col-tip" data-tip="average Elo delta when this condition is true">?</span><span class="sort-arrow">${arrow('delta')}</span></th>
+    <th onclick="sortPredictors('${metric}')" style="width:20%">${metricHeader}<span class="sort-arrow">${arrow(metric)}</span></th>
   </tr>`;
 }
 function render() {
   renderHead();
-  const range = cappedNumericRange(rows.filter(row => Number(row.count) >= 1000), row => row.delta);
+  const range = cappedNumericRange(rows.filter(row => !isInsufficientObservationCount(row.count)), row => row.delta);
   const sorted = [...rows].sort(compareRows);
   document.getElementById('tableMeta').innerHTML = `<strong>${rows.length}</strong> predictors`;
   document.getElementById('tableBody').innerHTML = sorted.map(row => `<tr>
-    <td class="sponsor-name-cell">${escapeHtml(row.condition)}</td>${deltaCell(row, range)}
+    <td class="sponsor-name-cell">${escapeHtml(row.condition)}</td>${mode === 'frequency' && activeView === 'specific' ? frequencyCell(row) : deltaCell(row, range)}
   </tr>`).join('');
 }
 function compareRows(a, b) {
   const direction = currentSort.dir === 'asc' ? 1 : -1;
   if (currentSort.col === 'condition') return (a.sort_order - b.sort_order) * direction;
-  const av = Number(a.delta), bv = Number(b.delta);
+  const av = currentSort.col === 'frequency' ? frequency(a) : Number(a.delta);
+  const bv = currentSort.col === 'frequency' ? frequency(b) : Number(b.delta);
   if (!Number.isFinite(av) && !Number.isFinite(bv)) return a.sort_order - b.sort_order;
   if (!Number.isFinite(av)) return 1;
   if (!Number.isFinite(bv)) return -1;
@@ -176,8 +181,17 @@ function sortPredictors(col) {
 function deltaCell(row, range) {
   const value = Number(row.delta);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
-  if (Number(row.count) < 1000) return `<td class="delta sponsor-delta-insufficient">${fmtSigned(value)}</td>`;
+  if (isInsufficientObservationCount(row.count)) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="${INSUFFICIENT_DATA_TOOLTIP}">${fmtSigned(value)}</td>`;
   return `<td class="delta delta-ci-cell" data-ci-low="${escapeAttr(row.delta_ci95_low ?? '')}" data-ci-high="${escapeAttr(row.delta_ci95_high ?? '')}" data-ci-n="${escapeAttr(row.delta_ci95_n ?? '')}" data-ci-color-min="${escapeAttr(range.min ?? '')}" data-ci-color-max="${escapeAttr(range.max ?? '')}" style="color:${deltaRangeColor(value, range.min, range.max)}">${fmtSigned(value)}</td>`;
+}
+function frequency(row) {
+  const denominator = Number(row.denominator);
+  return denominator > 0 ? 100 * Number(row.count || 0) / denominator : Number.NaN;
+}
+function frequencyCell(row) {
+  const value = frequency(row);
+  if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
+  return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count)} / ${fmtInt(row.denominator)}" style="color:${frequencyColor(value)}">${value.toFixed(2)}%</td>`;
 }
 function arrow(col) { return currentSort.col === col ? (currentSort.dir === 'desc' ? '\u2193' : '\u2191') : '\u2195'; }
 function renderLoading() { renderHead(); document.getElementById('tableBody').innerHTML = '<tr><td colspan="2"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching predictors...</div></div></td></tr>'; }
@@ -192,11 +206,43 @@ function selectNoneMaps() { selectedMaps = []; renderMapChips(); }
 function resetFilters() {
   const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
   set('playerEloMin', '300'); set('playerEloMax', ''); set('opponentEloMin', '300'); set('opponentEloMax', '');
-  set('dateFrom', '2025-01-01'); set('dateTo', ''); selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); loadData(++token);
+  set('dateFrom', '2025-01-01'); set('dateTo', '');
+  const completed = document.getElementById('endGameToggle'); if (completed) completed.checked = false;
+  selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); loadData(++token);
 }
 function applyFiltersFromSidebar() {
   loadData(++token); document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('active');
 }
 function fmtSigned(value) { return `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(3)}`; }
+function fmtInt(value) { return Number(value || 0).toLocaleString('en-US'); }
 function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
 const escapeAttr = escapeHtml;
+
+// Predictors uses the shared tooltip element, but its insufficient/frequency
+// cells are not CI cells and therefore need their own delegated value path.
+const predictorTooltip = document.getElementById('col-tooltip');
+function predictorTooltipSource(event) {
+  return event.target.closest?.('.build-value-tooltip, .predictors-table .col-tip');
+}
+function positionPredictorTooltip(event) {
+  if (!predictorTooltip) return;
+  predictorTooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - predictorTooltip.offsetWidth - 8))}px`;
+  predictorTooltip.style.top = `${event.clientY + 18}px`;
+}
+document.addEventListener('mouseover', event => {
+  if (!mounted || !predictorTooltip) return;
+  const source = predictorTooltipSource(event);
+  if (!source) return;
+  predictorTooltip.textContent = source.dataset.valueTooltip || source.dataset.tip || '';
+  predictorTooltip.style.display = 'block';
+  positionPredictorTooltip(event);
+});
+document.addEventListener('mousemove', event => {
+  if (!mounted || !predictorTooltip || !predictorTooltipSource(event)) return;
+  positionPredictorTooltip(event);
+});
+document.addEventListener('mouseout', event => {
+  if (!mounted || !predictorTooltip) return;
+  const source = predictorTooltipSource(event);
+  if (source && !source.contains(event.relatedTarget)) predictorTooltip.style.display = 'none';
+});

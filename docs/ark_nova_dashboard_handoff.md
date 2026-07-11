@@ -42,6 +42,7 @@ Backend folder is now cleaned down to:
 ```text
 main.py
 requirements.txt
+cards_attributes.csv
 ```
 
 Old temporary backup Python files (`main_backup_before_opening_hand.py`, `main_with_opening_hand.py`) can be removed once `main.py` is confirmed current.
@@ -520,7 +521,7 @@ Amount is the mean non-null final icon count. Buckets `0` through `6` are exact 
 
 The full-width icon selector uses the PNG artwork under `assets/img/icons` and groups icons into Species, Habitat, and Other. It has no all/none control or decorative brackets. Individual icons toggle independently; a fully selected group-button click clears that group, while a partial/empty group-button click selects the whole group. A group remains visually active until all its members are deselected. Selected artwork is full-color and deselected artwork is greyed. Base omits Sea Animals from the selector, table, graph, ranges, and ranking universe. Attributes separators and Icons group separators share the same fixed 2px rule.
 
-The enlarged graph toggle at the selector's right edge swaps the table for an Endgames-style SVG line chart. The selector defines the available lines, while the graph legend independently shows/hides those lines. Each icon has a permanent palette position assigned from the complete MW/Base icon order before selector filtering, so hiding lines never recolors survivors. Delta mode plots `Delta (0)` through `Delta (7+)`, omitting missing, impossible, and sub-1,000 points and breaking paths across gaps. Frequency mode plots the same buckets as percentages. Axes scale dynamically; tooltips contain icon, bucket, and value but no observation count.
+The enlarged graph toggle at the selector's right edge swaps the table for an Endgames-style SVG line chart. It is centered within a flexible zone spanning from the final selector separator to the bar's right border. The selector defines the available lines, while the graph legend independently shows/hides those lines. Each icon has a permanent palette position assigned from the complete MW/Base icon order before selector filtering, so hiding lines never recolors survivors. Delta mode plots `Delta (0)` through `Delta (7+)`, omitting missing, impossible, and sub-1,000 points and breaking paths across gaps. Frequency mode plots the same buckets as percentages. Axes scale dynamically; tooltips contain icon, bucket, and value but no observation count.
 
 The graph and legend keep a fixed height with a stable scrollbar gutter, so reducing the available icon lines does not resize or shift the chart. Icon bucket headers use the same styled header-tooltip event path as Sponsor Endgames.
 
@@ -551,7 +552,7 @@ The deliberate exception is line-chart selection in Endgames CP distribution, En
 CP distribution:
 
 - Table view has columns `0`, `1`, `2`, `3`, `4`, and `CP`.
-- CP percentage cells use a monochrome green intensity scale normalized to 50%.
+- CP percentage cells use the shared blue frequency scale with a fixed 0–50% domain.
 - Graph view renders the same data as custom SVG with x-axis `0..4` and y-axis `0..60%`.
 - Graph legend supports all/none controls plus per-endgame selection. If all lines are selected, clicking one legend entry or graph line isolates it.
 - Deselected graph lines remain visible but greyed out.
@@ -567,7 +568,7 @@ CP by map:
 - Map filter is hidden and ignored in this view because all maps must be shown as columns.
 - Graph mode uses the same payload, with maps ordered `1a` through `8a`, then `9` through `14`, then `T1` on the x-axis and average CP on a dynamically padded y-axis. Missing points break line segments. Legend selection and nearest-point tooltips match CP distribution.
 - The `Raw / vs. avg` switch is frontend-only and applies to table and graph. Comparison values are `map CP - CP`, display signed to two decimals, use zero-anchored capped Delta colors with one shared range across all map columns, and retain raw `CP` as the final reference column.
-- CP-distribution frequency columns use the shared blue frequency scale rather than the former green intensity scale.
+- CP-distribution frequency columns use the shared blue frequency scale with the fixed 0–50% cap.
 
 Default snapshots:
 
@@ -596,9 +597,9 @@ In-page views:
 Metrics:
 
 - Uses map codes as columns and metric names as rows.
-- Maps General has four `- / O / +` segmented controls in this order: Map Pack 1, Map Pack 2, Legacy Maps, and Beginner Maps. `-` excludes the category, `O` includes it with ordinary maps, and `+` shows only that category. Defaults are Map Pack 1 `O`, Map Pack 2 `O`, Legacy `-`, and Beginner `-`, producing columns 1a-8a, 9-14, and T1. Selecting `+` forces the other three controls to `-`; ordinary maps remain visible whenever no category is in `+` mode. Exclude/Include/Only labels use the shared dashboard tooltip, not native browser titles. These are client-side controls because the backend payload already contains all 25 maps.
+- Maps General has four `- / O / +` segmented controls in this order: Map Pack 1, Map Pack 2, Legacy Maps, and Beginner Maps. `-` excludes the category, `O` includes it with ordinary maps, and `+` shows only that category. Defaults are Map Pack 1 `O`, Map Pack 2 `O`, Legacy `-`, and Beginner `-`, producing columns 1a-8a, 9-14, and T1. Selecting `+` forces the other three controls to `-`; ordinary maps remain visible whenever no category is in `+` mode. Exclude/Include/Only labels use the shared dashboard tooltip, not native browser titles. A larger Reset button sits on the same Metrics control row and restores these switch defaults plus the default metric ordering without changing sidebar filters. These are client-side controls because the backend payload already contains all 25 maps.
 - Default sort is by `Turns` ascending. `Rounds` also sorts ascending because lower values are better; other metric rows sort descending.
-- Percentage metrics display one decimal. Body values have no hover detail; map headers and compact Games footer values use the dashboard tooltip, with Games showing the full comma-grouped integer.
+- Percentage metrics display one decimal. The rows after `$ gained` are `$ gained (income)`, `$ spent (Animals)`, `$ spent (Build)`, `$ spent (Donations)`, and `$ spent (Range)`. Income reads `Money_gained_through_income`. The four spending rows remain category averages divided by total spending and therefore display percentages despite their concise labels. Their per-map tooltips show the absolute category average with two decimals and no currency symbol. Zero denominators display `-`. Map headers and compact Games footer values also use the dashboard tooltip, with Games showing the full comma-grouped integer.
 - Filters are MW/Base, Elo ranges, and date range only. No map filter, no round filter, no Completed games toggle.
 - Metrics default date is `2026-01-13` onward because Map Pack 2 was added on January 13th, 2026. Home is unrestricted; the remaining dated pages default to `2025-01-01`.
 - The visible end-date input stays blank by default; blank means no upper date limit.
@@ -639,6 +640,30 @@ and individual Delta into that chosen display slot. With no selection, body orde
 remains alphabetical; global rank calculation continues to use canonical pair
 identity. Card/Card 1/Card 2 headers are filter-only and are deliberately not sortable.
 
+The default combination snapshots are generated with `n_played >= 1000`. They retain
+`combination_ranges`, calculated from the complete untrimmed population, so the
+client-side color scale does not change merely because low-play rows were omitted.
+While a default snapshot is active and Minimum plays is at least 1000, sorting,
+pagination, card selection, and header filtering stay client-side. If a sidebar
+filter is applied or Minimum plays is lowered below 1000, the page switches to the
+server-paged API. Paged requests return at most 25, 50, or 100 rows, plus `page`,
+`page_size`, `total_rows`, global ranks, `combination_ranges`, and the option metadata
+needed by the visible filters. This keeps filtered responses small without changing
+the displayed rank or color semantics.
+
+The paged request fields are `combination_page`, `combination_page_size`,
+`combination_sort`, `combination_sort_dir`, `combination_min_plays`,
+`combination_pair_types`, `combination_card_types`, `combination_primary`,
+`combination_secondary`, `combination_header_maps`, and
+`combination_header_rounds`. The response marks this mode with
+`combination_paged: true`; its `data` array contains only the requested page.
+The page, page-size, and minimum-play request fields are optional and use the
+backend defaults `1`, `50`, and `1000` when omitted; explicitly invalid values
+are rejected.
+Minimum-plays and multi-chip header changes are debounced by 250 ms, while sorting
+and page changes request immediately. Stale responses are ignored by the existing
+request-token guard.
+
 All four tables use 100%-total desktop allocations and a `1080px` readability floor. Card + Card and Card + Endgame use `5/18/18/11/11/11/7/9/10`; Card + Endgame has independent non-sortable Card and Endgame searches, puts each general Delta beneath its name, uses only the card's three-value Type filter, and hides Completed-only because scored pairs are inherently complete. Its Round filter applies to the card play.
 
 Default snapshots:
@@ -654,11 +679,11 @@ Combo result metadata uses `combinations` on desktop and the shorter `combos` on
 
 ### Build Page
 
-`assets/js/pages/build.js` is routed at `#/build`; backend page id is `build`. The page has `Enclosures` and `Covered hexes` tabs. Enclosures uses joined Full/Log observations at one player/game row. Standard rows are sizes 1-5 with exact buckets 0-4 and `5+`; unique rows are Aviary, Reptile House, Petting Zoo, Large Aquarium, and Small Aquarium with No/Yes buckets. Only Petting Zoo has Empty, defined exactly as built once with `COALESCE(Petting_Zoo_icons, 0) = 0` and no Horse Whisperer in `played_sponsors`.
+`assets/js/pages/build.js` is routed at `#/build`; backend page id is `build`. The page has `Enclosures` and `Hexes` tabs. Enclosures uses joined Full/Log observations at one player/game row. Standard rows are sizes 1-5 with exact buckets 0-4 and `5+`; unique rows are Aviary, Reptile House, Petting Zoo, Large Aquarium, and Small Aquarium with No/Yes buckets. Only Petting Zoo has Empty, defined exactly as built once with `COALESCE(Petting_Zoo_icons, 0) = 0` and no Horse Whisperer in `played_sponsors`.
 
-Elo Delta and Frequency share the two-table layout. Delta cells expose the usual CI and use the 1,000-observation sufficiency rule. Ordinary frequency denominators are non-null observations for that enclosure field. Empty Petting Zoo frequency uniquely divides empty Petting Zoos by built Petting Zoos and uses violet. Standard enclosures use one shared bucket color range across `0-5+`; unique enclosures use one shared range across No/Yes/Empty, except the violet Empty Petting Zoo frequency exception. Elo Delta remembers Completed=false by default; Frequency separately remembers Completed=true. Default snapshots live under `card-stats/build/enclosures/{delta|frequency}/default-{mw|base}.json`.
+Elo Delta and Frequency share the two-table layout. Delta cells expose the usual CI and use the 1,000-observation sufficiency rule. Ordinary frequency denominators are non-null observations for that enclosure field. Empty Petting Zoo frequency uniquely divides empty Petting Zoos by built Petting Zoos and uses violet. Standard enclosures use one shared bucket color range across `0-5+`; unique enclosures use one shared range across No/Yes/Empty, except the violet Empty Petting Zoo frequency exception. Enclosures keep the Completed games only control; when enabled, `completed_only=true` limits the table to rows whose derived `table_conceded` value is zero. The default Delta view is unrestricted and the default Frequency view enables this control. Default snapshots live under `card-stats/build/enclosures/{delta|frequency}/default-{mw|base}.json`.
 
-Covered Hexes uses prepared Full Sample rows and `Empty_hexes` buckets `0`, `1-5`, `6-11`, `12-17`, `18-23`, and `24+`. Columns are the 15 map columns plus a final raw `Avg` reference. It has `Elo Δ / Frequency` and `Raw / vs. avg` switches. In comparison mode, each map cell shows `map value - row Avg`; `Avg` remains the raw reference. Delta cells use CI and the 1,000-observation rule in raw mode. Frequency cells show exact `count / denominator` tooltips. Map cells use one shared Delta or blue frequency range across all map cells; `Avg` uses CP-style orange-green in Delta mode and violet in Frequency mode. Default snapshots live under `card-stats/build/covered_hexes/{delta|frequency}/default-{mw|base}.json`.
+Hexes uses prepared Full Sample rows from non-conceded tables only; it has no Completed games only control. Collapsed `Empty_hexes` buckets are `0`, `1-5`, `6-11`, `12-17`, `18-23`, and `24+`. Each default and filtered response contains both the six collapsed rows and exact `0` through `23` plus `24+` in `expanded_data`, so the attached arrow changes the table locally without another request. The API has no expansion request flag; it always calculates both populations for Hexes. The arrow points down to expand and up to collapse. The state is shared across Elo Delta/Frequency and MW/Base switches. Columns are the 15 map columns plus a final raw `Avg` reference. It has `Elo Δ / Frequency` and `Raw / vs. avg` switches. In comparison mode, each map cell shows `map value - row Avg`; `Avg` remains the raw reference. Delta cells use CI and the 1,000-observation rule in raw mode. Frequency cells show exact `count / denominator` tooltips. Expanded Hexes blue frequency cells use a fixed `0–20%` color domain; collapsed Hexes uses the normal `0–50%` domain. The violet Avg frequency styling is unchanged. Default snapshots live under `card-stats/build/hexes/{delta|frequency}/default-{mw|base}.json` and contain both bucket modes.
 
 Prepared Logs includes numeric fields for all five standard sizes plus `aviary_built`, `reptile_house_built`, `petting_zoo_built`, `large_aquarium_built`, and `small_aquarium_built`.
 
@@ -668,34 +693,41 @@ Prepared Logs includes numeric fields for all five standard sizes plus `aviary_b
 
 General and Icon are backend-backed. One observation compares a player to their opponent in the same non-conceded table. A condition includes only rows where the player value is greater than the opponent value; ties do not count. Rows display the condition in the PDF-defined order plus Elo Delta with the normal CI tooltip and 1,000-observation sufficiency styling. Filters are player/opponent Elo, Maps, and Date Range. There is no Completed toggle for General/Icon.
 
-Specific is intentionally a frontend placeholder for now. It lists the Specific conditions in the requested order with dashes in Elo Delta and includes the Completed games toggle in the filter bar for future use.
+Specific is backend-backed and has a client-side `Elo Δ / Frequency` switch. Delta uses the normal CI and 1,000-observation behavior. Frequency is `count / denominator`, where denominator is every filtered player-game observation for that condition; it uses exact count tooltips and the standard blue `0–50%` color domain. Switching metrics does not request data or alter the Completed games only toggle. Unchecked completion includes recorded values from conceded and non-conceded games, while checked applies `table_conceded = 0`. MW has 22 rows; Base omits More reefers and Round 1: Humphead Wrasse and therefore has 20. Insufficient Delta and Frequency value cells use the shared styled tooltip path.
+
+Specific conditions are Triggered endgame; More endgame points; More endgame CP; More ingame CP; More reefers; More small/medium/large animals; Round 1 Upgrade, Project, Release, 2+ association actions, and Humphead Wrasse; Round 1/2 New Zealand Fur Seal; First to 5/8 CP with and without the exclusive university/partner-zoo bonus; No project/sponsor in the starting hand; No sponsor in the starting hand with Sponsors at 5; and that final condition further restricted to second player, Association at 2, and Sponsors at 5.
+
+Endgame CP is sponsor CP plus scored endgame-card CP. Endgame points value each CP at 3 and sponsor endgame appeal at 1. Ingame CP is `Conservation - endgame CP`. Threshold timing uses the first `cp_history.move` reaching the target; reaching it when the opponent never does counts as first. Sponsor endgame values are deduplicated per sponsor before summing.
+
+Reefer, animal-size, Project, and Sponsor classifications come from the canonical `cards_attributes.csv`. The same file is packaged with the Cloud Function and its parsed groups are published to `card-stats/metadata/cards-attributes.json` during daily refresh. Keep the frontend and backend copies synchronized when changing card metadata; ordinary requests use the cached parsed copy and do not fetch the CSV repeatedly.
 
 Default snapshots live under:
 
 ```text
 card-stats/predictors/general/default-{mw|base}.json
 card-stats/predictors/icon/default-{mw|base}.json
+card-stats/predictors/specific/default-{mw|base}.json
 ```
 
 ### Actions Page
 
-`assets/js/pages/actions.js` is routed at `#/actions`; backend page id is `actions`. It has four equal tabs: Starting position, Upgrades, Upgrade order, and Upgrades per map.
+`assets/js/pages/actions.js` is routed at `#/actions`; backend page id is `actions`. It has four equal tabs: Starting position, Upgrades, Upgrade order, and Upgrades by map.
 
-Starting position shows two non-sortable tables. The action-strength table compares Association, Build, Cards, and Sponsors at starting strengths 2-5. The comparison table covers Higher Association, Higher Build, Higher Cards, Higher Sponsors, and First player, with a double separator before First player. Delta cells use the usual CI and 1,000-observation rules, with one shared range across comparable Delta columns.
+Starting position shows two non-sortable tables. The action-strength table compares Association, Build, Cards, and Sponsors at starting strengths 2-5. The comparison table covers Higher Association, Higher Build, Higher Cards, Higher Sponsors, and First player, with a double separator before First player. Delta cells use the usual CI and 1,000-observation rules, with one shared range across comparable Delta columns. Insufficient-data cells use the shared dashboard tooltip.
 
-Upgrades has an `Elo Δ / Frequency` switch and two equal-width tables: number of upgrades (`0-5`) and action upgrades (Animals, Association, Build, Cards, Sponsors). Frequency mode shows percentages with exact count tooltips and blue coloring.
+Upgrades has no metric switch. Its two equal-width tables cover number of upgrades (`0-5`) and action upgrades (Animals, Association, Build, Cards, Sponsors); each table has three equal columns for its label, Elo Delta, and Frequency. One non-conceded payload supplies both metrics. Delta keeps CI/insufficient styling, while Frequency shows percentages with exact count tooltips and blue coloring. Its only default snapshots are `actions/upgrades/delta/default-{mw|base}.json`.
 
-Upgrade order has the same mode switch, one row per action, and columns for 1st through 4th upgrade. Frequency denominators are all times that same action appears in any upgrade slot.
+Upgrade order has the same mode switch, one row per action, and columns for 1st through 4th upgrade. The left-side swap-axes button transposes the table locally into four timing rows and equal-width columns for Upgrade timing plus the five actions; it remains transposed across Elo Delta/Frequency and MW/Base changes, and resets on a new Actions mount. Elo values and CI metadata are unchanged. In the normal orientation, frequency divides by all upgrades of that action. In the transposed orientation, frequency divides by all upgrades occupying that timing slot. The tooltip always shows the applicable numerator and denominator, and swapping never requests data.
 
-Upgrades per map uses the map-grid framework with `Elo Δ / Frequency` and `Raw / vs. avg` switches. Rows are the five action upgrades, map columns are `1a-8a, 9-14, T1`, and the final `Avg` column stays as the raw reference when comparison mode is active.
+Upgrades by map uses the map-grid framework with `Elo Δ / Frequency` and `Raw / vs. avg` switches. Rows are the five action upgrades, map columns are `1a-8a, 9-14, T1`, and the final `Avg` column stays as the raw reference when comparison mode is active.
 
 Default snapshots live under:
 
 ```text
 card-stats/actions/starting_position/delta/default-{mw|base}.json
-card-stats/actions/upgrades/{delta|frequency}/default-{mw|base}.json
+card-stats/actions/upgrades/delta/default-{mw|base}.json
 card-stats/actions/upgrade_order/{delta|frequency}/default-{mw|base}.json
-card-stats/actions/upgrades_per_map/{delta|frequency}/default-{mw|base}.json
+card-stats/actions/upgrades_by_map/{delta|frequency}/default-{mw|base}.json
 ```
 
 ### Shared Table UI
@@ -917,7 +949,7 @@ Current sheet CSV export source:
 https://docs.google.com/spreadsheets/d/1wJnQFXgaWa3rCUTOZpNwVETCn5fMtGo6IhjzUKlOWCs/export?format=csv&gid=1099485726
 ```
 
-The daily refresh rebuilds the prepared table, then refreshes default snapshots. The prepared Log table retains all 25 known maps; individual pages apply their own map scopes. Default snapshots include both completed and incomplete games unless a page has a hard non-conceded rule; the Completed games only toggle adds an end_game_triggered = true filter only when enabled.
+The daily refresh rebuilds the prepared tables, then refreshes default snapshots. Full Sample and Prepared Logs derive `table_conceded` per table from the raw Full Sample `concede` field: a table is completed when no player conceded, and incomplete when any player conceded. `completed_only=true` applies the completed-table filter (`table_conceded = 0`) on pages that retain the Completed games only control. Default snapshots include both completed and incomplete games unless a page has a hard non-conceded rule. Build/Hexes is always hard-filtered to completed tables and does not expose that control.
 
 Default date filter:
 
@@ -944,11 +976,15 @@ player_elo_min = 300
 opponent_elo_min = 300
 ```
 
-Completed games default:
+Completed games filter default:
 
 ```text
-end_game_triggered = null
+completed_only = null
 ```
+
+## Concession and Completion Semantics
+
+The source field is Full Sample `concede`. During prepared-table refresh, the backend derives `table_conceded` for every table: it is `1` when any player row has a non-zero `concede` value and `0` otherwise. Therefore a completed game/table means `table_conceded = 0`; an incomplete game/table means `table_conceded = 1`. `completed_only` is an API filter flag, not a database column. When true on a page that exposes the Completed games only control, the query filters to `table_conceded = 0`; null means both populations are included. Pages with an inherent non-conceded definition retain their hard `table_conceded = 0` predicate. Build/Hexes is always in that hard-filtered population and has no completion toggle.
 
 ## Backend API Shape
 
@@ -960,7 +996,7 @@ Cards default request:
 {
   "is_mw": 1,
   "maps": ["..."],
-  "end_game_triggered": null,
+  "completed_only": null,
   "player_elo_min": 300,
   "opponent_elo_min": 300,
   "date_from": "2025-01-01"
@@ -1087,10 +1123,10 @@ card-stats/data-version.json
 Filter cache version:
 
 ```text
-v5
+v9
 ```
 
-Default snapshots are public gzip-encoded JSON files loaded directly by the frontend for fast initial page loads; versioned frontend requests may use normal browser caching. The backend reads the same compressed objects transparently when serving cache fallbacks. Home additionally has a generated JavaScript bootstrap containing both default datasets so its first paint has no loading state. Non-default filter requests go through the Cloud Function and may use compressed Cloud Storage filter-cache blobs. The filter cache key includes the explicit data-version marker, so daily refresh invalidates old filter results.
+Default snapshots are public gzip-encoded JSON files. Home additionally has a generated JavaScript bootstrap containing both default datasets so its first paint has no loading state. The frontend loads the active snapshot in the foreground, then schedules two low-priority background workers after the browser is idle. Background workers cache raw responses in versioned Cache Storage entries and do not parse or synchronously serialize JSON until a page is opened. Memory and in-flight request caches prevent duplicate downloads; Cache Storage persists them across reloads. Navigation, hover, and focus prioritize the relevant snapshot, while foreground or filtered work aborts background downloads and requeues them afterward. The current daily data version is part of both cache names and snapshot URLs, and obsolete cache versions are removed. The large Card-Card combination snapshot remains a separate cached asset. Non-default filter requests go through the Cloud Function and may use compressed Cloud Storage filter-cache blobs. Large JSON responses from the function are gzip-compressed when the browser advertises support. The filter cache key includes the explicit data-version marker, so daily refresh invalidates old filter results. The first visit still requires network transfer; subsequent cached default navigation does not.
 
 ## Daily Refresh / Scheduler
 
@@ -1584,9 +1620,12 @@ There are deliberate exceptions:
 
 Other numeric scales use the minimum and maximum for that variable from the complete
 applicable payload: Elo uses `#2a5a5a` through `#2a8a7a` to `#4acfb0`;
-playrate/keeprate and frequency buckets use `#2a4a6a` through `#3a7abf` to
-`#6bb5f0` (bucket ranges are calculated in the same percentage units as their
-displayed values); CP and other orange-to-green measures use `#ff6027` to `#7cba43`.
+Cards Playrate, Opening Hand Keeprate, and Endgames Keeprate retain their payload-range
+blue scale. Other blue frequency cells use the fixed `0–50%` domain from
+`#2a4a6a` through `#3a7abf` to `#6bb5f0`; values above 50% saturate at the high endpoint
+while displayed percentages and tooltips remain exact. Expanded Build/Hexes map-frequency
+cells use a page-specific fixed `0–20%` domain instead. Violet Avg/special cells retain
+their own scales. CP and other orange-to-green measures use `#ff6027` to `#7cba43`.
 Maps metric/H2H
 scales retain their metric-specific endpoint colors. Equal minimum/maximum values use
 the scale midpoint, and null/missing values retain the muted fallback.
@@ -1789,6 +1828,14 @@ If exposed, rotate immediately:
 3. Update Scheduler header.
 4. Verify body/header safely.
 5. Run Scheduler once manually.
+
+## Frontend review notes (2026-07-10)
+
+- Bucketed Elo-delta pages now share the `assets/js/table-cells.js` threshold and tooltip constants. The observation population and exact count remain page-specific, but the presentation rule is consistent: fewer than 1,000 observations is insufficient data.
+- The Icons page no longer wraps insufficient delta values in parentheses; it uses the same muted styling and tooltip wording as the other bucketed tables.
+- Cache-busting was advanced for the shared helper and affected page modules.
+- A visual audit found the reviewed desktop CP-by-Map and Actions table geometries aligned. Wide map tables on phones intentionally retain horizontal scrolling rather than compressing columns.
+- Backend verification (read-only) confirmed Maps Fill% is based on `Empty_hexes` with the documented 42/43/39 map totals, and Empty Petting Zoo requires a built petting zoo, zero Petting Zoo icons, and no Horse Whisperer sponsor. No backend changes were made during this review.
 
 
 

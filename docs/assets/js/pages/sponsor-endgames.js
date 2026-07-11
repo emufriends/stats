@@ -2,10 +2,15 @@ export const id = 'sponsor-endgames';
 import {
   cappedNumericRange,
   deltaRangeColor,
+  frequencyColor,
   numericRange,
   orangeGreenRangeColor,
-  playrateColor,
-} from '../color-scales.js?v=20260707-1';
+} from '../color-scales.js?v=20260710-2';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-4';
+import {
+  INSUFFICIENT_DATA_TOOLTIP,
+  isInsufficientObservationCount,
+} from '../table-cells.js?v=20260710-1';
 
 export const title = 'Sponsor Endgames';
 export const navLabel = 'Sponsor Endgames';
@@ -280,24 +285,13 @@ async function applyFilters(token = mountToken) {
 
 async function loadDefaultSnapshot(view, dataset) {
   if (defaultSnapshotCache[view]?.[dataset]) return defaultSnapshotCache[view][dataset];
-  const response = await fetch(DEFAULT_SNAPSHOT_URLS[view][dataset], { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
-  const payload = await response.json();
+  const payload = await loadSnapshot(DEFAULT_SNAPSHOT_URLS[view][dataset]);
   defaultSnapshotCache[view][dataset] = payload;
   return payload;
 }
 
 async function fetchApi(params) {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.status !== 'ok') {
-    throw new Error(payload.message || `API request failed (${response.status})`);
-  }
-  return payload;
+  return fetchStats(params);
 }
 
 function renderTable() {
@@ -331,7 +325,7 @@ function renderTable() {
     sortedRows.flatMap(row => buckets.map(([field, value]) => ({
       value: Array.isArray(row.possible_values) &&
         row.possible_values.includes(value) &&
-        bucketCount(row, field) >= 1000 ? row[field] : null,
+        !isInsufficientObservationCount(bucketCount(row, field)) ? row[field] : null,
     }))),
     row => row.value,
   );
@@ -421,14 +415,14 @@ function bucketCell(row, field, value, buckets, frequencyRange, deltaRange) {
     if (!Number.isFinite(frequency)) return '<td class="unavailable-cell">-</td>';
     const tooltip = `${occurrences.toLocaleString('en-US')} / ${total.toLocaleString('en-US')}`;
     return `<td class="sponsor-frequency-cell sponsor-value-tooltip" data-value-tooltip="${escapeAttr(tooltip)}"
-      style="color:${playrateColor(frequency, frequencyRange?.min, frequencyRange?.max)}">${frequency.toFixed(2)}%</td>`;
+      style="color:${frequencyColor(frequency)}">${frequency.toFixed(2)}%</td>`;
   }
   const raw = row[field];
   const n = Number(raw);
   if (!Number.isFinite(n)) return '<td class="unavailable-cell">-</td>';
-  if (occurrences < 1000) {
+  if (isInsufficientObservationCount(occurrences)) {
     return `<td class="delta sponsor-delta-insufficient sponsor-value-tooltip"
-      data-value-tooltip="Insufficient data (fewer than 1,000 observations).">${formatInsufficientSigned(n)}</td>`;
+      data-value-tooltip="${INSUFFICIENT_DATA_TOOLTIP}">${formatInsufficientSigned(n)}</td>`;
   }
   const ciAttrs = ` data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(deltaRange?.min ?? '')}" data-ci-color-max="${escapeAttr(deltaRange?.max ?? '')}"`;
   return `<td class="delta delta-ci-cell"${ciAttrs} style="color:${deltaRangeColor(n, deltaRange?.min, deltaRange?.max)}">${formatSigned(n)}</td>`;
@@ -467,7 +461,7 @@ function sponsorBucketSortTier(row, field) {
   if (!possible) return 2;
   const value = activeMode === 'frequency' ? frequencyForSort(row, field) : Number(row[field]);
   if (!Number.isFinite(value)) return 2;
-  return activeMode === 'delta' && bucketCount(row, field) < 1000 ? 1 : 0;
+  return activeMode === 'delta' && isInsufficientObservationCount(bucketCount(row, field)) ? 1 : 0;
 }
 
 function sponsorRankEligible(row) {

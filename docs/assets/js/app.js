@@ -1,6 +1,7 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260708-11';
-import { deltaColor, deltaRangeColor } from './color-scales.js?v=20260707-1';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260711-6';
+import { deltaColor, deltaRangeColor, orangeGreenRangeColor } from './color-scales.js?v=20260710-3';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
+import { preloadDefaultSnapshots, prioritizeSnapshotGroup } from './snapshot-cache.js?v=20260711-6';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -10,12 +11,20 @@ import {
   setTopbarDataset,
   toggleNavCollapse,
   toggleSidebar,
-} from './layout.js?v=20260709-1';
+} from './layout.js?v=20260711-1';
 
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;
   document.querySelectorAll('#sidebar .date-input[type="text"]').forEach(normalizeIsoDateInput);
 }, true);
+
+function prioritizeNavigationSnapshot(event) {
+  const link = event.target.closest?.('.side-nav-link[data-page-id]');
+  if (link) prioritizeSnapshotGroup(link.dataset.pageId);
+}
+
+document.addEventListener('pointerover', prioritizeNavigationSnapshot, { passive: true });
+document.addEventListener('focusin', prioritizeNavigationSnapshot, { passive: true });
 
 // App controller for the static multi-page dashboard.
 //
@@ -43,7 +52,6 @@ async function renderCurrentRoute() {
 
   const pageId = getRoutePageId(PAGES, DEFAULT_PAGE_ID);
   const pageDef = PAGES[pageId] || PAGES[DEFAULT_PAGE_ID];
-
   const page = await pageDef.load();
   if (renderToken !== routeRenderToken) return;
 
@@ -63,6 +71,9 @@ async function renderCurrentRoute() {
   setTopbarDataset(currentDataset);
 
   if (page.mount) page.mount({ dataset: currentDataset, pageId: activePageId });
+  // Let the active page claim the network first; background warmup begins from
+  // an idle callback after its foreground request has been started.
+  preloadDefaultSnapshots(pageDef.id);
   scheduleRankCellFit();
 }
 
@@ -200,7 +211,9 @@ function renderDeltaCiTooltip(cell) {
   }
   const signed = value => `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
   const color = value => Number.isFinite(colorMin) && Number.isFinite(colorMax)
-    ? deltaRangeColor(value, colorMin, colorMax)
+    ? (cell.dataset.ciColorScale === 'orange-green'
+      ? orangeGreenRangeColor(value, colorMin, colorMax)
+      : deltaRangeColor(value, colorMin, colorMax))
     : deltaColor(value);
   tooltip.innerHTML = `
     <div class="ci-tooltip-title">95% confidence interval</div>

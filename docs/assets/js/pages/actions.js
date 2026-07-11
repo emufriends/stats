@@ -1,11 +1,16 @@
 import {
   cappedNumericRange,
   deltaRangeColor,
+  frequencyColor,
   numericRange,
   orangeGreenRangeColor,
-  playrateColor,
   violetRangeColor,
-} from '../color-scales.js?v=20260707-1';
+} from '../color-scales.js?v=20260711-1';
+import {
+  INSUFFICIENT_DATA_TOOLTIP,
+  isInsufficientObservationCount,
+} from '../table-cells.js?v=20260710-1';
+import { loadStats } from '../snapshot-cache.js?v=20260711-6';
 
 export const id = 'actions';
 export const title = 'Actions';
@@ -26,7 +31,16 @@ const MAPS = [
 
 export const mainHtml = `
   <div class="main-header sponsor-endgames-main-header actions-main-header">
-    <div class="table-meta" id="tableMeta"></div>
+    <div class="actions-header-left">
+      <button type="button" class="actions-transpose-btn is-hidden" id="actionsTransposeBtn"
+        onclick="toggleActionsOrderTranspose()" aria-pressed="false"
+        aria-label="Swap upgrade-order rows and columns" title="Swap rows and columns">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h13m0 0-3-3m3 3-3 3M20 17H7m0 0 3-3m-3 3 3 3"/>
+        </svg>
+      </button>
+      <div class="table-meta" id="tableMeta"></div>
+    </div>
     <div class="build-switches">
       <div class="maps-h2h-mode actions-compare-mode" role="group" aria-label="Actions comparison mode">
         <button type="button" class="active" data-compare="raw" onclick="setActionsCompareMode('raw')">Raw</button>
@@ -44,7 +58,7 @@ export const mainHtml = `
         <button class="endgames-tab active" data-view="starting_position" onclick="setActionsView('starting_position')">Starting position</button>
         <button class="endgames-tab" data-view="upgrades" onclick="setActionsView('upgrades')">Upgrades</button>
         <button class="endgames-tab" data-view="upgrade_order" onclick="setActionsView('upgrade_order')">Upgrade order</button>
-        <button class="endgames-tab" data-view="upgrades_per_map" onclick="setActionsView('upgrades_per_map')">Upgrades by map</button>
+        <button class="endgames-tab" data-view="upgrades_by_map" onclick="setActionsView('upgrades_by_map')">Upgrades by map</button>
       </div>
     </div>
   </div>
@@ -83,31 +97,42 @@ let isMW = 1;
 let view = 'starting_position';
 let mode = 'delta';
 let compareMode = 'raw';
+let orderTransposed = false;
 let rows = [];
 let selectedMaps = MAPS.map(([, , full]) => full);
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true; token += 1; isMW = Number(dataset) === 0 ? 0 : 1;
-  view = 'starting_position'; mode = 'delta'; compareMode = 'raw'; rows = [];
+  view = 'starting_position'; mode = 'delta'; compareMode = 'raw'; orderTransposed = false; rows = [];
   selectedMaps = MAPS.map(([, , full]) => full);
-  Object.assign(window, { setActionsView, setActionsMode, setActionsCompareMode, resetFilters, applyFiltersFromSidebar, selectAllMaps, selectNoneMaps, toggleActionsMap });
+  Object.assign(window, { setActionsView, setActionsMode, setActionsCompareMode, toggleActionsOrderTranspose, resetFilters, applyFiltersFromSidebar, selectAllMaps, selectNoneMaps, toggleActionsMap });
   renderMapChips(); syncControls(); loadData(token);
 }
 export function unmount() { mounted = false; token += 1; }
 export function setDataset(value) { isMW = Number(value) === 0 ? 0 : 1; loadData(++token); }
 
 function setActionsView(next) {
-  view = ['starting_position', 'upgrades', 'upgrade_order', 'upgrades_per_map'].includes(next) ? next : 'starting_position';
+  view = ['starting_position', 'upgrades', 'upgrade_order', 'upgrades_by_map'].includes(next) ? next : 'starting_position';
   mode = 'delta'; compareMode = 'raw'; syncControls(); loadData(++token);
 }
 function setActionsMode(next) { mode = next === 'frequency' ? 'frequency' : 'delta'; syncControls(); loadData(++token); }
 function setActionsCompareMode(next) { compareMode = next === 'average' ? 'average' : 'raw'; syncControls(); render(); }
+function toggleActionsOrderTranspose() {
+  if (view !== 'upgrade_order') return;
+  orderTransposed = !orderTransposed;
+  syncControls();
+  render();
+}
 function syncControls() {
   document.querySelectorAll('.actions-tabs .endgames-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   document.querySelectorAll('.actions-mode button').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
   document.querySelectorAll('.actions-compare-mode button').forEach(btn => btn.classList.toggle('active', btn.dataset.compare === compareMode));
-  document.querySelector('.actions-mode')?.classList.toggle('is-hidden', view === 'starting_position');
-  document.querySelector('.actions-compare-mode')?.classList.toggle('is-hidden', view !== 'upgrades_per_map');
+  document.querySelector('.actions-mode')?.classList.toggle('is-hidden', view === 'starting_position' || view === 'upgrades');
+  document.querySelector('.actions-compare-mode')?.classList.toggle('is-hidden', view !== 'upgrades_by_map');
+  const transpose = document.getElementById('actionsTransposeBtn');
+  transpose?.classList.toggle('is-hidden', view !== 'upgrade_order');
+  transpose?.setAttribute('aria-pressed', String(orderTransposed));
+  if (transpose) transpose.title = orderTransposed ? 'Restore rows and columns' : 'Swap rows and columns';
 }
 function params() {
   const v = id => document.getElementById(id)?.value ?? '';
@@ -118,11 +143,12 @@ function params() {
     opponent_elo_min: v('opponentEloMin') === '' ? 0 : Number(v('opponentEloMin')),
     opponent_elo_max: v('opponentEloMax') === '' ? null : Number(v('opponentEloMax')),
     date_from: v('dateFrom') || '2025-01-01', date_to: v('dateTo') || null,
-    end_game_triggered: mode === 'frequency' && view !== 'starting_position' ? true : null,
+    completed_only: mode === 'frequency' && view !== 'starting_position' ? true : null,
   };
 }
 function snapshotUrl() {
-  return `${SNAPSHOT_ROOT}/${view}/${mode}/default-${isMW ? 'mw' : 'base'}.json`;
+  const snapshotMode = view === 'starting_position' ? 'delta' : mode;
+  return `${SNAPSHOT_ROOT}/${view}/${snapshotMode}/default-${isMW ? 'mw' : 'base'}.json`;
 }
 function isDefault(p) {
   return p.player_elo_min === 300 && p.player_elo_max === null &&
@@ -133,17 +159,7 @@ async function loadData(activeToken) {
   renderLoading();
   try {
     const p = params();
-    let response;
-    if (isDefault(p)) {
-      try {
-        response = await fetch(snapshotUrl(), { cache: 'no-store' });
-        if (!response.ok) throw new Error('Snapshot unavailable');
-      } catch {
-        response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
-      }
-    } else response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
-    const payload = await response.json();
-    if (!response.ok || payload.status !== 'ok') throw new Error(payload.message || `Request failed (${response.status})`);
+    const payload = await loadStats(p, isDefault(p) ? snapshotUrl() : null);
     if (!mounted || activeToken !== token) return;
     rows = payload.data || []; render();
   } catch (error) { if (mounted && activeToken === token) renderError(error); }
@@ -162,11 +178,11 @@ function renderStarting() {
     strength.flatMap(row => [2, 3, 4, 5].map(v => ({
       value: row[`delta_${v}`],
       count: observationCount(row, `delta_${v}`, row[`count_${v}`]),
-    }))).filter(item => item.count >= 1000),
+    }))).filter(item => !isInsufficientObservationCount(item.count)),
     item => item.value,
   );
   const compRange = cappedNumericRange(
-    comparison.filter(row => observationCount(row, 'delta_2', row.count_2) >= 1000),
+    comparison.filter(row => !isInsufficientObservationCount(observationCount(row, 'delta_2', row.count_2))),
     row => row.delta_2,
   );
   document.getElementById('actionsContent').innerHTML = `<div class="actions-tables">
@@ -190,13 +206,10 @@ function renderUpgrades() {
   </div>`;
 }
 function simpleMetricTable(firstHeader, data) {
-  const range = mode === 'delta'
-    ? cappedNumericRange(data.filter(row => row.count >= 1000), row => row.delta)
-    : numericRange(data, row => frequency(row));
-  const header = mode === 'delta' ? 'Elo \u0394' : 'Frequency';
+  const range = cappedNumericRange(data.filter(row => !isInsufficientObservationCount(row.count)), row => row.delta);
   return `<div class="build-table-panel"><div class="table-scroll">
-    <table class="sponsor-endgames-table actions-table"><thead><tr><th style="width:50%">${firstHeader}</th><th style="width:50%">${header}</th></tr></thead>
-    <tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${escapeHtml(row.label)}</td>${mode === 'delta' ? deltaCell(row, 'delta', row.count, range) : frequencyCell(row, range)}</tr>`).join('')}</tbody></table>
+    <table class="sponsor-endgames-table actions-table actions-upgrades-combined"><thead><tr><th>${firstHeader}</th><th>Elo \u0394</th><th>Frequency</th></tr></thead>
+    <tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${escapeHtml(row.label)}</td>${deltaCell(row, 'delta', row.count, range)}${frequencyCell(row, range)}</tr>`).join('')}</tbody></table>
   </div></div>`;
 }
 
@@ -206,11 +219,25 @@ function renderUpgradeOrder() {
       rows.flatMap(row => [1,2,3,4].map(v => ({
         value: row[`delta_${v}`],
         count: observationCount(row, `delta_${v}`, row[`count_${v}`]),
-      }))).filter(item => item.count >= 1000),
+      }))).filter(item => !isInsufficientObservationCount(item.count)),
       item => item.value,
     )
     : numericRange(rows.flatMap(row => [1,2,3,4].map(v => ({ value: orderFrequency(row, v) }))), item => item.value);
   const prefix = mode === 'delta' ? '\u0394' : 'f';
+  if (orderTransposed) {
+    document.getElementById('actionsContent').innerHTML = `<div class="table-wrap"><div class="table-scroll">
+      <table id="statsTable" class="sponsor-endgames-table actions-table actions-order-transposed"><thead><tr>
+        <th>Upgrade timing</th>${rows.map(row => `<th>${prefix} (${escapeHtml(row.label)})</th>`).join('')}
+      </tr></thead>
+      <tbody>${[1,2,3,4].map(slot => `<tr>
+        <td class="sponsor-name-cell">${slot}${ordinal(slot)}</td>
+        ${rows.map(row => mode === 'delta'
+          ? deltaCell(row, `delta_${slot}`, row[`count_${slot}`], range)
+          : transposedOrderFrequencyCell(row, slot)).join('')}
+      </tr>`).join('')}</tbody></table>
+    </div></div>`;
+    return;
+  }
   document.getElementById('actionsContent').innerHTML = `<div class="table-wrap"><div class="table-scroll">
     <table id="statsTable" class="sponsor-endgames-table actions-table"><thead><tr><th style="width:50%">Action</th>${[1,2,3,4].map(v => `<th style="width:12.5%">${prefix} (${v}${ordinal(v)})</th>`).join('')}</tr></thead>
     <tbody>${rows.map(row => `<tr><td class="sponsor-name-cell">${row.label}</td>${[1,2,3,4].map(v => mode === 'delta' ? deltaCell(row, `delta_${v}`, row[`count_${v}`], range) : orderFrequencyCell(row, v, range)).join('')}</tr>`).join('')}</tbody></table>
@@ -219,10 +246,10 @@ function renderUpgradeOrder() {
 function renderPerMap() {
   const mapKeys = MAPS.map(([, key]) => key);
   const mapRange = mode === 'delta'
-    ? cappedNumericRange(rows.flatMap(row => mapKeys.map(field => ({ value: displayedMapValue(row, field), count: row[`count_${field}`] }))).filter(item => mode === 'frequency' || item.count >= 1000), item => item.value)
+    ? cappedNumericRange(rows.flatMap(row => mapKeys.map(field => ({ value: displayedMapValue(row, field), count: row[`count_${field}`] }))).filter(item => mode === 'frequency' || !isInsufficientObservationCount(item.count)), item => item.value)
     : numericRange(rows.flatMap(row => mapKeys.map(field => ({ value: displayedMapValue(row, field) }))), item => item.value);
   const avgRange = mode === 'delta' ? numericRange(rows, row => row.avg) : numericRange(rows, row => frequencyFor(row, 'avg'));
-  document.getElementById('actionsContent').innerHTML = `<div class="table-wrap build-covered-wrap"><div class="table-scroll">
+  document.getElementById('actionsContent').innerHTML = `<div class="table-wrap build-hexes-wrap"><div class="table-scroll">
     <table id="statsTable" class="maps-table actions-map-table ${mode === 'frequency' ? 'actions-map-frequency' : ''}"><thead><tr><th style="width:10%">Upgrade</th>${MAPS.map(([short,,full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%">${short}</th>`).join('')}<th style="width:7.5%">Avg</th></tr></thead>
     <tbody>${rows.map(row => `<tr><td class="sponsor-name-cell">${row.label}</td>${MAPS.map(([, key]) => mapCell(row, key, mapRange)).join('')}${mapAvgCell(row, avgRange)}</tr>`).join('')}</tbody></table>
   </div></div>`;
@@ -231,7 +258,7 @@ function deltaCell(row, field, count, range) {
   const value = Number(row[field]);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
   const n = observationCount(row, field, count);
-  if (n < 1000) return `<td class="delta sponsor-delta-insufficient">${fmtSigned(value)}</td>`;
+  if (isInsufficientObservationCount(n)) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="${INSUFFICIENT_DATA_TOOLTIP}">${fmtSigned(value)}</td>`;
   const colorRange = normalizedDeltaRange(range, value);
   return `<td class="delta delta-ci-cell" data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(colorRange.min ?? '')}" data-ci-color-max="${escapeAttr(colorRange.max ?? '')}" style="color:${deltaRangeColor(value, colorRange.min, colorRange.max)}">${fmtSigned(value)}</td>`;
 }
@@ -251,13 +278,20 @@ function frequency(row) { return Number(row.denominator) > 0 ? 100 * Number(row.
 function frequencyCell(row, range) {
   const pct = frequency(row);
   if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
-  return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count)} / ${fmtInt(row.denominator)}" style="color:${playrateColor(pct, range.min, range.max)}">${pct.toFixed(2)}%</td>`;
+  return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count)} / ${fmtInt(row.denominator)}" style="color:${frequencyColor(pct)}">${pct.toFixed(2)}%</td>`;
 }
 function orderFrequency(row, slot) { return Number(row.denominator) > 0 ? 100 * Number(row[`count_${slot}`] || 0) / Number(row.denominator) : Number.NaN; }
 function orderFrequencyCell(row, slot, range) {
   const pct = orderFrequency(row, slot);
   if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
-  return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row[`count_${slot}`])} / ${fmtInt(row.denominator)}" style="color:${playrateColor(pct, range.min, range.max)}">${pct.toFixed(2)}%</td>`;
+  return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row[`count_${slot}`])} / ${fmtInt(row.denominator)}" style="color:${frequencyColor(pct)}">${pct.toFixed(2)}%</td>`;
+}
+function transposedOrderFrequencyCell(row, slot) {
+  const denominator = rows.reduce((sum, item) => sum + Number(item[`count_${slot}`] || 0), 0);
+  const numerator = Number(row[`count_${slot}`] || 0);
+  const pct = denominator > 0 ? 100 * numerator / denominator : Number.NaN;
+  if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
+  return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(numerator)} / ${fmtInt(denominator)}" style="color:${frequencyColor(pct)}">${pct.toFixed(2)}%</td>`;
 }
 function frequencyFor(row, field) { return Number(row[`denom_${field}`]) > 0 ? 100 * Number(row[`count_${field}`] || 0) / Number(row[`denom_${field}`]) : Number.NaN; }
 function displayedMapValue(row, field) {
@@ -279,7 +313,7 @@ function mapCell(row, field, range) {
   if (mode === 'frequency') {
     const raw = frequencyFor(row, field);
     const text = compareMode === 'average' ? fmtSignedPercentAdaptive(value) : fmtPercentFixed(raw);
-    return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row[`count_${field}`])} / ${fmtInt(row[`denom_${field}`])}" style="color:${playrateColor(value, range.min, range.max)}">${text}</td>`;
+    return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row[`count_${field}`])} / ${fmtInt(row[`denom_${field}`])}" style="color:${frequencyColor(value)}">${text}</td>`;
   }
   if (compareMode === 'average') return `<td class="delta cp-map-comparison" style="color:${deltaRangeColor(value, range.min, range.max)}">${fmtSigned(value, 3, true)}</td>`;
   return deltaCell(row, field, row[`count_${field}`], range);

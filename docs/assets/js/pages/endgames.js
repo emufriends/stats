@@ -2,12 +2,14 @@
 import {
   cappedNumericRange,
   deltaRangeColor,
+  frequencyColor,
   divergingRangeColor,
   numericRange,
   orangeGreenRangeColor,
   playrateColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260707-1';
+} from '../color-scales.js?v=20260710-2';
+import { loadStats } from '../snapshot-cache.js?v=20260711-4';
 
 export const title = 'Endgames';
 export const navLabel = 'Endgames';
@@ -484,28 +486,10 @@ async function applyFilters(activeMountToken = mountToken) {
 
   try {
     let json;
-    if (defaultSnapshotKey !== null) {
-      try {
-        const snapshotRes = await fetch(snapshotUrlForKey(defaultSnapshotKey), { cache: 'no-cache' });
-        if (!snapshotRes.ok) throw new Error(`Snapshot HTTP ${snapshotRes.status}`);
-        json = await snapshotRes.json();
-      } catch (snapshotErr) {
-        const res = await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(params),
-        });
-        json = await res.json();
-      }
-    } else {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-        cache: 'no-store',
-      });
-      json = await res.json();
-    }
+    json = await loadStats(
+      params,
+      defaultSnapshotKey === null ? null : snapshotUrlForKey(defaultSnapshotKey),
+    );
     if (!isCurrentMount(activeMountToken)) return;
     if (json.status !== 'ok') throw new Error(json.message || 'Unknown error');
     allData = Array.isArray(json.data) ? json.data : [];
@@ -1366,7 +1350,7 @@ function titleCase(str) {
 
 function cpPctColor(val, range) {
   if (val == null) return 'var(--text-muted)';
-  return playrateColor(val, range?.min, range?.max);
+  return frequencyColor(val);
 }
 
 function cpMapValue(row, field) {

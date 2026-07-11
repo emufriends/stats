@@ -1,11 +1,16 @@
 import {
   cappedNumericRange,
   deltaRangeColor,
+  frequencyColor,
   numericRange,
   orangeGreenRangeColor,
-  playrateColor,
   violetRangeColor,
-} from '../color-scales.js?v=20260707-1';
+} from '../color-scales.js?v=20260711-1';
+import {
+  INSUFFICIENT_DATA_TOOLTIP,
+  isInsufficientObservationCount,
+} from '../table-cells.js?v=20260710-1';
+import { loadStats } from '../snapshot-cache.js?v=20260711-4';
 
 export const id = 'build';
 export const title = 'Build';
@@ -45,7 +50,7 @@ export const mainHtml = `
     <div class="attributes-bar-header endgames-tabs-header">
       <div class="endgames-tabs build-tabs" role="tablist" aria-label="Build views">
         <button class="endgames-tab active" type="button" data-view="enclosures" onclick="setBuildView('enclosures')">Enclosures</button>
-        <button class="endgames-tab" type="button" data-view="covered_hexes" onclick="setBuildView('covered_hexes')">Hexes</button>
+        <button class="endgames-tab" type="button" data-view="hexes" onclick="setBuildView('hexes')">Hexes</button>
       </div>
     </div>
   </div>
@@ -76,7 +81,7 @@ export const sidebarHtml = `
     <input class="date-input" type="text" id="dateTo" placeholder="yyyy-mm-dd" />
   </div>
   <hr class="divider" />
-  <div class="filter-group"><div class="toggle-row"><span class="toggle-label">Completed games only</span>
+  <div class="filter-group" id="completedFilterGroup"><div class="toggle-row"><span class="toggle-label">Completed games only</span>
     <label class="toggle"><input type="checkbox" id="endGameToggle" onchange="rememberBuildCompleted()"><span class="toggle-track"></span></label>
   </div></div>
   <hr class="divider" />
@@ -89,8 +94,10 @@ let mode = 'delta';
 let view = 'enclosures';
 let compareMode = 'raw';
 let rows = [];
+let expandedRows = [];
 let selectedMaps = MAPS.map(([, , full]) => full);
 let completedByMode = { delta: false, frequency: true };
+let expanded = false;
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true;
@@ -100,8 +107,10 @@ export function mount({ dataset = 1 } = {}) {
   view = 'enclosures';
   compareMode = 'raw';
   rows = [];
+  expandedRows = [];
   selectedMaps = MAPS.map(([, , full]) => full);
   completedByMode = { delta: false, frequency: true };
+  expanded = false;
   bindHandlers();
   renderMapChips();
   syncControls();
@@ -116,7 +125,7 @@ export function setDataset(value) {
 
 function bindHandlers() {
   Object.assign(window, {
-    setBuildMode, setBuildView, setBuildCompareMode, rememberBuildCompleted, resetFilters,
+    setBuildMode, setBuildView, setBuildCompareMode, toggleBuildExpanded, rememberBuildCompleted, resetFilters,
     applyFiltersFromSidebar, selectAllMaps, selectNoneMaps, toggleBuildMap,
   });
 }
@@ -128,7 +137,7 @@ function setBuildMode(next) {
   loadData(++token);
 }
 function setBuildView(next) {
-  view = next === 'covered_hexes' ? 'covered_hexes' : 'enclosures';
+  view = next === 'hexes' ? 'hexes' : 'enclosures';
   compareMode = 'raw';
   syncControls();
   loadData(++token);
@@ -138,11 +147,17 @@ function setBuildCompareMode(next) {
   syncControls();
   render();
 }
+function toggleBuildExpanded() {
+  if (view !== 'hexes') return;
+  expanded = !expanded;
+  render();
+}
 function syncControls() {
   document.querySelectorAll('.build-mode button').forEach(button => button.classList.toggle('active', button.dataset.mode === mode));
   document.querySelectorAll('.build-compare-mode button').forEach(button => button.classList.toggle('active', button.dataset.compare === compareMode));
   document.querySelectorAll('.build-tabs .endgames-tab').forEach(button => button.classList.toggle('active', button.dataset.view === view));
-  document.querySelector('.build-compare-mode')?.classList.toggle('is-hidden', view !== 'covered_hexes');
+  document.querySelector('.build-compare-mode')?.classList.toggle('is-hidden', view !== 'hexes');
+  document.getElementById('completedFilterGroup')?.classList.toggle('is-hidden', view === 'hexes');
   syncCompleted();
 }
 function syncCompleted() {
@@ -162,7 +177,7 @@ function getParams() {
     opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
     opponent_elo_max: value('opponentEloMax') === '' ? null : Number(value('opponentEloMax')),
     date_from: value('dateFrom') || '2025-01-01', date_to: value('dateTo') || null,
-    end_game_triggered: completedByMode[mode] ? true : null,
+    completed_only: view === 'hexes' ? null : (completedByMode[mode] ? true : null),
   };
 }
 
@@ -171,7 +186,7 @@ function isDefault(params) {
     params.opponent_elo_min === 300 && params.opponent_elo_max === null &&
     params.date_from === '2025-01-01' && params.date_to === null &&
     selectedMaps.length === MAPS.length &&
-    params.end_game_triggered === (mode === 'frequency' ? true : null);
+    params.completed_only === (view === 'hexes' ? null : (mode === 'frequency' ? true : null));
 }
 
 function snapshotUrl() {
@@ -183,25 +198,10 @@ async function loadData(activeToken) {
   renderLoading();
   try {
     const params = getParams();
-    let response;
-    if (isDefault(params)) {
-      try {
-        response = await fetch(snapshotUrl(), { cache: 'no-store' });
-        if (!response.ok) throw new Error('Snapshot unavailable');
-      } catch {
-        response = await fetch(API_URL, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params),
-        });
-      }
-    } else {
-      response = await fetch(API_URL, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params),
-      });
-    }
-    const payload = await response.json();
-    if (!response.ok || payload.status !== 'ok') throw new Error(payload.message || `Request failed (${response.status})`);
+    const payload = await loadStats(params, isDefault(params) ? snapshotUrl() : null);
     if (!mounted || activeToken !== token) return;
     rows = payload.data || [];
+    expandedRows = Array.isArray(payload.expanded_data) ? payload.expanded_data : rows;
     render();
   } catch (error) {
     if (mounted && activeToken === token) renderError(error);
@@ -209,7 +209,7 @@ async function loadData(activeToken) {
 }
 
 function render() {
-  if (view === 'covered_hexes') renderCovered();
+  if (view === 'hexes') renderHexes();
   else renderEnclosures();
 }
 
@@ -227,7 +227,7 @@ function enclosureTableHtml(titleText, data, buckets, unique) {
   const usable = data.flatMap(row => buckets.map(([field]) => ({ row, field })))
     .filter(({ row, field }) => possible(row, field));
   const range = mode === 'delta'
-    ? cappedNumericRange(usable.filter(({ row, field }) => count(row, field) >= 1000), item => item.row[item.field])
+    ? cappedNumericRange(usable.filter(({ row, field }) => !isInsufficientObservationCount(count(row, field))), item => item.row[item.field])
     : numericRange(usable.filter(({ field }) => field !== 'delta_empty'), item => frequency(item.row, item.field));
   const prefix = mode === 'delta' ? '\u0394' : 'f';
   const tableClass = unique ? 'build-unique-enclosures-table' : 'build-standard-enclosures-table';
@@ -268,38 +268,46 @@ function enclosureCell(row, field, range) {
     const pct = frequency(row, field);
     if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
     const total = denominator(row, field);
-    const color = field === 'delta_empty' ? 'rgba(153, 102, 204, .72)' : playrateColor(pct, range.min, range.max);
+    const color = field === 'delta_empty' ? 'rgba(153, 102, 204, .72)' : frequencyColor(pct);
     return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(occurrences)} / ${fmtInt(total)}" style="color:${color}">${pct.toFixed(2)}%</td>`;
   }
   return deltaCell(row, field, occurrences, range);
 }
 
-function renderCovered() {
+function renderHexes() {
+  // Hexes is always non-conceded. Both collapsed and exact rows arrive in the
+  // same snapshot/API payload, so changing expansion never performs a request.
   document.getElementById('tableMeta').textContent = '';
   const mapFields = MAPS.map(([, key]) => key);
-  const mapValues = rows.flatMap(row => mapFields.map(field => ({ value: displayedMapValue(row, field) })));
+  const displayRows = expanded ? expandedRows : rows;
+  const mapValues = displayRows.flatMap(row => mapFields.map(field => ({ value: displayedMapValue(row, field) })));
   const mapRange = mode === 'delta'
     ? cappedNumericRange(mapValues, row => row.value)
     : numericRange(mapValues, row => row.value);
   const avgRange = mode === 'delta'
-    ? numericRange(rows, row => row.avg)
-    : numericRange(rows, row => frequencyFor(row, 'avg'));
-  const prefix = mode === 'delta' ? '\u0394' : 'f';
-  document.getElementById('buildContent').innerHTML = `<div class="table-wrap build-covered-wrap"><div class="table-scroll">
-    <table class="maps-table build-covered-table ${mode === 'frequency' ? 'build-covered-frequency' : ''}" id="statsTable">
+    ? numericRange(displayRows, row => row.avg)
+    : numericRange(displayRows, row => frequencyFor(row, 'avg'));
+  document.getElementById('buildContent').innerHTML = `<div class="build-hexes-shell ${expanded ? 'is-expanded' : ''}">
+    <div class="table-wrap build-hexes-wrap">
+    <div class="table-scroll">
+    <table class="maps-table build-hexes-table ${mode === 'frequency' ? 'build-hexes-frequency' : ''}" id="statsTable">
       <thead><tr>
-        <th class="build-covered-bucket-header" style="width:10%">Empty hexes</th>
+        <th class="build-hexes-bucket-header" style="width:10%">Empty hexes</th>
         ${MAPS.map(([short, , full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%;text-align:center">${escapeHtml(short)}</th>`).join('')}
         <th style="width:7.5%">Avg</th>
       </tr></thead>
-      <tbody>${rows.map(row => `<tr>
-        <td class="sponsor-name-cell build-covered-bucket-cell">${escapeHtml(row.bucket_label)}</td>
-        ${MAPS.map(([, key]) => coveredCell(row, key, mapRange)).join('')}
-        ${coveredAvgCell(row, avgRange)}
-      </tr>`).join('')}</tbody>
+      <tbody>${displayRows.map(row => `<tr class="${expanded ? 'hexes-expanded-row' : ''}">
+        <td class="sponsor-name-cell build-hexes-bucket-cell">${escapeHtml(row.bucket_label)}</td>
+        ${MAPS.map(([, key]) => hexesCell(row, key, mapRange)).join('')}
+        ${hexesAvgCell(row, avgRange)}
+       </tr>`).join('')}</tbody>
     </table>
-  </div></div>`;
-  void prefix;
+    </div>
+    </div>
+  <button type="button" class="build-expand-btn" onclick="toggleBuildExpanded()"
+    aria-expanded="${expanded}" aria-label="${expanded ? 'Collapse exact empty-hex values' : 'Expand exact empty-hex values'}"
+    title="${expanded ? 'Collapse values' : 'Expand values'}"><span aria-hidden="true">${expanded ? '&#9650;' : '&#9660;'}</span></button>
+  </div>`;
 }
 
 function displayedMapValue(row, field) {
@@ -320,7 +328,7 @@ function frequencyFor(row, field) {
   const occurrences = Number(row[`count_${field}`]);
   return total > 0 ? 100 * occurrences / total : Number.NaN;
 }
-function coveredCell(row, field, range) {
+function hexesCell(row, field, range) {
   const value = displayedMapValue(row, field);
   const occurrences = Number(row[`count_${field}`]) || 0;
   if (mode === 'frequency') {
@@ -329,19 +337,20 @@ function coveredCell(row, field, range) {
     const total = Number(row[`denom_${field}`]) || 0;
     const text = compareMode === 'average' ? fmtFrequencyComparison(value) : `${rawPct.toFixed(2)}%`;
     const tip = `${fmtInt(occurrences)} / ${fmtInt(total)}`;
-    return `<td class="build-value-tooltip" data-value-tooltip="${tip}" style="color:${playrateColor(value, range.min, range.max)}">${text}</td>`;
+    const frequencyCap = expanded ? 20 : 50;
+    return `<td class="build-value-tooltip" data-value-tooltip="${tip}" style="color:${frequencyColor(value, frequencyCap)}">${text}</td>`;
   }
   const text = compareMode === 'average' ? fmtSigned(value, 3, true) : fmtSigned(value, 3, true);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
   if (compareMode === 'average') {
-    if (occurrences < 1000) {
-      return `<td class="delta cp-map-comparison sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="Insufficient data (fewer than 1,000 observations).">${text}</td>`;
+    if (isInsufficientObservationCount(occurrences)) {
+      return `<td class="delta cp-map-comparison sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="${INSUFFICIENT_DATA_TOOLTIP}">${text}</td>`;
     }
     return `<td class="delta cp-map-comparison" style="color:${deltaRangeColor(value, range.min, range.max)}">${text}</td>`;
   }
   return deltaCell(row, field, occurrences, range, text);
 }
-function coveredAvgCell(row, range) {
+function hexesAvgCell(row, range) {
   if (mode === 'frequency') {
     const pct = frequencyFor(row, 'avg');
     if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
@@ -349,14 +358,22 @@ function coveredAvgCell(row, range) {
   }
   const value = Number(row.avg);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
-  return `<td class="delta cp-cell" style="color:${orangeGreenRangeColor(value, range.min, range.max)}">${fmtSigned(value, 3, true)}</td>`;
+  const ciN = Number(row.avg_ci95_n);
+  const displayText = fmtSigned(value, 3, true);
+  if (isInsufficientObservationCount(ciN)) {
+    return `<td class="delta cp-cell sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="${INSUFFICIENT_DATA_TOOLTIP}">${displayText}</td>`;
+  }
+  return `<td class="delta cp-cell delta-ci-cell"
+    data-ci-low="${escapeAttr(row.avg_ci95_low ?? '')}" data-ci-high="${escapeAttr(row.avg_ci95_high ?? '')}"
+    data-ci-n="${escapeAttr(row.avg_ci95_n ?? '')}" data-ci-color-scale="orange-green" data-ci-color-min="${escapeAttr(range.min ?? '')}"
+    data-ci-color-max="${escapeAttr(range.max ?? '')}" style="color:${orangeGreenRangeColor(value, range.min, range.max)}">${displayText}</td>`;
 }
 
 function deltaCell(row, field, occurrences, range, text = null) {
   const value = Number(row[field]);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
   const displayText = text ?? fmtSigned(value);
-  if (occurrences < 1000) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="Insufficient data (fewer than 1,000 observations).">${displayText}</td>`;
+  if (isInsufficientObservationCount(occurrences)) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="${INSUFFICIENT_DATA_TOOLTIP}">${displayText}</td>`;
   return `<td class="delta delta-ci-cell"
     data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}"
     data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(range.min ?? '')}"
@@ -389,6 +406,8 @@ function resetFilters() {
   set('dateFrom', '2025-01-01'); set('dateTo', '');
   selectedMaps = MAPS.map(([, , full]) => full);
   completedByMode = { delta: false, frequency: true };
+  expanded = false;
+  expandedRows = [];
   compareMode = 'raw';
   syncControls(); renderMapChips(); loadData(++token);
 }

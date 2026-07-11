@@ -1,4 +1,5 @@
 export const id = 'home';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-4';
 export const title = 'Home';
 export const navLabel = 'Home';
 
@@ -201,7 +202,7 @@ function getParams() {
     opponent_elo_max: val('opponentEloMax') ? Number(val('opponentEloMax')) : null,
     date_from: val('dateFrom') || null,
     date_to: val('dateTo') || null,
-    end_game_triggered: document.getElementById('endGameToggle')?.checked ? true : null,
+    completed_only: document.getElementById('endGameToggle')?.checked ? true : null,
   };
 }
 
@@ -212,7 +213,7 @@ function isDefaultParams(params) {
     params.opponent_elo_max === null &&
     params.date_from === null &&
     params.date_to === null &&
-    params.end_game_triggered === null &&
+    params.completed_only === null &&
     selectedMaps.length === ALL_MAPS.length;
 }
 
@@ -257,24 +258,13 @@ async function loadDefaultSnapshot(dataset) {
   const embedded = getEmbeddedDefaultSnapshot(dataset);
   if (embedded) return embedded;
   if (defaultSnapshotCache[dataset]) return defaultSnapshotCache[dataset];
-  const response = await fetch(DEFAULT_SNAPSHOT_URLS[dataset], { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
-  const payload = await response.json();
+  const payload = await loadSnapshot(DEFAULT_SNAPSHOT_URLS[dataset]);
   defaultSnapshotCache[dataset] = payload;
   return payload;
 }
 
 async function fetchApi(params) {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.status !== 'ok') {
-    throw new Error(payload.message || `API request failed (${response.status})`);
-  }
-  return payload;
+  return fetchStats(params);
 }
 
 function renderTiles(rows) {

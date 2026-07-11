@@ -1,10 +1,15 @@
 import {
   cappedNumericRange,
   deltaRangeColor,
+  frequencyColor,
   numericRange,
   orangeGreenRangeColor,
-  playrateColor,
-} from '../color-scales.js?v=20260707-1';
+} from '../color-scales.js?v=20260710-2';
+import {
+  INSUFFICIENT_DATA_TOOLTIP,
+  isInsufficientObservationCount,
+} from '../table-cells.js?v=20260710-1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-6';
 
 export const id = 'icons';
 export const title = 'Icons';
@@ -77,10 +82,12 @@ export const mainHtml = `
       <div class="icons-filter-controls">
         <div class="icons-filter-groups" id="iconFilterChips"></div>
         <div class="attr-separator icons-group-separator icons-graph-separator" aria-hidden="true"></div>
-        <button type="button" class="endgames-graph-toggle icons-graph-toggle" aria-label="Toggle icon graph"
-          title="Show graph" onclick="toggleIconsGraphView()">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16" /><path d="M4 5v14" /><path d="M6.5 15.5 10 11l3.5 2.5L18 7" /></svg>
-        </button>
+        <div class="icons-graph-zone">
+          <button type="button" class="endgames-graph-toggle icons-graph-toggle" aria-label="Toggle icon graph"
+            title="Show graph" onclick="toggleIconsGraphView()">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16" /><path d="M4 5v14" /><path d="M6.5 15.5 10 11l3.5 2.5L18 7" /></svg>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -252,20 +259,11 @@ async function applyFilters(activeToken = token) {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
-  return response.json();
+  return loadSnapshot(url);
 }
 
 async function fetchApi(p) {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(p),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.status !== 'ok') throw new Error(payload.message || `API request failed (${response.status})`);
-  return payload;
+  return fetchStats(p);
 }
 
 function availableIconNames() {
@@ -305,7 +303,7 @@ function bucketSortTier(row, field) {
   if (isImpossibleBucket(row, field)) return 2;
   const value = mode === 'frequency' ? frequency(row, field) : Number(row[field]);
   if (!Number.isFinite(value)) return 2;
-  return mode === 'delta' && count(row, field) < 1000 ? 1 : 0;
+  return mode === 'delta' && isInsufficientObservationCount(count(row, field)) ? 1 : 0;
 }
 
 function sortValue(row, field) {
@@ -347,7 +345,7 @@ function renderTable() {
   const amountRange = numericRange(universe, row => row.amount);
   const sharedDeltaRange = cappedNumericRange(
     universe.flatMap(row => BUCKETS.map(([field]) => ({
-      value: !isImpossibleBucket(row, field) && count(row, field) >= 1000 ? row[field] : null,
+      value: !isImpossibleBucket(row, field) && !isInsufficientObservationCount(count(row, field)) ? row[field] : null,
     }))),
     row => row.value,
   );
@@ -401,13 +399,13 @@ function bucketCell(row, field, deltaRange, frequencyRange) {
     if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
     const tip = `${occurrences.toLocaleString('en-US')} / ${Number(row.n_total || 0).toLocaleString('en-US')}`;
     return `<td class="sponsor-frequency-cell icons-value-tooltip" data-value-tooltip="${escapeAttr(tip)}"
-      style="color:${playrateColor(pct, frequencyRange.min, frequencyRange.max)}">${pct.toFixed(2)}%</td>`;
+      style="color:${frequencyColor(pct)}">${pct.toFixed(2)}%</td>`;
   }
   const value = Number(row[field]);
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
-  if (occurrences < 1000) {
+  if (isInsufficientObservationCount(occurrences)) {
     return `<td class="delta sponsor-delta-insufficient icons-value-tooltip"
-      data-value-tooltip="Insufficient data (fewer than 1,000 observations).">(${signed(value)})</td>`;
+      data-value-tooltip="${INSUFFICIENT_DATA_TOOLTIP}">${signed(value)}</td>`;
   }
   return `<td class="delta delta-ci-cell"
     data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}"
@@ -477,7 +475,7 @@ function buildIconsChart(data) {
     if (isImpossibleBucket(row, field)) return [];
     if (mode === 'delta') {
       const value = Number(row[field]);
-      return count(row, field) >= 1000 && Number.isFinite(value) ? [value] : [];
+      return !isInsufficientObservationCount(count(row, field)) && Number.isFinite(value) ? [value] : [];
     }
     const value = frequency(row, field);
     return Number.isFinite(value) ? [value] : [];
@@ -582,7 +580,7 @@ function buildIconsChart(data) {
       if (isImpossibleBucket(row, field)) return null;
       const value = mode === 'delta' ? Number(row[field]) : frequency(row, field);
       if (!Number.isFinite(value)) return null;
-      if (mode === 'delta' && count(row, field) < 1000) return null;
+      if (mode === 'delta' && isInsufficientObservationCount(count(row, field))) return null;
       return { field, bucketIndex, value, x: x(bucketIndex), y: y(value) };
     });
     let pathData = '';

@@ -128,6 +128,7 @@ export const sidebarHtml = `
 
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-4';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
@@ -151,6 +152,7 @@ const PAIR_TYPES = [
   'Project + Project', 'Project + Sponsor', 'Sponsor + Sponsor',
 ];
 const CARD_TYPES = ['animal', 'sponsor', 'project'];
+const COMBINATION_DEFAULT_MIN_PLAYS = 1000;
 
 let mounted = false;
 let mountToken = 0;
@@ -175,6 +177,11 @@ let sortState = { col: 'interaction', dir: 'desc' };
 let eloRange = { min: null, max: null };
 let interactionRange = { min: null, max: null };
 let deltaRanges = {};
+let serverPaged = false;
+let serverMeta = null;
+let combinationRanges = null;
+let minimumDebounceTimer = 0;
+let serverRequestTimer = 0;
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true;
@@ -192,6 +199,9 @@ export function mount({ dataset = 1 } = {}) {
   currentPage = 1;
   rowsPerPage = 50;
   sortState = { col: 'interaction', dir: 'desc' };
+  serverPaged = false;
+  serverMeta = null;
+  combinationRanges = null;
   bindHandlers();
   renderMapChips();
   renderRoundChips();
@@ -217,6 +227,10 @@ export function setDataset(value) {
   selectedHeaderRounds = new Set(ROUNDS);
   selectedRounds = new Set(ROUNDS);
   selectedCardTypes = new Set(CARD_TYPES);
+  currentPage = 1;
+  serverPaged = false;
+  serverMeta = null;
+  combinationRanges = null;
   renderRoundChips();
   closeCombinationHeaderPopups();
   loadCardCatalogue();
@@ -276,6 +290,9 @@ function setCombinationsView(view) {
   selectedCardTypes = new Set(CARD_TYPES);
   sortState = { col: 'interaction', dir: 'desc' };
   currentPage = 1;
+  serverPaged = false;
+  serverMeta = null;
+  combinationRanges = null;
   renderTabs();
   renderSidebarMapVisibility();
   applyFilters(++mountToken);
@@ -313,7 +330,7 @@ function getParams() {
     opponent_elo_max: value('opponentEloMax') ? Number(value('opponentEloMax')) : null,
     date_from: value('dateFrom') || '2025-01-01',
     date_to: value('dateTo') || null,
-    end_game_triggered: document.getElementById('endGameToggle')?.checked ? true : null,
+    completed_only: document.getElementById('endGameToggle')?.checked ? true : null,
   };
   if (activeView !== 'card_round' && selectedRounds.size < ROUNDS.length) {
     params.rounds = [...selectedRounds];
@@ -325,27 +342,60 @@ function isDefaultParams(params) {
   return params.player_elo_min === 300 && params.player_elo_max === null
     && params.opponent_elo_min === 300 && params.opponent_elo_max === null
     && params.date_from === '2025-01-01' && params.date_to === null
-    && params.end_game_triggered === null && selectedMaps.length === MAPS.length
+    && params.completed_only === null && selectedMaps.length === MAPS.length
     && selectedRounds.size === ROUNDS.length;
 }
 
+function minimumPlaysValue() {
+  return Math.max(0, Number(document.getElementById('minPlayedInput')?.value || 0));
+}
+
+function shouldUseServerPaging(params) {
+  return minimumPlaysValue() < COMBINATION_DEFAULT_MIN_PLAYS || !isDefaultParams(params);
+}
+
+function serverPagedParams(params) {
+  return {
+    ...params,
+    combination_paged: true,
+    combination_page: currentPage,
+    combination_page_size: rowsPerPage,
+    combination_min_plays: minimumPlaysValue(),
+    combination_sort: sortState.col,
+    combination_sort_dir: sortState.dir,
+    combination_pair_types: [...selectedTypes],
+    combination_card_types: [...selectedCardTypes],
+    combination_primary: selectedOne,
+    combination_secondary: selectedTwo,
+    combination_header_maps: [...selectedHeaderMaps],
+    combination_header_rounds: [...selectedHeaderRounds],
+  };
+}
+
 async function applyFilters(token = mountToken) {
+  currentPage = 1;
   renderLoading();
   if (!selectedMaps.length || (activeView !== 'card_round' && !selectedRounds.size)) {
     allData = [];
-    applyClientFilters();
+    serverMeta = { total_rows: 0 };
+    filteredData = [];
+    renderTable();
     return;
   }
   const params = getParams();
+  const useServerPaging = shouldUseServerPaging(params);
+  serverPaged = useServerPaging;
+  serverMeta = null;
+  combinationRanges = null;
   try {
     let payload;
-    if (isDefaultParams(params)) {
+    if (useServerPaging) {
+      payload = await fetchApi(serverPagedParams(params));
+    } else if (isDefaultParams(params)) {
       try {
         const dataset = isMW ? 'mw' : 'base';
         const url = `${SNAPSHOT_ROOT}/combinations/${SNAPSHOT_VIEWS[activeView]}/default-${dataset}.json?v=20260629-13`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
-        payload = await response.json();
+        payload = await loadSnapshot(url);
       } catch {
         payload = await fetchApi(params);
       }
@@ -355,8 +405,22 @@ async function applyFilters(token = mountToken) {
     if (!mounted || token !== mountToken) return;
     allData = Array.isArray(payload.data) ? payload.data : [];
     mergeCardCatalogueFromRows(allData);
+    if (Array.isArray(payload.combination_endgame_options)) {
+      endgameCatalogue = [...new Set([
+        ...endgameCatalogue,
+        ...payload.combination_endgame_options,
+      ])].sort((a, b) => a.localeCompare(b));
+    }
+    serverMeta = payload.combination_paged ? payload : null;
+    combinationRanges = payload.combination_ranges || null;
     currentPage = 1;
-    applyClientFilters();
+    if (serverPaged) {
+      filteredData = allData;
+      applyCombinationRanges();
+      renderTable();
+    } else {
+      applyClientFilters();
+    }
   } catch (error) {
     if (!mounted || token !== mountToken) return;
     renderError(error);
@@ -364,16 +428,43 @@ async function applyFilters(token = mountToken) {
 }
 
 async function fetchApi(params) {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.status !== 'ok') {
-    throw new Error(payload.message || `API request failed (${response.status})`);
+  return fetchStats(params);
+}
+
+function scheduleServerPage(preserveHead = false) {
+  window.clearTimeout(serverRequestTimer);
+  serverRequestTimer = window.setTimeout(() => loadServerPage(preserveHead), 250);
+}
+
+async function loadServerPage(preserveHead = false) {
+  const params = getParams();
+  if (!shouldUseServerPaging(params)) {
+    applyFilters(++mountToken);
+    return;
   }
-  return payload;
+  const token = ++mountToken;
+  serverPaged = true;
+  renderLoading();
+  try {
+    const payload = await fetchApi(serverPagedParams(params));
+    if (!mounted || token !== mountToken) return;
+    allData = Array.isArray(payload.data) ? payload.data : [];
+    mergeCardCatalogueFromRows(allData);
+    if (Array.isArray(payload.combination_endgame_options)) {
+      endgameCatalogue = [...new Set([
+        ...endgameCatalogue,
+        ...payload.combination_endgame_options,
+      ])].sort((a, b) => a.localeCompare(b));
+    }
+    serverMeta = payload;
+    combinationRanges = payload.combination_ranges || null;
+    filteredData = allData;
+    applyCombinationRanges();
+    renderTable(preserveHead);
+  } catch (error) {
+    if (!mounted || token !== mountToken) return;
+    renderError(error);
+  }
 }
 
 async function loadCardCatalogue() {
@@ -381,9 +472,7 @@ async function loadCardCatalogue() {
   try {
     let payload;
     try {
-      const response = await fetch(`${SNAPSHOT_ROOT}/default-${dataset}.json`, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
-      payload = await response.json();
+      payload = await loadSnapshot(`${SNAPSHOT_ROOT}/default-${dataset}.json`);
     } catch {
       payload = await fetchApi({
         stats_page: 'cards',
@@ -395,7 +484,7 @@ async function loadCardCatalogue() {
         opponent_elo_max: null,
         date_from: '2025-01-01',
         date_to: null,
-        end_game_triggered: null,
+        completed_only: null,
       });
     }
     mergeCardCatalogueFromRows(payload.data || []);
@@ -418,7 +507,11 @@ function mergeCardCatalogueFromRows(sourceRows) {
 }
 
 function applyClientFilters({ preserveHead = false } = {}) {
-  const minimum = Math.max(0, Number(document.getElementById('minPlayedInput')?.value || 0));
+  if (serverPaged) {
+    scheduleServerPage(preserveHead);
+    return;
+  }
+  const minimum = minimumPlaysValue();
   assignGlobalRanks(minimum);
   const candidatesBeforeMinimum = allData.filter(row => {
     const normalizedPairType = String(row.pair_type || '').replace(' vs. ', ' + ');
@@ -450,12 +543,26 @@ function applyClientFilters({ preserveHead = false } = {}) {
   sortFilteredData();
   // Header filters, Type, card selection, and Minimum plays only hide rows.
   // Numeric colors stay anchored to the complete active backend payload.
-  eloRange = numericRange(allData, row => row.avg_elo);
-  interactionRange = cappedNumericRange(allData, row => row.interaction);
+  eloRange = combinationRange('avg_elo') || numericRange(allData, row => row.avg_elo);
+  interactionRange = combinationRange('interaction', true) || cappedNumericRange(allData, row => row.interaction);
   deltaRanges = buildDeltaRanges(allData);
   const pages = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
   currentPage = Math.min(currentPage, pages);
   renderTable(preserveHead);
+}
+
+function combinationRange(field, cap = false) {
+  const range = combinationRanges?.[field];
+  if (!range || !Number.isFinite(Number(range.min)) || !Number.isFinite(Number(range.max))) return null;
+  const min = cap ? Math.max(-2, Math.min(2, Number(range.min))) : Number(range.min);
+  const max = cap ? Math.max(-2, Math.min(2, Number(range.max))) : Number(range.max);
+  return { min: Math.min(min, max), max: Math.max(min, max) };
+}
+
+function applyCombinationRanges() {
+  eloRange = combinationRange('avg_elo') || numericRange(allData, row => row.avg_elo);
+  interactionRange = combinationRange('interaction', true) || cappedNumericRange(allData, row => row.interaction);
+  deltaRanges = buildDeltaRanges(allData);
 }
 
 function sortFilteredData() {
@@ -521,16 +628,16 @@ function projectPairRow(row) {
 function buildDeltaRanges(data) {
   if (activeView === 'card_card' || activeView === 'card_endgame') {
     return {
-      delta_1: cappedNumericRange(data, row => activeView === 'card_endgame' ? row.delta_card : row.delta_1),
-      delta_2: cappedNumericRange(data, row => activeView === 'card_endgame' ? row.delta_endgame : row.delta_2),
-      delta_combined: cappedNumericRange(data, row => row.delta_combined),
-      delta_actual: cappedNumericRange(data, row => row.delta_actual),
+      delta_1: combinationRange(activeView === 'card_endgame' ? 'delta_card' : 'delta_1', true) || cappedNumericRange(data, row => activeView === 'card_endgame' ? row.delta_card : row.delta_1),
+      delta_2: combinationRange(activeView === 'card_endgame' ? 'delta_endgame' : 'delta_2', true) || cappedNumericRange(data, row => activeView === 'card_endgame' ? row.delta_endgame : row.delta_2),
+      delta_combined: combinationRange('delta_combined', true) || cappedNumericRange(data, row => row.delta_combined),
+      delta_actual: combinationRange('delta_actual', true) || cappedNumericRange(data, row => row.delta_actual),
     };
   }
   const contextField = activeView === 'card_map' ? 'delta_map' : 'delta_round';
   return {
-    delta_general: cappedNumericRange(data, row => row.delta_general),
-    [contextField]: cappedNumericRange(data, row => row[contextField]),
+    delta_general: combinationRange('delta_general', true) || cappedNumericRange(data, row => row.delta_general),
+    [contextField]: combinationRange(contextField, true) || cappedNumericRange(data, row => row[contextField]),
   };
 }
 
@@ -551,18 +658,20 @@ function sortCombinations(col) {
       : 'desc',
   };
   currentPage = 1;
-  applyClientFilters();
+  if (serverPaged) loadServerPage();
+  else applyClientFilters();
 }
 
 function renderTable(preserveHead = false) {
   if (!preserveHead) renderHead();
   const meta = document.getElementById('tableMeta');
-  const start = filteredData.length ? (currentPage - 1) * rowsPerPage + 1 : 0;
-  const end = Math.min(currentPage * rowsPerPage, filteredData.length);
+  const totalRows = serverPaged ? Number(serverMeta?.total_rows || 0) : filteredData.length;
+  const start = totalRows ? (currentPage - 1) * rowsPerPage + 1 : 0;
+  const end = Math.min(currentPage * rowsPerPage, totalRows);
   if (meta) meta.innerHTML = `<span class="meta-prefix">Showing </span><strong>${start}-${end}</strong> of <strong>${filteredData.length}</strong> <span class="combo-meta-full">combinations</span><span class="combo-meta-short">combos</span>`;
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
-  const pageRows = filteredData.slice(start ? start - 1 : 0, end);
+  const pageRows = serverPaged ? filteredData : filteredData.slice(start ? start - 1 : 0, end);
   tbody.innerHTML = pageRows.length
     ? pageRows.map(row => rowHtml(row, row.global_rank ?? '\u2014')).join('')
     : `<tr><td colspan="${activeView === 'card_card' || activeView === 'card_endgame' ? 9 : 8}"><div class="state-overlay"><div class="state-title">No combinations found</div></div></td></tr>`;
@@ -840,7 +949,8 @@ function interactionTd(raw) {
 function renderPagination() {
   const host = document.getElementById('pagination');
   if (!host) return;
-  const total = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
+  const totalRows = serverPaged ? Number(serverMeta?.total_rows || 0) : filteredData.length;
+  const total = Math.max(1, Math.ceil(totalRows / rowsPerPage));
   if (total <= 1) {
     hidePagination();
     return;
@@ -872,23 +982,27 @@ function paginationRange(current, total) {
 }
 
 function goCombinationPage(page) {
-  const total = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
+  const totalRows = serverPaged ? Number(serverMeta?.total_rows || 0) : filteredData.length;
+  const total = Math.max(1, Math.ceil(totalRows / rowsPerPage));
   const nextPage = Number(page);
   if (nextPage < 1 || nextPage > total) return;
   currentPage = nextPage;
-  renderTable();
+  if (serverPaged) loadServerPage();
+  else renderTable();
   document.querySelector('.combinations-table-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function onCombinationRowsChange() {
   rowsPerPage = Number(document.getElementById('rppSelect')?.value || 50);
   currentPage = 1;
-  renderTable();
+  if (serverPaged) loadServerPage();
+  else renderTable();
 }
 
 function onCombinationFilterChange() {
   currentPage = 1;
-  applyClientFilters();
+  window.clearTimeout(minimumDebounceTimer);
+  minimumDebounceTimer = window.setTimeout(() => applyFilters(++mountToken), 250);
 }
 
 function toggleCombinationTypePopup(event) {

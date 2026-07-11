@@ -412,7 +412,8 @@
     }
 
     .nav-icon-hand,
-    .nav-icon-emu {
+    .nav-icon-emu,
+    .nav-icon-build {
       fill: currentColor;
       stroke: none;
       transition: fill 0.3s ease, filter 0.3s ease, transform 0.3s ease;
@@ -424,6 +425,21 @@
       font-family: 'Inter', sans-serif;
       font-size: 8px;
       font-weight: 700;
+    }
+
+    .nav-icon-actions {
+      width: 52px;
+      height: 26px;
+      stroke-width: 1.05;
+    }
+
+    .nav-icon-build {
+      width: 26px;
+      height: 22px;
+      display: inline-block;
+      background: currentColor;
+      -webkit-mask: url('../img/nav-build.png') center / contain no-repeat;
+      mask: url('../img/nav-build.png') center / contain no-repeat;
     }
 
     /* Active vertical green glow strip (Expanding Indicator Blade) */
@@ -466,6 +482,16 @@
       filter: drop-shadow(0 0 4px rgba(109, 245, 184, 0.2));
     }
 
+    .side-nav-link.active .nav-icon-build {
+      background-color: var(--accent);
+      filter: drop-shadow(0 0 5px rgba(52, 211, 153, 0.3));
+    }
+
+    .side-nav-link:hover .nav-icon-build {
+      background-color: var(--accent-bright);
+      filter: drop-shadow(0 0 4px rgba(109, 245, 184, 0.2));
+    }
+
     .side-nav.nav-collapsed .side-nav-scroll-btn {
       display: none;
     }
@@ -474,17 +500,22 @@
        the generic nav-icon active/hover rules so no stroke flashes on hover. */
     .side-nav-link .nav-icon-hand,
     .side-nav-link .nav-icon-emu,
+    .side-nav-link .nav-icon-build,
     .side-nav-link.active .nav-icon-hand,
     .side-nav-link.active .nav-icon-emu,
+    .side-nav-link.active .nav-icon-build,
     .side-nav-link:hover .nav-icon-hand,
-    .side-nav-link:hover .nav-icon-emu {
+    .side-nav-link:hover .nav-icon-emu,
+    .side-nav-link:hover .nav-icon-build {
       stroke: none;
     }
 
     .side-nav-link.active .nav-icon-hand,
     .side-nav-link.active .nav-icon-emu,
+    .side-nav-link.active .nav-icon-build,
     .side-nav-link:hover .nav-icon-hand,
-    .side-nav-link:hover .nav-icon-emu {
+    .side-nav-link:hover .nav-icon-emu,
+    .side-nav-link:hover .nav-icon-build {
       color: var(--accent);
       fill: var(--accent);
       filter: drop-shadow(0 0 4px rgba(52, 211, 153, 0.22));
@@ -2189,6 +2220,14 @@
       gap: 24px;
     }
 
+    .maps-metrics-reset-btn {
+      margin-left: auto;
+      min-height: 24.6667px;
+      padding: 4px 12px;
+      font-size: 13px;
+      line-height: 1;
+    }
+
     .maps-metrics-option {
       display: flex;
       align-items: center;
@@ -2639,6 +2678,15 @@
       cursor: pointer;
     }
 
+    .icons-graph-zone {
+      align-self: stretch;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1 1 40px;
+      min-width: 40px;
+    }
+
     .icons-graph-toggle svg {
       width: 34px;
       height: 34px;
@@ -2851,6 +2899,12 @@
         gap: 5px;
         font-size: 11px;
       }
+
+      .maps-metrics-reset-btn {
+        padding-left: 10px;
+        padding-right: 10px;
+        font-size: 12px;
+      }
     }
 
     .endgames-table.endgames-graph-view tbody td {
@@ -2987,13 +3041,92 @@
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 
+    .actions-header-left {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      min-height: 24.6667px;
+    }
+
+    .actions-transpose-btn {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 24.6667px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .actions-transpose-btn:hover,
+    .actions-transpose-btn:focus-visible,
+    .actions-transpose-btn[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: rgba(132, 173, 163, 0.16);
+      color: var(--text);
+      outline: none;
+    }
+
+    .actions-transpose-btn svg {
+      width: 17px;
+      height: 17px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .actions-order-transposed {
+      table-layout: fixed;
+    }
+
+    .actions-order-transposed th,
+    .actions-order-transposed td {
+      width: 16.6667%;
+    }
+
+    .actions-upgrades-combined {
+      table-layout: fixed;
+    }
+
+    .actions-upgrades-combined th,
+    .actions-upgrades-combined td {
+      width: 33.3333%;
+    }
+
     .build-switches {
       display: flex;
       align-items: center;
       justify-content: flex-end;
       gap: 10px;
       margin-left: auto;
+      min-height: 24.6667px;
     }
+
+    /* Keep route-specific segmented controls inside the same header slot as
+       pages whose controls are hidden. This prevents a small vertical jump
+       when switching between views. */
+.build-switches .maps-h2h-mode,
+.cp-map-mode {
+  height: 24.6667px !important;
+  min-height: 24.6667px !important;
+}
+
+.main-header:has(.build-switches),
+.main-header:has(.cp-map-mode) {
+  height: 24.6667px;
+  min-height: 24.6667px;
+}
+
+.main-header:has(.build-switches) .build-switches,
+.main-header:has(.cp-map-mode) .cp-map-mode {
+  height: 24.6667px !important;
+  min-height: 24.6667px !important;
+}
 
     .build-tables {
       display: grid;
@@ -3050,7 +3183,7 @@
       width: 20%;
     }
 
-    .build-covered-table,
+    .build-hexes-table,
     .actions-map-table {
       table-layout: fixed;
       width: 100%;
@@ -3083,32 +3216,84 @@
     .actions-map-table thead th,
     .predictors-table thead th,
     .build-table thead th,
-    .build-covered-table thead th {
+    .build-hexes-table thead th {
       text-align: center;
     }
 
     /* Build > Hexes first column: narrower padding avoids optical off-centering
        in the compact Empty hexes bucket column without affecting map columns. */
-    .build-covered-bucket-header,
-    .build-covered-bucket-cell {
+    .build-hexes-bucket-header,
+    .build-hexes-bucket-cell {
       text-align: center;
       padding-left: 4px;
       padding-right: 4px;
     }
 
-    .build-covered-bucket-header {
+    .build-hexes-bucket-header {
       cursor: default;
     }
 
     /* Build > Hexes frequency view: frequency values are visually dense, so
        only the body value cells are reduced by 1px. The bucket-label column
        keeps the standard table size for readability. */
-    .build-covered-table.build-covered-frequency tbody td:not(.build-covered-bucket-cell) {
+    .build-hexes-table.build-hexes-frequency tbody td:not(.build-hexes-bucket-cell) {
       font-size: 11px;
     }
 
+    .build-hexes-shell {
+      position: relative;
+      width: 100%;
+      padding-bottom: 17px;
+      overflow: visible;
+    }
 
-    /* Actions > Upgrades per map frequency values are similarly dense; reduce
+    .build-hexes-wrap {
+      width: 100%;
+    }
+
+    .build-hexes-wrap .table-scroll {
+      width: 100%;
+    }
+
+    .build-expand-btn {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      z-index: 2;
+      width: 44px;
+      height: 18px;
+      margin: 0;
+      transform: translateX(-50%);
+      border: 1px solid var(--border-light);
+      border-top: 0;
+      border-radius: 0 0 5px 5px;
+      background: var(--bg-panel);
+      color: var(--accent);
+      cursor: pointer;
+      font: inherit;
+      font-size: 11px;
+      line-height: 1;
+      padding: 0;
+      transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+
+    .hexes-expanded-row {
+      animation: hexes-row-reveal 180ms ease-out both;
+    }
+
+    @keyframes hexes-row-reveal {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .build-expand-btn:hover,
+    .build-expand-btn:focus-visible {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+
+    /* Actions > Upgrades by map frequency values are similarly dense; reduce
        only the body value cells by 1px while leaving the upgrade labels intact. */
     .actions-map-table.actions-map-frequency tbody td:not(.sponsor-name-cell) {
       font-size: 11px;
@@ -3949,6 +4134,17 @@
       .nav-icon {
         width: 16px; /* Scaled icon optimized for the 50px mobile height boundary */
         height: 16px;
+      }
+
+      .nav-icon-actions {
+        width: 38px;
+        height: 18px;
+        stroke-width: 1;
+      }
+
+      .nav-icon-build {
+        width: 20px;
+        height: 17px;
       }
 
       .wm-ark, .wm-nova { font-size: 14px; }
