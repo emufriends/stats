@@ -1,14 +1,18 @@
 import functions_framework
+import csv
 import gzip
 import hashlib
 import hmac
+import io
 import json
 import logging
 import math
 import os
 import time
+import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
+from types import SimpleNamespace
 
 from google.cloud import bigquery
 from google.cloud import storage
@@ -20,6 +24,10 @@ DEFAULT_DATE_FROM = date(2025, 1, 1)
 MAPS_METRICS_DEFAULT_DATE_FROM = date(2026, 1, 13)
 DEFAULT_CARD_TYPES = ["animal", "sponsor", "project"]
 VALID_CARD_TYPES = set(DEFAULT_CARD_TYPES)
+COMBINATION_PAIR_TYPES = [
+    "Animal + Animal", "Animal + Project", "Animal + Sponsor",
+    "Project + Project", "Project + Sponsor", "Sponsor + Sponsor",
+]
 
 EXCLUDED_PROJECTS = {
     "reptiles", "europe", "predators", "americas", "australia",
@@ -50,7 +58,13 @@ VALID_ROUNDS = {"1", "2", "3", "4", "5", "6+"}
 
 CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 CACHE_PREFIX = os.environ.get("CACHE_PREFIX", "card-stats")
-FILTER_CACHE_VERSION = "v8"
+CARD_ATTRIBUTES_URL = os.environ.get(
+    "CARD_ATTRIBUTES_URL",
+    "https://raw.githubusercontent.com/pr0paganda-panda/ark-nova-stats/main/docs/cards_attributes.csv",
+)
+CARD_ATTRIBUTES_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "cards_attributes.csv")
+CARD_ATTRIBUTES_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/cards-attributes.json"
+FILTER_CACHE_VERSION = "v9"
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -90,8 +104,8 @@ VALID_ENDGAMES_VIEWS = {
 VALID_MAPS_VIEWS = {MAPS_VIEW_METRICS, MAPS_VIEW_TOURNAMENT_H2H}
 VALID_SPONSOR_ENDGAMES_VIEWS = {SPONSOR_ENDGAMES_VIEW_CP, SPONSOR_ENDGAMES_VIEW_APPEAL}
 BUILD_VIEW_ENCLOSURES = "enclosures"
-BUILD_VIEW_COVERED_HEXES = "covered_hexes"
-VALID_BUILD_VIEWS = {BUILD_VIEW_ENCLOSURES, BUILD_VIEW_COVERED_HEXES}
+BUILD_VIEW_HEXES = "hexes"
+VALID_BUILD_VIEWS = {BUILD_VIEW_ENCLOSURES, BUILD_VIEW_HEXES}
 PREDICTORS_VIEW_GENERAL = "general"
 PREDICTORS_VIEW_ICON = "icon"
 PREDICTORS_VIEW_SPECIFIC = "specific"
@@ -103,12 +117,12 @@ VALID_PREDICTORS_VIEWS = {
 ACTIONS_VIEW_STARTING_POSITION = "starting_position"
 ACTIONS_VIEW_UPGRADES = "upgrades"
 ACTIONS_VIEW_UPGRADE_ORDER = "upgrade_order"
-ACTIONS_VIEW_UPGRADES_PER_MAP = "upgrades_per_map"
+ACTIONS_VIEW_UPGRADES_BY_MAP = "upgrades_by_map"
 VALID_ACTIONS_VIEWS = {
     ACTIONS_VIEW_STARTING_POSITION,
     ACTIONS_VIEW_UPGRADES,
     ACTIONS_VIEW_UPGRADE_ORDER,
-    ACTIONS_VIEW_UPGRADES_PER_MAP,
+    ACTIONS_VIEW_UPGRADES_BY_MAP,
 }
 COMBINATIONS_VIEW_CARD_CARD = "card_card"
 COMBINATIONS_VIEW_CARD_MAP = "card_map"
@@ -119,6 +133,28 @@ VALID_COMBINATIONS_VIEWS = {
     COMBINATIONS_VIEW_CARD_MAP,
     COMBINATIONS_VIEW_CARD_ROUND,
     COMBINATIONS_VIEW_CARD_ENDGAME,
+}
+COMBINATION_DEFAULT_MIN_PLAYS = 1000
+COMBINATION_PAGE_DEFAULT = 1
+COMBINATION_PAGE_SIZE_DEFAULT = 50
+COMBINATION_PAGE_SIZES = {25, 50, 100}
+COMBINATION_SORT_FIELDS = {
+    COMBINATIONS_VIEW_CARD_CARD: {
+        "card_1", "card_2", "delta_combined", "delta_actual",
+        "interaction", "avg_elo", "n_played", "pair_type",
+    },
+    COMBINATIONS_VIEW_CARD_MAP: {
+        "card_name", "map_name", "delta_general", "delta_map",
+        "interaction", "avg_elo", "n_played", "card_type",
+    },
+    COMBINATIONS_VIEW_CARD_ROUND: {
+        "card_name", "round_name", "delta_general", "delta_round",
+        "interaction", "avg_elo", "n_played", "card_type",
+    },
+    COMBINATIONS_VIEW_CARD_ENDGAME: {
+        "card_name", "endgame_name", "delta_combined", "delta_actual",
+        "interaction", "avg_elo", "n_played", "card_type",
+    },
 }
 
 ALL_MAPS_FOR_METRICS = [
@@ -401,6 +437,17 @@ def _parse_card_types(raw_value):
     return [card_type for card_type in raw_value if card_type in VALID_CARD_TYPES]
 
 
+def _parse_combination_list(raw_value, field_name, allowed, default):
+    if raw_value is None:
+        return list(default)
+    if not isinstance(raw_value, list):
+        raise ValueError(f"{field_name} must be an array")
+    invalid = [value for value in raw_value if value not in allowed]
+    if invalid:
+        raise ValueError(f"{field_name} contains unsupported values")
+    return list(dict.fromkeys(raw_value))
+
+
 def _parse_stats_page(raw_value):
     if raw_value in (None, ""):
         return STATS_PAGE_CARDS
@@ -454,7 +501,7 @@ def _parse_build_view(raw_value):
         return BUILD_VIEW_ENCLOSURES
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_BUILD_VIEWS:
-        raise ValueError("build_view must be enclosures or covered_hexes")
+        raise ValueError("build_view must be enclosures or hexes")
     return value
 
 
@@ -472,7 +519,7 @@ def _parse_actions_view(raw_value):
         return ACTIONS_VIEW_STARTING_POSITION
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_ACTIONS_VIEWS:
-        raise ValueError("actions_view must be starting_position, upgrades, upgrade_order, or upgrades_per_map")
+        raise ValueError("actions_view must be starting_position, upgrades, upgrade_order, or upgrades_by_map")
     return value
 
 
@@ -628,6 +675,98 @@ def _write_cache_blob(blob_name, payload, cache_status):
         return False
 
 
+_CARD_ATTRIBUTE_GROUPS = None
+
+
+def _parse_card_attribute_csv(source_text):
+    """Build SQL-ready card groups from the dashboard's canonical CSV."""
+    reader = csv.DictReader(io.StringIO(source_text))
+    required = {"Type", "Name", "Size", "Reefer"}
+    if not required.issubset(set(reader.fieldnames or [])):
+        raise ValueError("cards_attributes.csv is missing Type, Name, Size, or Reefer")
+    groups = {
+        "reefer_animals": set(),
+        "small_animals": set(),
+        "medium_animals": set(),
+        "large_animals": set(),
+        "project_cards": set(),
+        "sponsor_cards": set(),
+    }
+    for row in reader:
+        card_name = str(row.get("Name") or "").strip().lower()
+        card_type = str(row.get("Type") or "").strip().lower()
+        if not card_name:
+            continue
+        if card_type == "project":
+            groups["project_cards"].add(card_name)
+        elif card_type == "sponsor":
+            groups["sponsor_cards"].add(card_name)
+        elif card_type == "animal":
+            reefer = str(row.get("Reefer") or "").strip().lower()
+            if reefer not in {"", "0", "false", "no"}:
+                groups["reefer_animals"].add(card_name)
+            try:
+                size = int(float(str(row.get("Size") or "").strip()))
+            except ValueError:
+                size = None
+            if size in (1, 2):
+                groups["small_animals"].add(card_name)
+            elif size == 3:
+                groups["medium_animals"].add(card_name)
+            elif size in (4, 5):
+                groups["large_animals"].add(card_name)
+    parsed = {key: sorted(values) for key, values in groups.items()}
+    if not parsed["small_animals"] or not parsed["project_cards"] or not parsed["sponsor_cards"]:
+        raise ValueError("cards_attributes.csv did not produce the required card groups")
+    parsed["source_sha256"] = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    return parsed
+
+
+def _load_card_attribute_groups(force_refresh=False):
+    """Use memory/GCS metadata; refresh GCS from the canonical public CSV daily."""
+    global _CARD_ATTRIBUTE_GROUPS
+    if _CARD_ATTRIBUTE_GROUPS is not None and not force_refresh:
+        return _CARD_ATTRIBUTE_GROUPS
+    if not force_refresh:
+        cached = _read_cache_blob(CARD_ATTRIBUTES_CACHE_BLOB, "hit")
+        if cached:
+            cached.pop("cache_status", None)
+            cached.pop("cache_updated_at", None)
+            _CARD_ATTRIBUTE_GROUPS = cached
+            return cached
+    try:
+        if os.path.exists(CARD_ATTRIBUTES_LOCAL_PATH):
+            with open(CARD_ATTRIBUTES_LOCAL_PATH, "r", encoding="utf-8-sig", newline="") as source:
+                source_text = source.read()
+        else:
+            request = urllib.request.Request(
+                CARD_ATTRIBUTES_URL,
+                headers={"User-Agent": "ark-nova-dashboard-refresh"},
+            )
+            with urllib.request.urlopen(request, timeout=20) as response:
+                source_text = response.read().decode("utf-8-sig")
+        parsed = _parse_card_attribute_csv(source_text)
+        _write_cache_blob(CARD_ATTRIBUTES_CACHE_BLOB, parsed, "refreshed")
+        _CARD_ATTRIBUTE_GROUPS = parsed
+        return parsed
+    except Exception:
+        logging.exception("Failed to refresh card attribute metadata from %s", CARD_ATTRIBUTES_URL)
+    cached = _read_cache_blob(CARD_ATTRIBUTES_CACHE_BLOB, "hit")
+    if cached:
+        cached.pop("cache_status", None)
+        cached.pop("cache_updated_at", None)
+        _CARD_ATTRIBUTE_GROUPS = cached
+        return cached
+    raise RuntimeError("Card attribute metadata is unavailable")
+
+
+def _sql_string_list(values):
+    def bigquery_string(value):
+        escaped = str(value).replace("\\", "\\\\").replace("'", "\\'")
+        return f"'{escaped}'"
+    return ", ".join(bigquery_string(value) for value in values)
+
+
 def _read_data_version():
     if not CACHE_BUCKET:
         return _filter_cache_day()
@@ -721,7 +860,8 @@ def _write_home_bootstrap_asset():
         logging.error("Cannot publish Home bootstrap asset without both snapshots")
         return False
     payload = {"1": mw, "0": base}
-    source = "window.__ARK_NOVA_HOME_DEFAULTS__=" + json.dumps(
+    source = "window.__ARK_NOVA_DATA_VERSION__=" + json.dumps(_read_data_version()) + ";"
+    source += "window.__ARK_NOVA_HOME_DEFAULTS__=" + json.dumps(
         payload, default=_json_default, separators=(",", ":")
     ) + ";"
     try:
@@ -748,7 +888,7 @@ def _filter_cache_blob_name(
     opponent_elo_max,
     date_from,
     date_to,
-    end_game_triggered,
+    completed_only,
     data_version,
     subview=None,
 ):
@@ -767,7 +907,7 @@ def _filter_cache_blob_name(
         "opponent_elo_max": opponent_elo_max,
         "date_from": date_from.isoformat() if date_from else None,
         "date_to": date_to.isoformat() if date_to else None,
-        "end_game_triggered": end_game_triggered,
+        "completed_only": completed_only,
     }
     key_json = json.dumps(cache_key, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(key_json.encode("utf-8")).hexdigest()[:32]
@@ -788,7 +928,7 @@ def _is_default_cache_request(
     opponent_elo_max,
     date_from,
     date_to,
-    end_game_triggered,
+    completed_only,
     round_filter_active,
 ):
     if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_TOURNAMENT_H2H:
@@ -803,7 +943,7 @@ def _is_default_cache_request(
             and opponent_elo_max is None
             and date_from is None
             and date_to is None
-            and end_game_triggered is None
+            and completed_only is None
             and not round_filter_active
         )
     default_date_from = (
@@ -823,7 +963,7 @@ def _is_default_cache_request(
         and opponent_elo_max is None
         and date_from == default_date_from
         and default_date_to_ok
-        and end_game_triggered is None
+        and completed_only is None
         and not round_filter_active
     )
 
@@ -831,10 +971,11 @@ def _is_default_cache_request(
 # BigQuery helpers
 
 def _refresh_prepared_logs_table():
+    """Prepare log rows and derive table-level completion from Full Sample concede."""
     query = f"""
     CREATE OR REPLACE TABLE `{PREPARED_LOGS_TABLE}`
     PARTITION BY game_date
-    CLUSTER BY is_mw, Map, end_game_triggered
+    CLUSTER BY is_mw, Map, table_conceded
     AS
     WITH valid_log_ids AS (
       SELECT table_id
@@ -848,8 +989,9 @@ def _refresh_prepared_logs_table():
       CAST(f.is_mw AS INT64) AS is_mw,
       f.Map,
       CAST(f.game_ended_at AS DATE) AS game_date,
-      f.end_game_triggered,
       f.concede,
+      MAX(IF(COALESCE(f.concede, 0) != 0, 1, 0))
+        OVER (PARTITION BY f.table_id) AS table_conceded,
       f.elo,
       f.opponent_elo,
       f.elo_delta,
@@ -877,6 +1019,10 @@ def _refresh_prepared_logs_table():
       l.build_starting_strength,
       l.cards_starting_strength,
       l.sponsors_starting_strength,
+      l.association_action_history,
+      l.cp_history,
+      l.has_round_1_upgrade,
+      l.has_round_1_release,
       l.first_upgrade,
       l.second_upgrade,
       l.third_upgrade,
@@ -892,6 +1038,12 @@ def _refresh_prepared_logs_table():
 
     started_at = time.perf_counter()
     client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    # BigQuery cannot replace a partitioned table when its clustering fields
+    # change. Prepared Logs is rebuilt from source immediately after this drop.
+    client.query(
+        f"DROP TABLE IF EXISTS `{PREPARED_LOGS_TABLE}`",
+        location=BIGQUERY_LOCATION,
+    ).result()
     job_config = bigquery.QueryJobConfig()
     job = client.query(query, job_config=job_config, location=BIGQUERY_LOCATION)
     job.result()
@@ -909,6 +1061,7 @@ def _refresh_prepared_logs_table():
 
 
 def _refresh_prepared_full_stats_table():
+    """Materialize Full Sample with `table_conceded` for consistent filtering."""
     query = f"""
     CREATE OR REPLACE TABLE `{PREPARED_FULL_STATS_TABLE}`
     PARTITION BY game_date
@@ -948,7 +1101,7 @@ def _refresh_prepared_card_plays_table():
     AS
     WITH raw_plays AS (
       SELECT
-        table_id, player, is_mw, Map, game_date, end_game_triggered,
+        table_id, player, is_mw, Map, game_date, table_conceded,
         elo, opponent_elo, elo_delta,
         pa.animal AS card_name,
         'animal' AS card_type,
@@ -960,7 +1113,7 @@ def _refresh_prepared_card_plays_table():
       UNION ALL
 
       SELECT
-        table_id, player, is_mw, Map, game_date, end_game_triggered,
+        table_id, player, is_mw, Map, game_date, table_conceded,
         elo, opponent_elo, elo_delta,
         ps.sponsor AS card_name,
         'sponsor' AS card_type,
@@ -972,7 +1125,7 @@ def _refresh_prepared_card_plays_table():
       UNION ALL
 
       SELECT
-        table_id, player, is_mw, Map, game_date, end_game_triggered,
+        table_id, player, is_mw, Map, game_date, table_conceded,
         elo, opponent_elo, elo_delta,
         pp.project AS card_name,
         'project' AS card_type,
@@ -1011,12 +1164,12 @@ def _refresh_prepared_card_pairs_table():
     AS
     WITH per_card AS (
       SELECT
-        table_id, player, is_mw, Map, game_date, end_game_triggered,
+        table_id, player, is_mw, Map, game_date, table_conceded,
         elo, opponent_elo, elo_delta, card_name, ANY_VALUE(card_type) AS card_type,
         ARRAY_AGG(DISTINCT played_round IGNORE NULLS) AS played_rounds
       FROM `{PREPARED_CARD_PLAYS_TABLE}`
       GROUP BY
-        table_id, player, is_mw, Map, game_date, end_game_triggered,
+        table_id, player, is_mw, Map, game_date, table_conceded,
         elo, opponent_elo, elo_delta, card_name
     )
     SELECT
@@ -1025,7 +1178,7 @@ def _refresh_prepared_card_pairs_table():
       a.is_mw,
       a.Map,
       a.game_date,
-      a.end_game_triggered,
+      a.table_conceded,
       a.elo,
       a.opponent_elo,
       a.elo_delta,
@@ -1087,7 +1240,7 @@ def _build_where_sql(
     opponent_elo_max,
     date_from,
     date_to,
-    end_game_triggered,
+    completed_only,
 ):
     where_clauses = [
         "is_mw = @is_mw",
@@ -1118,9 +1271,9 @@ def _build_where_sql(
     if date_to:
         where_clauses.append("game_date <= @date_to")
         query_parameters.append(bigquery.ScalarQueryParameter("date_to", "DATE", date_to))
-    if end_game_triggered is not None:
-        where_clauses.append("end_game_triggered = @end_game_triggered")
-        query_parameters.append(bigquery.ScalarQueryParameter("end_game_triggered", "BOOL", end_game_triggered))
+    if completed_only:
+        # A completed table has no player row with `concede` set.
+        where_clauses.append("COALESCE(table_conceded, 0) = 0")
 
     return " AND ".join(where_clauses), query_parameters
 
@@ -1794,7 +1947,7 @@ def _build_full_sample_where_sql(
     opponent_elo_max,
     date_from,
     date_to,
-    end_game_triggered,
+    completed_only,
     exclude_invalid_maps=True,
 ):
     where_clauses = [
@@ -1827,9 +1980,9 @@ def _build_full_sample_where_sql(
     if date_to:
         where_clauses.append("CAST(f.game_ended_at AS DATE) <= @date_to")
         query_parameters.append(bigquery.ScalarQueryParameter("date_to", "DATE", date_to))
-    if end_game_triggered is not None:
-        where_clauses.append("f.end_game_triggered = @end_game_triggered")
-        query_parameters.append(bigquery.ScalarQueryParameter("end_game_triggered", "BOOL", end_game_triggered))
+    if completed_only:
+        # `table_conceded` is derived from Full Sample `concede` per table.
+        where_clauses.append("COALESCE(f.table_conceded, 0) = 0")
 
     return " AND ".join(where_clauses), query_parameters
 
@@ -1868,37 +2021,38 @@ def _build_maps_metrics_query(where_sql):
         ("x_tokens_spent", 30, "X-token spent", None, False, "number", False),
         ("x_backs", 31, "X-backs", None, False, "number", False),
         ("money_gained", 32, "Money gained", None, False, "number", False),
-        ("money_spent_animals", 33, "Money spent (Animals)", None, False, "number", False),
-        ("money_spent_build", 34, "Money spent (Build)", None, False, "number", False),
-        ("money_spent_donations", 35, "Money spent (Donations)", None, False, "number", False),
-        ("money_spent_range", 36, "Money spent (Range)", "money spent for playing cards from reputation range", False, "number", False),
-        ("cards_drawn_deck", 37, "Cards drawn from deck", None, False, "number", False),
-        ("cards_drawn_range", 38, "Cards drawn from range", None, False, "number", False),
-        ("cards_snapped", 39, "Cards snapped", None, False, "number", False),
-        ("cards_discarded", 40, "Cards discarded", None, False, "number", False),
-        ("enclosures", 41, "Enclosures", None, False, "number", False),
-        ("kiosks", 42, "Kiosks", None, False, "number", False),
-        ("pavilions", 43, "Pavilions", None, False, "number", False),
-        ("unique_buildings", 44, "Unique buildings", None, False, "number", False),
-        ("animals_played", 45, "Animals played", None, False, "number", False),
-        ("animals_released", 46, "Animals released", None, False, "number", False),
-        ("sponsors_played", 47, "Sponsors played", None, False, "number", False),
-        ("bird_icons", 48, "Bird icons", None, False, "number", False),
-        ("herbivore_icons", 49, "Herbivore icons", None, False, "number", False),
-        ("predator_icons", 50, "Predator icons", None, False, "number", False),
-        ("primate_icons", 51, "Primate icons", None, False, "number", False),
-        ("reptile_icons", 52, "Reptile icons", None, False, "number", False),
-        ("sea_animal_icons", 53, "Sea Animal icons", None, False, "number", False),
-        ("bear_icons", 54, "Bear icons", None, False, "number", False),
-        ("petting_zoo_icons", 55, "Petting zoo icons", None, False, "number", False),
-        ("africa_icons", 56, "Africa icons", None, False, "number", False),
-        ("america_icons", 57, "America icons", None, False, "number", False),
-        ("asia_icons", 58, "Asia icons", None, False, "number", False),
-        ("australia_icons", 59, "Australia icons", None, False, "number", False),
-        ("europe_icons", 60, "Europe icons", None, False, "number", False),
-        ("rock_icons", 61, "Rock icons", None, False, "number", False),
-        ("water_icons", 62, "Water icons", None, False, "number", False),
-        ("science_icons", 63, "Science icons", None, False, "number", False),
+        ("money_gained_income", 33, "Money gained (income)", None, False, "number", False),
+        ("money_spent_animals_pct", 34, "Money spent (Animals)", "Animals spending as a percentage of total money spent", False, "percent", False),
+        ("money_spent_build_pct", 35, "Money spent (Build)", "Build spending as a percentage of total money spent", False, "percent", False),
+        ("money_spent_donations_pct", 36, "Money spent (Donations)", "Donations spending as a percentage of total money spent", False, "percent", False),
+        ("money_spent_range_pct", 37, "Money spent (Range)", "Range spending as a percentage of total money spent", False, "percent", False),
+        ("cards_drawn_deck", 39, "Cards drawn from deck", None, False, "number", False),
+        ("cards_drawn_range", 40, "Cards drawn from range", None, False, "number", False),
+        ("cards_snapped", 41, "Cards snapped", None, False, "number", False),
+        ("cards_discarded", 42, "Cards discarded", None, False, "number", False),
+        ("enclosures", 43, "Enclosures", None, False, "number", False),
+        ("kiosks", 44, "Kiosks", None, False, "number", False),
+        ("pavilions", 45, "Pavilions", None, False, "number", False),
+        ("unique_buildings", 46, "Unique buildings", None, False, "number", False),
+        ("animals_played", 47, "Animals played", None, False, "number", False),
+        ("animals_released", 48, "Animals released", None, False, "number", False),
+        ("sponsors_played", 49, "Sponsors played", None, False, "number", False),
+        ("bird_icons", 50, "Bird icons", None, False, "number", False),
+        ("herbivore_icons", 51, "Herbivore icons", None, False, "number", False),
+        ("predator_icons", 52, "Predator icons", None, False, "number", False),
+        ("primate_icons", 53, "Primate icons", None, False, "number", False),
+        ("reptile_icons", 54, "Reptile icons", None, False, "number", False),
+        ("sea_animal_icons", 55, "Sea Animal icons", None, False, "number", False),
+        ("bear_icons", 56, "Bear icons", None, False, "number", False),
+        ("petting_zoo_icons", 57, "Petting zoo icons", None, False, "number", False),
+        ("africa_icons", 58, "Africa icons", None, False, "number", False),
+        ("america_icons", 59, "America icons", None, False, "number", False),
+        ("asia_icons", 60, "Asia icons", None, False, "number", False),
+        ("australia_icons", 61, "Australia icons", None, False, "number", False),
+        ("europe_icons", 62, "Europe icons", None, False, "number", False),
+        ("rock_icons", 63, "Rock icons", None, False, "number", False),
+        ("water_icons", 64, "Water icons", None, False, "number", False),
+        ("science_icons", 65, "Science icons", None, False, "number", False),
     ]
     metric_config_sql = ",\n        ".join(
         "STRUCT("
@@ -1918,13 +2072,17 @@ def _build_maps_metrics_query(where_sql):
         f"ROUND(MAX(IF(map_name = '{m['full']}', value, NULL)), 4) AS {m['key']}"
         for m in ALL_MAPS_FOR_METRICS
     )
+    map_tooltip_selects = ",\n      ".join(
+        f"ROUND(MAX(IF(map_name = '{m['full']}', tooltip_value, NULL)), 4) AS tooltip_{m['key']}"
+        for m in ALL_MAPS_FOR_METRICS
+    )
     return f"""
     WITH filtered AS (
       SELECT *
       FROM `{PREPARED_FULL_STATS_TABLE}`
       WHERE {where_sql}
     ),
-    per_map AS (
+    per_map_base AS (
       SELECT
         Map AS map_name,
         CAST(COUNT(DISTINCT table_id) AS FLOAT64) AS games,
@@ -1970,6 +2128,7 @@ def _build_maps_metrics_query(where_sql):
         AVG(SAFE_CAST(X_Tokens_used AS FLOAT64)) AS x_tokens_spent,
         AVG(SAFE_CAST(X_Tokens_gained_instead_of_action AS FLOAT64)) AS x_backs,
         AVG(SAFE_CAST(Money_gained AS FLOAT64)) AS money_gained,
+        AVG(SAFE_CAST(Money_gained_through_income AS FLOAT64)) AS money_gained_income,
         AVG(SAFE_CAST(Money_spent_on_animals AS FLOAT64)) AS money_spent_animals,
         AVG(SAFE_CAST(Money_spent_on_enclosures AS FLOAT64)) AS money_spent_build,
         AVG(SAFE_CAST(Money_spent_on_donations AS FLOAT64)) AS money_spent_donations,
@@ -2004,6 +2163,27 @@ def _build_maps_metrics_query(where_sql):
       FROM filtered
       GROUP BY Map
     ),
+    per_map AS (
+      SELECT
+        base.*,
+        100 * SAFE_DIVIDE(money_spent_animals,
+          money_spent_animals + money_spent_build + money_spent_donations + money_spent_range
+        ) AS money_spent_animals_pct,
+        100 * SAFE_DIVIDE(money_spent_build,
+          money_spent_animals + money_spent_build + money_spent_donations + money_spent_range
+        ) AS money_spent_build_pct,
+        100 * SAFE_DIVIDE(money_spent_donations,
+          money_spent_animals + money_spent_build + money_spent_donations + money_spent_range
+        ) AS money_spent_donations_pct,
+        100 * SAFE_DIVIDE(money_spent_range,
+          money_spent_animals + money_spent_build + money_spent_donations + money_spent_range
+        ) AS money_spent_range_pct,
+        money_spent_animals AS tooltip_money_spent_animals,
+        money_spent_build AS tooltip_money_spent_build,
+        money_spent_donations AS tooltip_money_spent_donations,
+        money_spent_range AS tooltip_money_spent_range
+      FROM per_map_base base
+    ),
     metric_config AS (
       SELECT *
       FROM UNNEST([
@@ -2011,7 +2191,17 @@ def _build_maps_metrics_query(where_sql):
       ])
     ),
     unpivoted AS (
-      SELECT map_name, metric_key, value
+      SELECT
+        map_name,
+        metric_key,
+        value,
+        CASE metric_key
+          WHEN 'money_spent_animals_pct' THEN tooltip_money_spent_animals
+          WHEN 'money_spent_build_pct' THEN tooltip_money_spent_build
+          WHEN 'money_spent_donations_pct' THEN tooltip_money_spent_donations
+          WHEN 'money_spent_range_pct' THEN tooltip_money_spent_range
+          ELSE NULL
+        END AS tooltip_value
       FROM per_map
       UNPIVOT INCLUDE NULLS (
         value FOR metric_key IN ({metric_keys_sql})
@@ -2026,7 +2216,8 @@ def _build_maps_metrics_query(where_sql):
         c.format,
         c.lower_is_better,
         u.map_name,
-        u.value
+        u.value,
+        u.tooltip_value
       FROM unpivoted u
       JOIN metric_config c USING(metric_key)
     )
@@ -2037,7 +2228,8 @@ def _build_maps_metrics_query(where_sql):
       is_default,
       format,
       lower_is_better,
-      {map_value_selects}
+      {map_value_selects},
+      {map_tooltip_selects}
     FROM metric_values
     GROUP BY sort_order, metric, tooltip, is_default, format, lower_is_better
     ORDER BY sort_order
@@ -2364,15 +2556,24 @@ def _build_build_enclosures_query(where_sql):
     """
 
 
-def _build_build_covered_hexes_query(where_sql):
-    buckets = [
-        ("0", "0", "empty_hexes = 0"),
-        ("1_5", "1-5", "empty_hexes BETWEEN 1 AND 5"),
-        ("6_11", "6-11", "empty_hexes BETWEEN 6 AND 11"),
-        ("12_17", "12-17", "empty_hexes BETWEEN 12 AND 17"),
-        ("18_23", "18-23", "empty_hexes BETWEEN 18 AND 23"),
-        ("24_plus", "24+", "empty_hexes >= 24"),
-    ]
+def _build_build_hexes_query(where_sql, expanded=False):
+    """Build collapsed or exact empty-hex buckets from non-conceded tables."""
+    buckets = (
+        [
+            (str(value), str(value), f"empty_hexes = {value}")
+            for value in range(24)
+        ]
+        + [("24_plus", "24+", "empty_hexes >= 24")]
+        if expanded
+        else [
+            ("0", "0", "empty_hexes = 0"),
+            ("1_5", "1-5", "empty_hexes BETWEEN 1 AND 5"),
+            ("6_11", "6-11", "empty_hexes BETWEEN 6 AND 11"),
+            ("12_17", "12-17", "empty_hexes BETWEEN 12 AND 17"),
+            ("18_23", "18-23", "empty_hexes BETWEEN 18 AND 23"),
+            ("24_plus", "24+", "empty_hexes >= 24"),
+        ]
+    )
     map_selects = []
     for map_meta in ALL_MAPS_FOR_METRICS[:15]:
         key = map_meta["key"]
@@ -2402,6 +2603,7 @@ def _build_build_covered_hexes_query(where_sql):
         SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       WHERE {where_sql}
+        AND COALESCE(f.table_conceded, 0) = 0
     ),
     bucketed AS (
       SELECT
@@ -2469,31 +2671,239 @@ PREDICTOR_GENERAL_FIELDS = [
 ]
 
 PREDICTOR_SPECIFIC_CONDITIONS = [
-    "Triggered endgame",
-    "More endgame points",
-    "More endgame CP",
-    "More ingame CP",
-    "More reefers",
-    "Round 1: Release",
-    "Round 1: Upgrade",
-    "Round 1: Humphead Wrasse",
-    "Round 1/2: New Zealand Fur Seal",
-    "First to 5 CP",
-    "First to 5 CP (with exactly one university/partner zoo bonus)",
-    "First to 8 CP",
-    "First to 8 CP (with exactly one university/partner zoo bonus)",
-    "No sponsor in starting hand",
-    "No project in starting hand",
+    ("Triggered endgame", "triggered_endgame", False),
+    ("More endgame points", "more_endgame_points", False),
+    ("More endgame CP", "more_endgame_cp", False),
+    ("More ingame CP", "more_ingame_cp", False),
+    ("More reefers", "more_reefers", True),
+    ("More small animals", "more_small_animals", False),
+    ("More medium animals", "more_medium_animals", False),
+    ("More large animals", "more_large_animals", False),
+    ("Round 1: Upgrade", "round_1_upgrade", False),
+    ("Round 1: Project", "round_1_project", False),
+    ("Round 1: Release", "round_1_release", False),
+    ("Round 1: 2+ association actions", "round_1_two_association", False),
+    ("Round 1: Humphead Wrasse", "round_1_humphead", True),
+    ("Round 1/2: New Zealand Fur Seal", "round_1_2_fur_seal", False),
+    ("First to 5 CP", "first_to_5", False),
+    ("First to 5 CP (with exactly one university/partner zoo bonus)", "first_to_5_bonus", False),
+    ("First to 8 CP", "first_to_8", False),
+    ("First to 8 CP (with exactly one university/partner zoo bonus)", "first_to_8_bonus", False),
+    ("No project in starting hand", "no_project_opening", False),
+    ("No sponsor in starting hand", "no_sponsor_opening", False),
+    ("No sponsor in starting hand and Sponsors at 5", "no_sponsor_sponsors_5", False),
+    (
+        "No sponsor in starting hand and second player and Association at 2 and Sponsors at 5",
+        "no_sponsor_second_assoc_2_sponsors_5",
+        False,
+    ),
 ]
+
+
+def _build_predictors_specific_query(where_sql):
+    metadata = _load_card_attribute_groups()
+    configs = ",\n        ".join(
+        (
+            f"STRUCT({idx} AS sort_order, {_sql_string(label)} AS condition, "
+            f"{_sql_string(key)} AS condition_key, {'TRUE' if mw_only else 'FALSE'} AS mw_only)"
+        )
+        for idx, (label, key, mw_only) in enumerate(PREDICTOR_SPECIFIC_CONDITIONS, 1)
+    )
+    reefer_sql = _sql_string_list(metadata["reefer_animals"])
+    small_sql = _sql_string_list(metadata["small_animals"])
+    medium_sql = _sql_string_list(metadata["medium_animals"])
+    large_sql = _sql_string_list(metadata["large_animals"])
+    project_sql = _sql_string_list(metadata["project_cards"])
+    sponsor_sql = _sql_string_list(metadata["sponsor_cards"])
+    sponsor_cp_sql = _sql_string_list(sorted(name.lower() for name in SPONSOR_CP_CARDS))
+    sponsor_appeal_sql = _sql_string_list(sorted(name.lower() for name in SPONSOR_APPEAL_CARDS))
+    first_to_5 = (
+        "me.first_5_move IS NOT NULL AND "
+        "(opp.first_5_move IS NULL OR me.first_5_move < opp.first_5_move)"
+    )
+    first_to_8 = (
+        "me.first_8_move IS NOT NULL AND "
+        "(opp.first_8_move IS NULL OR me.first_8_move < opp.first_8_move)"
+    )
+    return f"""
+    WITH scoped_full AS (
+      SELECT f.*
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+    ),
+    scoped AS (
+      SELECT
+        f.table_id,
+        f.player,
+        SAFE_CAST(f.is_mw AS INT64) AS is_mw,
+        SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta,
+        COALESCE(SAFE_CAST(f.Triggered_end_of_game AS BOOL), FALSE) AS triggered_endgame,
+        SAFE_CAST(f.Conservation AS FLOAT64) AS conservation,
+        LOWER(TRIM(CAST(f.Starting_position_in_first_round AS STRING))) AS starting_position,
+        l.played_animals,
+        l.opening_cards,
+        l.endgame_scores,
+        l.endgame_from_sponsors,
+        l.association_action_history,
+        l.cp_history,
+        COALESCE(l.has_round_1_upgrade, FALSE) AS has_round_1_upgrade,
+        COALESCE(l.has_round_1_release, FALSE) AS has_round_1_release,
+        l.chosen_5cp_bonus,
+        l.chosen_8cp_bonus,
+        SAFE_CAST(l.association_starting_strength AS INT64) AS association_starting_strength,
+        SAFE_CAST(l.sponsors_starting_strength AS INT64) AS sponsors_starting_strength
+      FROM scoped_full f
+      JOIN `{PREPARED_LOGS_TABLE}` l
+        ON f.table_id = l.table_id
+       AND f.player = l.player
+    ),
+    sponsor_per_card AS (
+      SELECT
+        s.table_id,
+        s.player,
+        LOWER(TRIM(event.sponsor)) AS sponsor,
+        MAX(COALESCE(SAFE_CAST(event.cp AS FLOAT64), 0)) AS cp,
+        MAX(COALESCE(SAFE_CAST(event.appeal AS FLOAT64), 0)) AS appeal
+      FROM scoped s
+      CROSS JOIN UNNEST(IFNULL(s.endgame_from_sponsors, [])) AS event
+      GROUP BY s.table_id, s.player, sponsor
+    ),
+    sponsor_totals AS (
+      SELECT
+        table_id,
+        player,
+        SUM(IF(sponsor IN ({sponsor_cp_sql}), cp, 0)) AS sponsor_cp,
+        SUM(IF(sponsor IN ({sponsor_appeal_sql}), appeal, 0)) AS sponsor_appeal
+      FROM sponsor_per_card
+      GROUP BY table_id, player
+    ),
+    endgame_card_totals AS (
+      SELECT
+        s.table_id,
+        s.player,
+        SUM(COALESCE(SAFE_CAST(score.cp AS FLOAT64), 0)) AS endgame_card_cp
+      FROM scoped s
+      CROSS JOIN UNNEST(IFNULL(s.endgame_scores, [])) AS score
+      GROUP BY s.table_id, s.player
+    ),
+    player_values AS (
+      SELECT
+        s.*,
+        COALESCE(st.sponsor_cp, 0) AS sponsor_cp,
+        COALESCE(st.sponsor_appeal, 0) AS sponsor_appeal,
+        COALESCE(et.endgame_card_cp, 0) AS endgame_card_cp,
+        COALESCE(st.sponsor_cp, 0) + COALESCE(et.endgame_card_cp, 0) AS endgame_cp,
+        3 * (COALESCE(st.sponsor_cp, 0) + COALESCE(et.endgame_card_cp, 0))
+          + COALESCE(st.sponsor_appeal, 0) AS endgame_points,
+        s.conservation - COALESCE(st.sponsor_cp, 0) - COALESCE(et.endgame_card_cp, 0) AS ingame_cp,
+        (SELECT COUNTIF(LOWER(TRIM(animal.animal)) IN ({reefer_sql}))
+          FROM UNNEST(IFNULL(s.played_animals, [])) AS animal) AS reefer_count,
+        (SELECT COUNTIF(LOWER(TRIM(animal.animal)) IN ({small_sql}))
+          FROM UNNEST(IFNULL(s.played_animals, [])) AS animal) AS small_animal_count,
+        (SELECT COUNTIF(LOWER(TRIM(animal.animal)) IN ({medium_sql}))
+          FROM UNNEST(IFNULL(s.played_animals, [])) AS animal) AS medium_animal_count,
+        (SELECT COUNTIF(LOWER(TRIM(animal.animal)) IN ({large_sql}))
+          FROM UNNEST(IFNULL(s.played_animals, [])) AS animal) AS large_animal_count,
+        EXISTS(
+          SELECT 1 FROM UNNEST(IFNULL(s.association_action_history, [])) AS action
+          WHERE SAFE_CAST(action.round AS INT64) = 1 AND action.project IS NOT NULL
+        ) AS round_1_project,
+        (SELECT COUNT(*) FROM UNNEST(IFNULL(s.association_action_history, [])) AS action
+          WHERE SAFE_CAST(action.round AS INT64) = 1) >= 2 AS round_1_two_association,
+        EXISTS(
+          SELECT 1 FROM UNNEST(IFNULL(s.played_animals, [])) AS animal
+          WHERE LOWER(TRIM(animal.animal)) = 'humphead wrasse'
+            AND SAFE_CAST(animal.round AS INT64) = 1
+        ) AS round_1_humphead,
+        EXISTS(
+          SELECT 1 FROM UNNEST(IFNULL(s.played_animals, [])) AS animal
+          WHERE LOWER(TRIM(animal.animal)) = 'new zealand fur seal'
+            AND SAFE_CAST(animal.round AS INT64) IN (1, 2)
+        ) AS round_1_2_fur_seal,
+        (SELECT MIN(SAFE_CAST(history.move AS INT64))
+          FROM UNNEST(IFNULL(s.cp_history, [])) AS history
+          WHERE SAFE_CAST(history.cp AS INT64) >= 5) AS first_5_move,
+        (SELECT MIN(SAFE_CAST(history.move AS INT64))
+          FROM UNNEST(IFNULL(s.cp_history, [])) AS history
+          WHERE SAFE_CAST(history.cp AS INT64) >= 8) AS first_8_move,
+        (SELECT COUNTIF(LOWER(TRIM(card)) IN ({project_sql}))
+          FROM UNNEST(IFNULL(s.opening_cards, [])) AS card) = 0 AS no_project_opening,
+        (SELECT COUNTIF(LOWER(TRIM(card)) IN ({sponsor_sql}))
+          FROM UNNEST(IFNULL(s.opening_cards, [])) AS card) = 0 AS no_sponsor_opening
+      FROM scoped s
+      LEFT JOIN sponsor_totals st USING(table_id, player)
+      LEFT JOIN endgame_card_totals et USING(table_id, player)
+    ),
+    configured AS (
+      SELECT *
+      FROM UNNEST([
+        {configs}
+      ])
+      WHERE NOT mw_only OR @is_mw = 1
+    ),
+    observations AS (
+      SELECT
+        config.sort_order,
+        config.condition,
+        me.elo_delta,
+        CASE config.condition_key
+          WHEN 'triggered_endgame' THEN me.triggered_endgame
+          WHEN 'more_endgame_points' THEN me.endgame_points > opp.endgame_points
+          WHEN 'more_endgame_cp' THEN me.endgame_cp > opp.endgame_cp
+          WHEN 'more_ingame_cp' THEN me.ingame_cp > opp.ingame_cp
+          WHEN 'more_reefers' THEN me.reefer_count > opp.reefer_count
+          WHEN 'more_small_animals' THEN me.small_animal_count > opp.small_animal_count
+          WHEN 'more_medium_animals' THEN me.medium_animal_count > opp.medium_animal_count
+          WHEN 'more_large_animals' THEN me.large_animal_count > opp.large_animal_count
+          WHEN 'round_1_upgrade' THEN me.has_round_1_upgrade
+          WHEN 'round_1_project' THEN me.round_1_project
+          WHEN 'round_1_release' THEN me.has_round_1_release
+          WHEN 'round_1_two_association' THEN me.round_1_two_association
+          WHEN 'round_1_humphead' THEN me.round_1_humphead
+          WHEN 'round_1_2_fur_seal' THEN me.round_1_2_fur_seal
+          WHEN 'first_to_5' THEN {first_to_5}
+          WHEN 'first_to_5_bonus' THEN ({first_to_5})
+            AND LOWER(TRIM(COALESCE(me.chosen_5cp_bonus, ''))) IN ('1 university', '1 partner-zoo')
+            AND LOWER(TRIM(COALESCE(opp.chosen_5cp_bonus, ''))) NOT IN ('1 university', '1 partner-zoo')
+          WHEN 'first_to_8' THEN {first_to_8}
+          WHEN 'first_to_8_bonus' THEN ({first_to_8})
+            AND LOWER(TRIM(COALESCE(me.chosen_8cp_bonus, ''))) IN ('1 university', '1 partner-zoo')
+            AND LOWER(TRIM(COALESCE(opp.chosen_8cp_bonus, ''))) NOT IN ('1 university', '1 partner-zoo')
+          WHEN 'no_project_opening' THEN me.no_project_opening
+          WHEN 'no_sponsor_opening' THEN me.no_sponsor_opening
+          WHEN 'no_sponsor_sponsors_5' THEN
+            me.no_sponsor_opening AND me.sponsors_starting_strength = 5
+          WHEN 'no_sponsor_second_assoc_2_sponsors_5' THEN
+            me.no_sponsor_opening
+            AND me.starting_position = 'second player'
+            AND me.association_starting_strength = 2
+            AND me.sponsors_starting_strength = 5
+          ELSE FALSE
+        END AS condition_met
+      FROM player_values me
+      JOIN player_values opp
+        ON me.table_id = opp.table_id
+       AND me.player != opp.player
+      CROSS JOIN configured config
+    )
+    SELECT
+      sort_order,
+      condition,
+      ROUND(AVG(IF(condition_met, elo_delta, NULL)), 3) AS delta,
+      COUNTIF(condition_met) AS count,
+      COUNT(*) AS denominator,
+      AVG(IF(condition_met, elo_delta, NULL)) AS delta_ci_mean,
+      STDDEV_SAMP(IF(condition_met, elo_delta, NULL)) AS delta_ci_sd,
+      COUNTIF(condition_met AND elo_delta IS NOT NULL) AS delta_ci_n
+    FROM observations
+    GROUP BY sort_order, condition
+    ORDER BY sort_order
+    """
 
 
 def _build_predictors_query(where_sql, predictors_view):
     if predictors_view == PREDICTORS_VIEW_SPECIFIC:
-        rows = "\n      UNION ALL\n      ".join(
-            f"SELECT {idx} AS sort_order, {_sql_string(label)} AS condition, NULL AS delta, 0 AS count, NULL AS delta_ci_mean, NULL AS delta_ci_sd, 0 AS delta_ci_n"
-            for idx, label in enumerate(PREDICTOR_SPECIFIC_CONDITIONS, 1)
-        )
-        return rows
+        return _build_predictors_specific_query(where_sql)
     fields = ICON_FIELDS if predictors_view == PREDICTORS_VIEW_ICON else PREDICTOR_GENERAL_FIELDS
     condition_structs = ",\n        ".join(
         f"STRUCT({idx} AS sort_order, {_sql_string(label)} AS condition, {_sql_string(field)} AS field_name)"
@@ -2783,7 +3193,7 @@ def _build_actions_upgrade_order_query(where_sql):
     """
 
 
-def _build_actions_upgrades_per_map_query(where_sql):
+def _build_actions_upgrades_by_map_query(where_sql):
     map_selects = []
     for map_meta in ALL_MAPS_FOR_METRICS[:15]:
         key = map_meta["key"]
@@ -2832,8 +3242,8 @@ def _build_actions_query(where_sql, actions_view):
         return _build_actions_upgrades_query(where_sql)
     if actions_view == ACTIONS_VIEW_UPGRADE_ORDER:
         return _build_actions_upgrade_order_query(where_sql)
-    if actions_view == ACTIONS_VIEW_UPGRADES_PER_MAP:
-        return _build_actions_upgrades_per_map_query(where_sql)
+    if actions_view == ACTIONS_VIEW_UPGRADES_BY_MAP:
+        return _build_actions_upgrades_by_map_query(where_sql)
     return _build_actions_starting_position_query(where_sql)
 
 
@@ -3130,7 +3540,7 @@ def _build_combinations_query(
         WITH
         {common_ctes},
         log_filtered AS (
-          SELECT table_id, player, is_mw, Map, game_date, end_game_triggered,
+          SELECT table_id, player, is_mw, Map, game_date, table_conceded,
                  elo, opponent_elo, elo_delta, concede, endgame_scores
           FROM `{PREPARED_LOGS_TABLE}`
           WHERE {where_sql}
@@ -3315,6 +3725,154 @@ def _build_combinations_query(
     CROSS JOIN UNNEST([STRUCT(p.type_1 AS type_a, p.type_2 AS type_b)])
     ORDER BY interaction DESC, n_played DESC, card_1, card_2
     """
+
+
+def _build_combinations_paged_query(
+    where_sql,
+    combinations_view,
+    round_filter_active=False,
+    selected_rounds=None,
+    sort_field="interaction",
+    sort_direction="desc",
+):
+    """Wrap the existing combination aggregate in a small server-paged result."""
+    base_query = _build_combinations_query(
+        where_sql, combinations_view, round_filter_active, selected_rounds
+    )
+    final_order = base_query.rfind("ORDER BY")
+    if final_order >= 0:
+        base_query = base_query[:final_order]
+
+    projected_card_one = (
+        "CASE WHEN (@combination_primary != '' AND card_2 = @combination_primary) "
+        "OR (@combination_primary = '' AND @combination_secondary != '' "
+        "AND card_1 = @combination_secondary) THEN card_2 ELSE card_1 END"
+    )
+    projected_card_two = (
+        "CASE WHEN (@combination_primary != '' AND card_2 = @combination_primary) "
+        "OR (@combination_primary = '' AND @combination_secondary != '' "
+        "AND card_1 = @combination_secondary) THEN card_1 ELSE card_2 END"
+    )
+
+    if combinations_view == COMBINATIONS_VIEW_CARD_CARD:
+        sort_expressions = {
+            "card_1": projected_card_one,
+            "card_2": projected_card_two,
+        }
+        stable_fields = [projected_card_one, projected_card_two, "pair_type"]
+        visible_filter = """
+        pair_type IN UNNEST(@combination_pair_types)
+        AND (
+          (@combination_primary = '' AND @combination_secondary = '')
+          OR (
+            @combination_primary != '' AND @combination_secondary = ''
+            AND (card_1 = @combination_primary OR card_2 = @combination_primary)
+          )
+          OR (
+            @combination_primary = '' AND @combination_secondary != ''
+            AND (card_1 = @combination_secondary OR card_2 = @combination_secondary)
+          )
+          OR (
+            @combination_primary != '' AND @combination_secondary != ''
+            AND ((card_1 = @combination_primary AND card_2 = @combination_secondary)
+              OR (card_1 = @combination_secondary AND card_2 = @combination_primary))
+          )
+        )
+        """
+        range_fields = ["avg_elo", "interaction", "delta_1", "delta_2", "delta_combined", "delta_actual"]
+        card_options_sql = "ARRAY<STRING>[]"
+        endgame_options_sql = "ARRAY<STRING>[]"
+    else:
+        context_field = {
+            COMBINATIONS_VIEW_CARD_MAP: "map_name",
+            COMBINATIONS_VIEW_CARD_ROUND: "round_name",
+            COMBINATIONS_VIEW_CARD_ENDGAME: "endgame_name",
+        }[combinations_view]
+        sort_expressions = {}
+        stable_fields = ["card_name", context_field, "card_type"]
+        visible_filter = """
+        card_type IN UNNEST(@combination_card_types)
+        AND (@combination_primary = '' OR card_name = @combination_primary)
+        """
+        if combinations_view == COMBINATIONS_VIEW_CARD_MAP:
+            visible_filter += " AND map_name IN UNNEST(@combination_header_maps)"
+            range_fields = ["avg_elo", "interaction", "delta_general", "delta_map"]
+            card_options_sql = "ARRAY_AGG(DISTINCT card_name IGNORE NULLS ORDER BY card_name)"
+            endgame_options_sql = "ARRAY<STRING>[]"
+        elif combinations_view == COMBINATIONS_VIEW_CARD_ROUND:
+            visible_filter += " AND round_name IN UNNEST(@combination_header_rounds)"
+            range_fields = ["avg_elo", "interaction", "delta_general", "delta_round"]
+            card_options_sql = "ARRAY_AGG(DISTINCT card_name IGNORE NULLS ORDER BY card_name)"
+            endgame_options_sql = "ARRAY<STRING>[]"
+        else:
+            visible_filter += (
+                " AND (@combination_secondary = '' OR endgame_name = @combination_secondary)"
+            )
+            range_fields = ["avg_elo", "interaction", "delta_card", "delta_endgame", "delta_combined", "delta_actual"]
+            card_options_sql = "ARRAY_AGG(DISTINCT card_name IGNORE NULLS ORDER BY card_name)"
+            endgame_options_sql = "ARRAY_AGG(DISTINCT endgame_name IGNORE NULLS ORDER BY endgame_name)"
+
+    direct_sort_fields = {
+        "delta_combined", "delta_actual", "delta_general", "delta_map", "delta_round",
+        "delta_card", "delta_endgame", "interaction", "avg_elo", "n_played",
+        "pair_type", "card_name", "map_name", "round_name", "endgame_name", "card_type",
+    }
+    if sort_field not in COMBINATION_SORT_FIELDS[combinations_view]:
+        sort_field = "interaction"
+    sort_expression = sort_expressions.get(sort_field, sort_field if sort_field in direct_sort_fields else "interaction")
+    sort_direction = "asc" if sort_direction == "asc" else "desc"
+    order_sql = f"{sort_expression} {sort_direction.upper()} NULLS LAST"
+    for stable_field in stable_fields:
+        order_sql += f", {stable_field} ASC NULLS LAST"
+
+    range_selects = ",\n          ".join(
+        f"MIN({field}) AS range_{field}_min, MAX({field}) AS range_{field}_max"
+        for field in range_fields
+    )
+    return f"""
+    WITH base AS (
+      {base_query}
+    ),
+    ranges AS (
+      SELECT
+        {range_selects}
+      FROM base
+    ),
+    ranked AS (
+      SELECT
+        b.*,
+        ROW_NUMBER() OVER (ORDER BY {order_sql}) AS global_rank
+      FROM base b
+      WHERE n_played >= @combination_min_plays
+    ),
+    visible AS (
+      SELECT *
+      FROM ranked
+      WHERE {visible_filter}
+    ),
+    options AS (
+      SELECT
+        {card_options_sql} AS card_options,
+        {endgame_options_sql} AS endgame_options
+      FROM base
+    )
+    SELECT
+      (SELECT COUNT(*) FROM visible) AS total_rows,
+      ranges.*,
+      options.card_options,
+      options.endgame_options,
+      ARRAY(
+        SELECT AS STRUCT *
+        FROM visible
+        ORDER BY {order_sql}
+        LIMIT @combination_page_size
+        OFFSET @combination_offset
+      ) AS page_rows
+    FROM ranges
+    CROSS JOIN options
+    """
+
+
 def _query_card_stats(
     is_mw,
     selected_maps,
@@ -3328,7 +3886,7 @@ def _query_card_stats(
     opponent_elo_max,
     date_from,
     date_to,
-    end_game_triggered,
+    completed_only,
     endgames_view=ENDGAMES_VIEW_GENERAL,
     maps_view=MAPS_VIEW_METRICS,
     sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP,
@@ -3336,6 +3894,19 @@ def _query_card_stats(
     build_view=BUILD_VIEW_ENCLOSURES,
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
+    hexes_expanded=False,
+    combination_paged=False,
+    combination_page=COMBINATION_PAGE_DEFAULT,
+    combination_page_size=COMBINATION_PAGE_SIZE_DEFAULT,
+    combination_min_plays=COMBINATION_DEFAULT_MIN_PLAYS,
+    combination_sort="interaction",
+    combination_sort_direction="desc",
+    combination_pair_types=None,
+    combination_card_types=None,
+    combination_primary="",
+    combination_secondary="",
+    combination_header_maps=None,
+    combination_header_rounds=None,
     use_query_cache=True,
 ):
     if stats_page == STATS_PAGE_HOME:
@@ -3348,7 +3919,7 @@ def _query_card_stats(
             opponent_elo_max,
             date_from,
             date_to,
-            end_game_triggered,
+            completed_only,
             exclude_invalid_maps=False,
         )
         query = _build_home_stats_query(where_sql)
@@ -3383,7 +3954,7 @@ def _query_card_stats(
             None,
         )
         query = _build_icons_query(where_sql)
-    elif stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_COVERED_HEXES:
+    elif stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
         where_sql, query_parameters = _build_full_sample_where_sql(
             is_mw,
             selected_maps,
@@ -3393,9 +3964,9 @@ def _query_card_stats(
             opponent_elo_max,
             date_from,
             date_to,
-            end_game_triggered,
+            None,
         )
-        query = _build_build_covered_hexes_query(where_sql)
+        query = _build_build_hexes_query(where_sql, expanded=hexes_expanded)
     elif stats_page == STATS_PAGE_PREDICTORS:
         where_sql, query_parameters = _build_full_sample_where_sql(
             is_mw,
@@ -3406,12 +3977,12 @@ def _query_card_stats(
             opponent_elo_max,
             date_from,
             date_to,
-            end_game_triggered,
+            completed_only,
         )
         query = _build_predictors_query(where_sql, predictors_view)
     elif stats_page == STATS_PAGE_ACTIONS and actions_view in (
         ACTIONS_VIEW_UPGRADES,
-        ACTIONS_VIEW_UPGRADES_PER_MAP,
+        ACTIONS_VIEW_UPGRADES_BY_MAP,
     ):
         where_sql, query_parameters = _build_full_sample_where_sql(
             is_mw,
@@ -3422,7 +3993,7 @@ def _query_card_stats(
             opponent_elo_max,
             date_from,
             date_to,
-            end_game_triggered,
+            completed_only,
         )
         query = _build_actions_query(where_sql, actions_view)
     else:
@@ -3435,7 +4006,7 @@ def _query_card_stats(
             opponent_elo_max,
             date_from,
             date_to,
-            end_game_triggered,
+            completed_only,
         )
     if stats_page == STATS_PAGE_SPONSOR_ENDGAMES:
         query = _build_sponsor_endgames_query(where_sql, sponsor_endgames_view)
@@ -3445,16 +4016,38 @@ def _query_card_stats(
     if stats_page == STATS_PAGE_ACTIONS:
         query = _build_actions_query(where_sql, actions_view)
     if stats_page == STATS_PAGE_COMBINATIONS:
-        query = _build_combinations_query(
-            where_sql,
-            combinations_view,
-            round_filter_active,
-            selected_rounds,
-        )
+        if combination_paged:
+            query = _build_combinations_paged_query(
+                where_sql,
+                combinations_view,
+                round_filter_active,
+                selected_rounds,
+                combination_sort,
+                combination_sort_direction,
+            )
+        else:
+            query = _build_combinations_query(
+                where_sql,
+                combinations_view,
+                round_filter_active,
+                selected_rounds,
+            )
         if combinations_view == COMBINATIONS_VIEW_CARD_MAP:
             query_parameters.append(
                 bigquery.ArrayQueryParameter("combination_maps", "STRING", VALID_MAPS)
             )
+        if combination_paged:
+            query_parameters.extend([
+                bigquery.ScalarQueryParameter("combination_page_size", "INT64", combination_page_size),
+                bigquery.ScalarQueryParameter("combination_offset", "INT64", max(0, (combination_page - 1) * combination_page_size)),
+                bigquery.ScalarQueryParameter("combination_min_plays", "INT64", combination_min_plays),
+                bigquery.ArrayQueryParameter("combination_pair_types", "STRING", combination_pair_types or []),
+                bigquery.ArrayQueryParameter("combination_card_types", "STRING", combination_card_types or []),
+                bigquery.ScalarQueryParameter("combination_primary", "STRING", combination_primary or ""),
+                bigquery.ScalarQueryParameter("combination_secondary", "STRING", combination_secondary or ""),
+                bigquery.ArrayQueryParameter("combination_header_maps", "STRING", combination_header_maps or []),
+                bigquery.ArrayQueryParameter("combination_header_rounds", "STRING", combination_header_rounds or []),
+            ])
     if stats_page in (STATS_PAGE_CARDS, STATS_PAGE_OPENING_HAND):
         query_parameters.append(
             bigquery.ArrayQueryParameter("excluded_projects", "STRING", sorted(EXCLUDED_PROJECTS))
@@ -3517,6 +4110,7 @@ def _query_card_stats(
                     "elo_delta": row.elo_delta,
                 })
         else:
+            schema_field_names = {field.name for field in results.schema}
             map_keys = [m["key"] for m in ALL_MAPS_FOR_METRICS]
             for row in results:
                 item = {
@@ -3529,6 +4123,9 @@ def _query_card_stats(
                 }
                 for key in map_keys:
                     item[key] = getattr(row, key, None)
+                    tooltip_key = f"tooltip_{key}"
+                    if tooltip_key in schema_field_names:
+                        item[tooltip_key] = getattr(row, tooltip_key, None)
                 rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
@@ -3548,7 +4145,7 @@ def _query_card_stats(
 
     if stats_page == STATS_PAGE_BUILD:
         schema_field_names = {field.name for field in results.schema}
-        if build_view == BUILD_VIEW_COVERED_HEXES:
+        if build_view == BUILD_VIEW_HEXES:
             for row in results:
                 item = {
                     "bucket_key": row.bucket_key,
@@ -3609,6 +4206,8 @@ def _query_card_stats(
                 "delta": row.delta,
                 "count": row.count,
             }
+            if "denominator" in schema_field_names:
+                item["denominator"] = row.denominator
             _attach_ci95(item, row, schema_field_names, "delta")
             rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
@@ -3640,6 +4239,14 @@ def _query_card_stats(
                 item["denominator"] = row.denominator
             if "count" in schema_field_names:
                 item["count"] = row.count
+            # Upgrade-order frequency uses the slot-count field names
+            # count_1..count_4.  They do not follow the count_<metric>
+            # convention used by the delta/map fields below, so expose them
+            # explicitly instead of leaving the frontend to default them to 0.
+            for slot in ("1", "2", "3", "4"):
+                field_name = f"count_{slot}"
+                if field_name in schema_field_names:
+                    item[field_name] = getattr(row, field_name, 0)
             for prefix in (
                 "delta", "delta_1", "delta_2", "delta_3", "delta_4", "delta_5",
                 "map_1a", "map_2a", "map_3a", "map_4a", "map_5a",
@@ -3749,8 +4356,48 @@ def _query_card_stats(
         return rows, timing
 
     if stats_page == STATS_PAGE_COMBINATIONS:
-        schema_field_names = {field.name for field in results.schema}
-        for row in results:
+        combination_meta = None
+        if combination_paged:
+            wrapper = next(iter(results), None)
+            result_rows = list(getattr(wrapper, "page_rows", None) or []) if wrapper else []
+            result_rows = [
+                SimpleNamespace(**row) if isinstance(row, dict) else row
+                for row in result_rows
+            ]
+            schema_field_names = {field.name for field in results.schema}
+            ci_prefixes = {
+                COMBINATIONS_VIEW_CARD_CARD: ["delta_actual"],
+                COMBINATIONS_VIEW_CARD_MAP: ["delta_map"],
+                COMBINATIONS_VIEW_CARD_ROUND: ["delta_round"],
+                COMBINATIONS_VIEW_CARD_ENDGAME: ["delta_actual"],
+            }[combinations_view]
+            for prefix in ci_prefixes:
+                schema_field_names.update({f"{prefix}_ci_mean", f"{prefix}_ci_sd", f"{prefix}_ci_n"})
+            range_fields = {
+                COMBINATIONS_VIEW_CARD_CARD: ["avg_elo", "interaction", "delta_1", "delta_2", "delta_combined", "delta_actual"],
+                COMBINATIONS_VIEW_CARD_MAP: ["avg_elo", "interaction", "delta_general", "delta_map"],
+                COMBINATIONS_VIEW_CARD_ROUND: ["avg_elo", "interaction", "delta_general", "delta_round"],
+                COMBINATIONS_VIEW_CARD_ENDGAME: ["avg_elo", "interaction", "delta_card", "delta_endgame", "delta_combined", "delta_actual"],
+            }[combinations_view]
+            combination_ranges = {}
+            for field in range_fields:
+                combination_ranges[field] = {
+                    "min": getattr(wrapper, f"range_{field}_min", None) if wrapper else None,
+                    "max": getattr(wrapper, f"range_{field}_max", None) if wrapper else None,
+                }
+            combination_meta = {
+                "combination_paged": True,
+                "page": combination_page,
+                "page_size": combination_page_size,
+                "total_rows": int(getattr(wrapper, "total_rows", 0) or 0) if wrapper else 0,
+                "combination_ranges": combination_ranges,
+                "combination_card_options": list(getattr(wrapper, "card_options", None) or []) if wrapper else [],
+                "combination_endgame_options": list(getattr(wrapper, "endgame_options", None) or []) if wrapper else [],
+            }
+        else:
+            result_rows = results
+            schema_field_names = {field.name for field in results.schema}
+        for row in result_rows:
             if combinations_view == COMBINATIONS_VIEW_CARD_ENDGAME:
                 item = {
                     "card_name": row.card_name,
@@ -3805,6 +4452,8 @@ def _query_card_stats(
                     "pair_type": row.pair_type,
                 }
                 _attach_ci95(item, row, schema_field_names, "delta_actual")
+            if combination_paged:
+                item["global_rank"] = getattr(row, "global_rank", None)
             rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
@@ -3820,6 +4469,8 @@ def _query_card_stats(
             "job_total_bytes_processed": job.total_bytes_processed,
             "job_total_slot_ms": job.slot_millis,
         }
+        if combination_meta is not None:
+            timing["combination_meta"] = combination_meta
         return rows, timing
 
     allowed_card_types = set(card_types)
@@ -3868,6 +4519,48 @@ def _query_card_stats(
     return rows, timing
 
 
+def _query_hexes_both(*args, **kwargs):
+    """Return collapsed and exact Hexes rows in one API request."""
+    collapsed_kwargs = dict(kwargs)
+    collapsed_kwargs["hexes_expanded"] = False
+    expanded_kwargs = dict(kwargs)
+    expanded_kwargs["hexes_expanded"] = True
+    collapsed_rows, collapsed_timing = _query_card_stats(*args, **collapsed_kwargs)
+    expanded_rows, expanded_timing = _query_card_stats(*args, **expanded_kwargs)
+    combined_timing = dict(collapsed_timing)
+    combined_timing["expanded_query_wait_ms"] = expanded_timing.get("query_wait_ms")
+    combined_timing["expanded_job_id"] = expanded_timing.get("job_id")
+    combined_timing["expanded_job_total_bytes_processed"] = expanded_timing.get(
+        "job_total_bytes_processed"
+    )
+    combined_timing["expanded_job_total_slot_ms"] = expanded_timing.get("job_total_slot_ms")
+    return collapsed_rows, expanded_rows, combined_timing
+
+
+def _combination_ranges(rows, combinations_view):
+    fields = {
+        COMBINATIONS_VIEW_CARD_CARD: ["avg_elo", "interaction", "delta_1", "delta_2", "delta_combined", "delta_actual"],
+        COMBINATIONS_VIEW_CARD_MAP: ["avg_elo", "interaction", "delta_general", "delta_map"],
+        COMBINATIONS_VIEW_CARD_ROUND: ["avg_elo", "interaction", "delta_general", "delta_round"],
+        COMBINATIONS_VIEW_CARD_ENDGAME: ["avg_elo", "interaction", "delta_card", "delta_endgame", "delta_combined", "delta_actual"],
+    }[combinations_view]
+    result = {}
+    for field in fields:
+        values = []
+        for row in rows:
+            try:
+                value = float(row.get(field))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                values.append(value)
+        result[field] = {
+            "min": min(values) if values else None,
+            "max": max(values) if values else None,
+        }
+    return result
+
+
 def _refresh_default_snapshot_from_prepared(
     is_mw,
     stats_page=STATS_PAGE_CARDS,
@@ -3878,7 +4571,7 @@ def _refresh_default_snapshot_from_prepared(
     build_view=BUILD_VIEW_ENCLOSURES,
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
-    end_game_triggered_override=None,
+    completed_only_override=None,
     cache_blob_override=None,
 ):
     started_at = time.perf_counter()
@@ -3888,7 +4581,7 @@ def _refresh_default_snapshot_from_prepared(
         if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_METRICS
         else DEFAULT_DATE_FROM
     )
-    rows, timing = _query_card_stats(
+    query_args = (
         int(is_mw),
         ALL_KNOWN_MAPS if is_home else VALID_MAPS,
         DEFAULT_CARD_TYPES,
@@ -3901,16 +4594,27 @@ def _refresh_default_snapshot_from_prepared(
         None,
         snapshot_date_from,
         None,
-        end_game_triggered_override,
-        endgames_view=endgames_view,
-        maps_view=maps_view,
-        sponsor_endgames_view=sponsor_endgames_view,
-        combinations_view=combinations_view,
-        build_view=build_view,
-        predictors_view=predictors_view,
-        actions_view=actions_view,
-        use_query_cache=False,
+        completed_only_override,
     )
+    query_kwargs = {
+        "endgames_view": endgames_view,
+        "maps_view": maps_view,
+        "sponsor_endgames_view": sponsor_endgames_view,
+        "combinations_view": combinations_view,
+        "build_view": build_view,
+        "predictors_view": predictors_view,
+        "actions_view": actions_view,
+        "use_query_cache": False,
+    }
+    expanded_rows = None
+    if stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
+        rows, expanded_rows, timing = _query_hexes_both(*query_args, **query_kwargs)
+    else:
+        rows, timing = _query_card_stats(*query_args, **query_kwargs)
+    combination_ranges = None
+    if stats_page == STATS_PAGE_COMBINATIONS:
+        combination_ranges = _combination_ranges(rows, combinations_view)
+        rows = [row for row in rows if int(row.get("n_played") or 0) >= COMBINATION_DEFAULT_MIN_PLAYS]
     payload = {
         "status": "ok",
         "round_filter_active": False,
@@ -3960,6 +4664,11 @@ def _refresh_default_snapshot_from_prepared(
         "job_total_bytes_processed": timing["job_total_bytes_processed"],
         "job_total_slot_ms": timing["job_total_slot_ms"],
     }
+    if combination_ranges is not None:
+        payload["combination_snapshot_min_plays"] = COMBINATION_DEFAULT_MIN_PLAYS
+        payload["combination_ranges"] = combination_ranges
+    if expanded_rows is not None:
+        payload["expanded_data"] = expanded_rows
     cache_write_ok = (
         _write_cache_blob(cache_blob_override, payload, "refreshed")
         if cache_blob_override
@@ -3995,6 +4704,7 @@ def _refresh_default_snapshot_from_prepared(
 
 def _run_daily_refresh():
     started_at = time.perf_counter()
+    card_attributes = _load_card_attribute_groups(force_refresh=True)
     prepared = _refresh_prepared_tables()
     data_version = _write_data_version(prepared)
     home_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_HOME)
@@ -4043,28 +4753,28 @@ def _run_daily_refresh():
     build_delta_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_BUILD)
     build_delta_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_BUILD)
     build_frequency_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_BUILD, end_game_triggered_override=True,
+        1, STATS_PAGE_BUILD, completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/build/enclosures/frequency/default-mw.json",
     )
     build_frequency_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_BUILD, end_game_triggered_override=True,
+        0, STATS_PAGE_BUILD, completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/build/enclosures/frequency/default-base.json",
     )
-    build_covered_delta_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_BUILD, build_view=BUILD_VIEW_COVERED_HEXES
+    build_hexes_delta_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_BUILD, build_view=BUILD_VIEW_HEXES
     )
-    build_covered_delta_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_BUILD, build_view=BUILD_VIEW_COVERED_HEXES
+    build_hexes_delta_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_BUILD, build_view=BUILD_VIEW_HEXES
     )
-    build_covered_frequency_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_BUILD, build_view=BUILD_VIEW_COVERED_HEXES,
-        end_game_triggered_override=True,
-        cache_blob_override=f"{CACHE_PREFIX}/build/covered_hexes/frequency/default-mw.json",
+    build_hexes_frequency_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_BUILD, build_view=BUILD_VIEW_HEXES,
+        completed_only_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/build/hexes/frequency/default-mw.json",
     )
-    build_covered_frequency_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_BUILD, build_view=BUILD_VIEW_COVERED_HEXES,
-        end_game_triggered_override=True,
-        cache_blob_override=f"{CACHE_PREFIX}/build/covered_hexes/frequency/default-base.json",
+    build_hexes_frequency_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_BUILD, build_view=BUILD_VIEW_HEXES,
+        completed_only_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/build/hexes/frequency/default-base.json",
     )
     predictors_general_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_GENERAL
@@ -4078,6 +4788,12 @@ def _run_daily_refresh():
     predictors_icon_base = _refresh_default_snapshot_from_prepared(
         0, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_ICON
     )
+    predictors_specific_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_SPECIFIC
+    )
+    predictors_specific_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_SPECIFIC
+    )
     actions_starting_position_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_STARTING_POSITION
     )
@@ -4090,16 +4806,6 @@ def _run_daily_refresh():
     actions_upgrades_delta_base = _refresh_default_snapshot_from_prepared(
         0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES
     )
-    actions_upgrades_frequency_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES,
-        end_game_triggered_override=True,
-        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades/frequency/default-mw.json",
-    )
-    actions_upgrades_frequency_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES,
-        end_game_triggered_override=True,
-        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades/frequency/default-base.json",
-    )
     actions_upgrade_order_delta_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER
     )
@@ -4108,29 +4814,29 @@ def _run_daily_refresh():
     )
     actions_upgrade_order_frequency_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER,
-        end_game_triggered_override=True,
+        completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/actions/upgrade_order/frequency/default-mw.json",
     )
     actions_upgrade_order_frequency_base = _refresh_default_snapshot_from_prepared(
         0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER,
-        end_game_triggered_override=True,
+        completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/actions/upgrade_order/frequency/default-base.json",
     )
-    actions_upgrades_per_map_delta_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_PER_MAP
+    actions_upgrades_by_map_delta_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_BY_MAP
     )
-    actions_upgrades_per_map_delta_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_PER_MAP
+    actions_upgrades_by_map_delta_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_BY_MAP
     )
-    actions_upgrades_per_map_frequency_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_PER_MAP,
-        end_game_triggered_override=True,
-        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_per_map/frequency/default-mw.json",
+    actions_upgrades_by_map_frequency_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_BY_MAP,
+        completed_only_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_by_map/frequency/default-mw.json",
     )
-    actions_upgrades_per_map_frequency_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_PER_MAP,
-        end_game_triggered_override=True,
-        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_per_map/frequency/default-base.json",
+    actions_upgrades_by_map_frequency_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_BY_MAP,
+        completed_only_override=True,
+        cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_by_map/frequency/default-base.json",
     )
     combinations_card_card_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_CARD
@@ -4164,17 +4870,17 @@ def _run_daily_refresh():
         sponsor_endgames_appeal_mw, sponsor_endgames_appeal_base,
         icons_mw, icons_base, build_delta_mw, build_delta_base,
         build_frequency_mw, build_frequency_base,
-        build_covered_delta_mw, build_covered_delta_base,
-        build_covered_frequency_mw, build_covered_frequency_base,
+        build_hexes_delta_mw, build_hexes_delta_base,
+        build_hexes_frequency_mw, build_hexes_frequency_base,
         predictors_general_mw, predictors_general_base,
         predictors_icon_mw, predictors_icon_base,
+        predictors_specific_mw, predictors_specific_base,
         actions_starting_position_mw, actions_starting_position_base,
         actions_upgrades_delta_mw, actions_upgrades_delta_base,
-        actions_upgrades_frequency_mw, actions_upgrades_frequency_base,
         actions_upgrade_order_delta_mw, actions_upgrade_order_delta_base,
         actions_upgrade_order_frequency_mw, actions_upgrade_order_frequency_base,
-        actions_upgrades_per_map_delta_mw, actions_upgrades_per_map_delta_base,
-        actions_upgrades_per_map_frequency_mw, actions_upgrades_per_map_frequency_base,
+        actions_upgrades_by_map_delta_mw, actions_upgrades_by_map_delta_base,
+        actions_upgrades_by_map_frequency_mw, actions_upgrades_by_map_frequency_base,
         combinations_card_card_mw, combinations_card_card_base,
         combinations_card_round_mw, combinations_card_round_base,
         combinations_card_map_mw, combinations_card_map_base,
@@ -4189,6 +4895,12 @@ def _run_daily_refresh():
         "status": status,
         "total_ms": _ms_since(started_at),
         "data_version": data_version,
+        "card_attributes": {
+            "source_sha256": card_attributes.get("source_sha256"),
+            "reefer_animals": len(card_attributes.get("reefer_animals", [])),
+            "project_cards": len(card_attributes.get("project_cards", [])),
+            "sponsor_cards": len(card_attributes.get("sponsor_cards", [])),
+        },
         "prepared": prepared,
         "home_mw": home_mw,
         "home_base": home_base,
@@ -4217,28 +4929,28 @@ def _run_daily_refresh():
         "build_delta_base": build_delta_base,
         "build_frequency_mw": build_frequency_mw,
         "build_frequency_base": build_frequency_base,
-        "build_covered_delta_mw": build_covered_delta_mw,
-        "build_covered_delta_base": build_covered_delta_base,
-        "build_covered_frequency_mw": build_covered_frequency_mw,
-        "build_covered_frequency_base": build_covered_frequency_base,
+        "build_hexes_delta_mw": build_hexes_delta_mw,
+        "build_hexes_delta_base": build_hexes_delta_base,
+        "build_hexes_frequency_mw": build_hexes_frequency_mw,
+        "build_hexes_frequency_base": build_hexes_frequency_base,
         "predictors_general_mw": predictors_general_mw,
         "predictors_general_base": predictors_general_base,
         "predictors_icon_mw": predictors_icon_mw,
         "predictors_icon_base": predictors_icon_base,
+        "predictors_specific_mw": predictors_specific_mw,
+        "predictors_specific_base": predictors_specific_base,
         "actions_starting_position_mw": actions_starting_position_mw,
         "actions_starting_position_base": actions_starting_position_base,
         "actions_upgrades_delta_mw": actions_upgrades_delta_mw,
         "actions_upgrades_delta_base": actions_upgrades_delta_base,
-        "actions_upgrades_frequency_mw": actions_upgrades_frequency_mw,
-        "actions_upgrades_frequency_base": actions_upgrades_frequency_base,
         "actions_upgrade_order_delta_mw": actions_upgrade_order_delta_mw,
         "actions_upgrade_order_delta_base": actions_upgrade_order_delta_base,
         "actions_upgrade_order_frequency_mw": actions_upgrade_order_frequency_mw,
         "actions_upgrade_order_frequency_base": actions_upgrade_order_frequency_base,
-        "actions_upgrades_per_map_delta_mw": actions_upgrades_per_map_delta_mw,
-        "actions_upgrades_per_map_delta_base": actions_upgrades_per_map_delta_base,
-        "actions_upgrades_per_map_frequency_mw": actions_upgrades_per_map_frequency_mw,
-        "actions_upgrades_per_map_frequency_base": actions_upgrades_per_map_frequency_base,
+        "actions_upgrades_by_map_delta_mw": actions_upgrades_by_map_delta_mw,
+        "actions_upgrades_by_map_delta_base": actions_upgrades_by_map_delta_base,
+        "actions_upgrades_by_map_frequency_mw": actions_upgrades_by_map_frequency_mw,
+        "actions_upgrades_by_map_frequency_base": actions_upgrades_by_map_frequency_base,
         "combinations_card_card_mw": combinations_card_card_mw,
         "combinations_card_card_base": combinations_card_card_base,
         "combinations_card_round_mw": combinations_card_round_mw,
@@ -4251,6 +4963,19 @@ def _run_daily_refresh():
 
 
 @functions_framework.http
+def _json_http_response(payload, status_code, headers, request):
+    encoded = json.dumps(payload, default=_json_default, separators=(",", ":")).encode("utf-8")
+    accepted = request.headers.get("Accept-Encoding", "").lower()
+    if len(encoded) >= 64 * 1024 and "gzip" in accepted:
+        compressed = gzip.compress(encoded, compresslevel=6, mtime=0)
+        response_headers = dict(headers)
+        response_headers["Content-Encoding"] = "gzip"
+        response_headers["Vary"] = "Accept-Encoding"
+        response_headers["Content-Length"] = str(len(compressed))
+        return (compressed, status_code, response_headers)
+    return (encoded.decode("utf-8"), status_code, headers)
+
+
 def get_card_stats(request):
     headers = {
         "Access-Control-Allow-Origin": "*",
@@ -4281,19 +5006,19 @@ def get_card_stats(request):
             payload = _refresh_prepared_tables()
             payload["data_version"] = _write_data_version(payload)
             status_code = 200 if payload["data_version"] else 500
-            return (json.dumps(payload), status_code, headers)
+            return _json_http_response(payload, status_code, headers, request)
         except Exception as exc:
             logging.exception("Failed to refresh prepared tables")
-            return (json.dumps({"status": "error", "message": str(exc)}), 500, headers)
+            return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
 
     if params.get("daily_refresh") is True:
         try:
             payload = _run_daily_refresh()
             status_code = 200 if payload.get("status") == "ok" else 500
-            return (json.dumps(payload), status_code, headers)
+            return _json_http_response(payload, status_code, headers, request)
         except Exception as exc:
             logging.exception("Failed to run daily refresh")
-            return (json.dumps({"status": "error", "message": str(exc)}), 500, headers)
+            return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
 
     try:
         stats_page = _parse_stats_page(params.get("stats_page", params.get("page", STATS_PAGE_CARDS)))
@@ -4317,6 +5042,65 @@ def get_card_stats(request):
             if stats_page == STATS_PAGE_COMBINATIONS
             else COMBINATIONS_VIEW_CARD_CARD
         )
+        combination_paged = False
+        combination_page = COMBINATION_PAGE_DEFAULT
+        combination_page_size = COMBINATION_PAGE_SIZE_DEFAULT
+        combination_min_plays = COMBINATION_DEFAULT_MIN_PLAYS
+        combination_sort = "interaction"
+        combination_sort_direction = "desc"
+        combination_pair_types = list(COMBINATION_PAIR_TYPES)
+        combination_card_types = list(DEFAULT_CARD_TYPES)
+        combination_primary = ""
+        combination_secondary = ""
+        combination_header_maps = list(VALID_MAPS)
+        combination_header_rounds = ["1", "2", "3", "4", "5", "6+"]
+        if stats_page == STATS_PAGE_COMBINATIONS:
+            combination_paged = bool(_parse_optional_bool(
+                params.get("combination_paged"), "combination_paged"
+            ))
+            combination_page = _parse_int_param(
+                params.get("combination_page"), "combination_page", COMBINATION_PAGE_DEFAULT
+            )
+            combination_page_size = _parse_int_param(
+                params.get("combination_page_size"), "combination_page_size", COMBINATION_PAGE_SIZE_DEFAULT
+            )
+            combination_min_plays = _parse_int_param(
+                params.get("combination_min_plays"), "combination_min_plays", COMBINATION_DEFAULT_MIN_PLAYS
+            )
+            if combination_page < 1:
+                raise ValueError("combination_page must be at least 1")
+            if combination_page_size not in COMBINATION_PAGE_SIZES:
+                raise ValueError("combination_page_size must be 25, 50, or 100")
+            if combination_min_plays < 0:
+                raise ValueError("combination_min_plays must be non-negative")
+            combination_sort = str(params.get("combination_sort") or "interaction")
+            if combination_sort not in COMBINATION_SORT_FIELDS[combinations_view]:
+                raise ValueError("combination_sort is not valid for this view")
+            combination_sort_direction = str(params.get("combination_sort_dir") or "desc").lower()
+            if combination_sort_direction not in {"asc", "desc"}:
+                raise ValueError("combination_sort_dir must be asc or desc")
+            combination_pair_types = _parse_combination_list(
+                params.get("combination_pair_types"), "combination_pair_types", COMBINATION_PAIR_TYPES, COMBINATION_PAIR_TYPES
+            )
+            combination_card_types = _parse_combination_list(
+                params.get("combination_card_types"), "combination_card_types", VALID_CARD_TYPES, DEFAULT_CARD_TYPES
+            )
+            for field_name in ("combination_primary", "combination_secondary"):
+                value = params.get(field_name, "")
+                if value is None:
+                    value = ""
+                if not isinstance(value, str):
+                    raise ValueError(f"{field_name} must be a string")
+                if field_name == "combination_primary":
+                    combination_primary = value
+                else:
+                    combination_secondary = value
+            combination_header_maps = _parse_combination_list(
+                params.get("combination_header_maps"), "combination_header_maps", VALID_MAPS, VALID_MAPS
+            )
+            combination_header_rounds = _parse_combination_list(
+                params.get("combination_header_rounds"), "combination_header_rounds", ["1", "2", "3", "4", "5", "6+"], ["1", "2", "3", "4", "5", "6+"]
+            )
         build_view = (
             _parse_build_view(params.get("build_view"))
             if stats_page == STATS_PAGE_BUILD
@@ -4357,10 +5141,10 @@ def get_card_stats(request):
         date_to = _parse_iso_date(params.get("date_to"), "date_to")
         if date_from and date_to and date_from > date_to:
             raise ValueError("date_from must be on or before date_to")
-        raw_end_game_triggered = params["end_game_triggered"] if "end_game_triggered" in params else None
-        end_game_triggered = _parse_optional_bool(raw_end_game_triggered, "end_game_triggered")
+        raw_completed_only = params["completed_only"] if "completed_only" in params else None
+        completed_only = _parse_optional_bool(raw_completed_only, "completed_only")
     except ValueError as exc:
-        return (json.dumps({"status": "error", "message": str(exc)}), 400, headers)
+        return _json_http_response({"status": "error", "message": str(exc)}, 400, headers, request)
 
     allowed_maps = ALL_KNOWN_MAPS if stats_page == STATS_PAGE_HOME else VALID_MAPS
     selected_maps = params.get("maps", allowed_maps)
@@ -4397,7 +5181,10 @@ def get_card_stats(request):
         STATS_PAGE_ICONS,
         STATS_PAGE_PREDICTORS,
     ):
-        end_game_triggered = None
+        completed_only = None
+    if stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
+        # Hexes always uses the completed-table population; its UI has no toggle.
+        completed_only = None
     if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_TOURNAMENT_H2H:
         player_elo_min = 300
         player_elo_max = None
@@ -4420,9 +5207,13 @@ def get_card_stats(request):
         opponent_elo_max,
         date_from,
         date_to,
-        end_game_triggered,
+        completed_only,
         round_filter_active,
     )
+    if stats_page == STATS_PAGE_COMBINATIONS and (
+        combination_paged or combination_min_plays != COMBINATION_DEFAULT_MIN_PLAYS
+    ):
+        cacheable_default_request = False
 
     if cacheable_default_request and not refresh_data:
         cached_payload = _read_cached_snapshot(
@@ -4431,11 +5222,26 @@ def get_card_stats(request):
             build_view, predictors_view, actions_view
         )
         if cached_payload:
-            return (json.dumps(cached_payload), 200, headers)
+            return _json_http_response(cached_payload, 200, headers, request)
 
     data_version = _read_data_version()
     filter_subview = (
-        combinations_view if stats_page == STATS_PAGE_COMBINATIONS else
+        {
+            "view": combinations_view,
+            "paged": combination_paged,
+            "page": combination_page,
+            "page_size": combination_page_size,
+            "min_plays": combination_min_plays,
+            "sort": combination_sort,
+            "sort_dir": combination_sort_direction,
+            "pair_types": combination_pair_types,
+            "card_types": combination_card_types,
+            "primary": combination_primary,
+            "secondary": combination_secondary,
+            "header_maps": combination_header_maps,
+            "header_rounds": combination_header_rounds,
+        }
+        if stats_page == STATS_PAGE_COMBINATIONS else
         build_view if stats_page == STATS_PAGE_BUILD else
         predictors_view if stats_page == STATS_PAGE_PREDICTORS else
         actions_view if stats_page == STATS_PAGE_ACTIONS else
@@ -4462,16 +5268,16 @@ def get_card_stats(request):
             opponent_elo_max,
             date_from,
             date_to,
-            end_game_triggered,
+            completed_only,
             data_version,
             filter_subview,
         )
         cached_payload = _read_cache_blob(filter_cache_blob_name, "filter_hit")
         if cached_payload:
-            return (json.dumps(cached_payload), 200, headers)
+            return _json_http_response(cached_payload, 200, headers, request)
 
     try:
-        rows, timing = _query_card_stats(
+        query_args = (
             is_mw,
             selected_maps,
             card_types,
@@ -4484,16 +5290,47 @@ def get_card_stats(request):
             opponent_elo_max,
             date_from,
             date_to,
-            end_game_triggered,
-            endgames_view=endgames_view,
-            maps_view=maps_view,
-            sponsor_endgames_view=sponsor_endgames_view,
-            combinations_view=combinations_view,
-            build_view=build_view,
-            predictors_view=predictors_view,
-            actions_view=actions_view,
-            use_query_cache=(stats_page != STATS_PAGE_ENDGAMES and not debug_timing),
+            completed_only,
         )
+        query_kwargs = {
+            "hexes_expanded": False,
+            "combination_paged": combination_paged,
+            "combination_page": combination_page,
+            "combination_page_size": combination_page_size,
+            "combination_min_plays": combination_min_plays,
+            "combination_sort": combination_sort,
+            "combination_sort_direction": combination_sort_direction,
+            "combination_pair_types": combination_pair_types,
+            "combination_card_types": combination_card_types,
+            "combination_primary": combination_primary,
+            "combination_secondary": combination_secondary,
+            "combination_header_maps": combination_header_maps,
+            "combination_header_rounds": combination_header_rounds,
+            "endgames_view": endgames_view,
+            "maps_view": maps_view,
+            "sponsor_endgames_view": sponsor_endgames_view,
+            "combinations_view": combinations_view,
+            "build_view": build_view,
+            "predictors_view": predictors_view,
+            "actions_view": actions_view,
+            "use_query_cache": (stats_page != STATS_PAGE_ENDGAMES and not debug_timing),
+        }
+        expanded_rows = None
+        if stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
+            rows, expanded_rows, timing = _query_hexes_both(*query_args, **query_kwargs)
+        else:
+            rows, timing = _query_card_stats(*query_args, **query_kwargs)
+        default_combination_floor = (
+            stats_page == STATS_PAGE_COMBINATIONS
+            and not combination_paged
+            and combination_min_plays == COMBINATION_DEFAULT_MIN_PLAYS
+        )
+        default_combination_ranges = (
+            _combination_ranges(rows, combinations_view)
+            if default_combination_floor else None
+        )
+        if default_combination_floor:
+            rows = [row for row in rows if int(row.get("n_played") or 0) >= COMBINATION_DEFAULT_MIN_PLAYS]
         payload = {
             "status": "ok",
             "round_filter_active": round_filter_active,
@@ -4517,6 +5354,14 @@ def get_card_stats(request):
             "data": rows,
             "cache_status": "live",
         }
+        if default_combination_floor:
+            payload["combination_snapshot_min_plays"] = COMBINATION_DEFAULT_MIN_PLAYS
+            payload["combination_ranges"] = default_combination_ranges
+        combination_meta = timing.pop("combination_meta", None)
+        if combination_meta:
+            payload.update(combination_meta)
+        if expanded_rows is not None:
+            payload["expanded_data"] = expanded_rows
 
         if cacheable_default_request:
             cache_write_ok = _write_cached_snapshot(
@@ -4535,11 +5380,11 @@ def get_card_stats(request):
             timing["total_ms"] = _ms_since(request_started_at)
             payload["debug_timing"] = timing
 
-        return (json.dumps(payload), 200, headers)
+        return _json_http_response(payload, 200, headers, request)
 
     except Exception as exc:
         logging.exception("Failed to query card stats")
-        return (json.dumps({"status": "error", "message": str(exc)}), 500, headers)
+        return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
 
 
 
