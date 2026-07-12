@@ -8,9 +8,12 @@ import {
 } from '../color-scales.js?v=20260711-1';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
+  formatSignedDeltaAdaptive,
+  formatSignedPercentAdaptive,
   isInsufficientObservationCount,
-} from '../table-cells.js?v=20260710-1';
-import { loadStats } from '../snapshot-cache.js?v=20260711-6';
+  mapTooltipLabel,
+} from '../table-cells.js?v=20260712-4';
+import { loadStats } from '../snapshot-cache.js?v=20260712-2';
 
 export const id = 'actions';
 export const title = 'Actions';
@@ -116,7 +119,14 @@ function setActionsView(next) {
   mode = 'delta'; compareMode = 'raw'; syncControls(); loadData(++token);
 }
 function setActionsMode(next) { mode = next === 'frequency' ? 'frequency' : 'delta'; syncControls(); loadData(++token); }
-function setActionsCompareMode(next) { compareMode = next === 'average' ? 'average' : 'raw'; syncControls(); render(); }
+function setActionsCompareMode(next) {
+  compareMode = next === 'average' ? 'average' : 'raw';
+  syncControls();
+  // Comparison is a local transform of the already loaded payload, including
+  // Frequency; changing it must never re-query the action statistics.
+  if (view === 'upgrades_by_map') renderPerMap();
+  else render();
+}
 function toggleActionsOrderTranspose() {
   if (view !== 'upgrade_order') return;
   orderTransposed = !orderTransposed;
@@ -209,7 +219,7 @@ function simpleMetricTable(firstHeader, data) {
   const range = cappedNumericRange(data.filter(row => !isInsufficientObservationCount(row.count)), row => row.delta);
   return `<div class="build-table-panel"><div class="table-scroll">
     <table class="sponsor-endgames-table actions-table actions-upgrades-combined"><thead><tr><th>${firstHeader}</th><th>Elo \u0394</th><th>Frequency</th></tr></thead>
-    <tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${escapeHtml(row.label)}</td>${deltaCell(row, 'delta', row.count, range)}${frequencyCell(row, range)}</tr>`).join('')}</tbody></table>
+    <tbody>${data.map(row => `<tr><td class="sponsor-name-cell">${escapeHtml(row.label)}</td>${deltaCell(row, 'delta', row.count, range)}${frequencyCell(row, firstHeader === 'Upgrade' ? 100 : 50)}</tr>`).join('')}</tbody></table>
   </div></div>`;
 }
 
@@ -250,7 +260,7 @@ function renderPerMap() {
     : numericRange(rows.flatMap(row => mapKeys.map(field => ({ value: displayedMapValue(row, field) }))), item => item.value);
   const avgRange = mode === 'delta' ? numericRange(rows, row => row.avg) : numericRange(rows, row => frequencyFor(row, 'avg'));
   document.getElementById('actionsContent').innerHTML = `<div class="table-wrap build-hexes-wrap"><div class="table-scroll">
-    <table id="statsTable" class="maps-table actions-map-table ${mode === 'frequency' ? 'actions-map-frequency' : ''}"><thead><tr><th style="width:10%">Upgrade</th>${MAPS.map(([short,,full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%">${short}</th>`).join('')}<th style="width:7.5%">Avg</th></tr></thead>
+    <table id="statsTable" class="maps-table actions-map-table ${mode === 'frequency' ? 'actions-map-frequency' : ''}"><thead><tr><th style="width:10%">Upgrade</th>${MAPS.map(([short,,full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(mapTooltipLabel(full))}" style="width:5.5%">${short}</th>`).join('')}<th style="width:7.5%">Avg</th></tr></thead>
     <tbody>${rows.map(row => `<tr><td class="sponsor-name-cell">${row.label}</td>${MAPS.map(([, key]) => mapCell(row, key, mapRange)).join('')}${mapAvgCell(row, avgRange)}</tr>`).join('')}</tbody></table>
   </div></div>`;
 }
@@ -275,10 +285,10 @@ function normalizedDeltaRange(range, value) {
   return { min: Math.min(-0.001, numeric), max: Math.max(0.001, numeric) };
 }
 function frequency(row) { return Number(row.denominator) > 0 ? 100 * Number(row.count || 0) / Number(row.denominator) : Number.NaN; }
-function frequencyCell(row, range) {
+function frequencyCell(row, cap = 50) {
   const pct = frequency(row);
   if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
-  return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count)} / ${fmtInt(row.denominator)}" style="color:${frequencyColor(pct)}">${pct.toFixed(2)}%</td>`;
+  return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count)} / ${fmtInt(row.denominator)}" style="color:${frequencyColor(pct, cap)}">${pct.toFixed(2)}%</td>`;
 }
 function orderFrequency(row, slot) { return Number(row.denominator) > 0 ? 100 * Number(row[`count_${slot}`] || 0) / Number(row.denominator) : Number.NaN; }
 function orderFrequencyCell(row, slot, range) {
@@ -293,7 +303,11 @@ function transposedOrderFrequencyCell(row, slot) {
   if (!Number.isFinite(pct)) return '<td class="unavailable-cell">-</td>';
   return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(numerator)} / ${fmtInt(denominator)}" style="color:${frequencyColor(pct)}">${pct.toFixed(2)}%</td>`;
 }
-function frequencyFor(row, field) { return Number(row[`denom_${field}`]) > 0 ? 100 * Number(row[`count_${field}`] || 0) / Number(row[`denom_${field}`]) : Number.NaN; }
+function frequencyFor(row, field) {
+  const denominator = Number(row[`denom_${field}`]);
+  const numerator = Number(row[`count_${field}`] || 0);
+  return denominator > 0 && Number.isFinite(numerator) ? 100 * numerator / denominator : Number.NaN;
+}
 function displayedMapValue(row, field) {
   if (mode === 'frequency') {
     const mapPct = frequencyFor(row, field);
@@ -312,7 +326,7 @@ function mapCell(row, field, range) {
   if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
   if (mode === 'frequency') {
     const raw = frequencyFor(row, field);
-    const text = compareMode === 'average' ? fmtSignedPercentAdaptive(value) : fmtPercentFixed(raw);
+    const text = compareMode === 'average' ? formatSignedPercentAdaptive(value) : fmtPercentFixed(raw);
     return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row[`count_${field}`])} / ${fmtInt(row[`denom_${field}`])}" style="color:${frequencyColor(value)}">${text}</td>`;
   }
   if (compareMode === 'average') return `<td class="delta cp-map-comparison" style="color:${deltaRangeColor(value, range.min, range.max)}">${fmtSigned(value, 3, true)}</td>`;
@@ -340,13 +354,11 @@ function comparisonLabel(label) {
   return escapeHtml(text);
 }
 function ordinal(value) { return value === 1 ? 'st' : value === 2 ? 'nd' : value === 3 ? 'rd' : 'th'; }
-function percentDecimals(value) { return Math.abs(Number(value)) >= 10 ? 1 : 2; }
 function fmtPercentFixed(value) {
   const n = Number(value);
   return Number.isFinite(n) ? `${n.toFixed(2)}%` : '\u2014';
 }
-function fmtSignedPercentAdaptive(value) { return `${fmtSigned(value, percentDecimals(value), true)}%`; }
-function fmtSigned(value, decimals = 3, plusMinusZero = false) { const n = Math.abs(Number(value)) < 0.5 * 10 ** -decimals ? 0 : Number(value); if (!Number.isFinite(n)) return '\u2014'; if (n === 0 && plusMinusZero) return `\u00b1${n.toFixed(decimals)}`; return `${n >= 0 ? '+' : '\u2212'}${Math.abs(n).toFixed(decimals)}`; }
+function fmtSigned(value, decimals = 3, plusMinusZero = false) { return formatSignedDeltaAdaptive(value, plusMinusZero); }
 function fmtInt(value) { return Number(value || 0).toLocaleString('en-US'); }
 function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
 const escapeAttr = escapeHtml;

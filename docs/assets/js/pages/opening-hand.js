@@ -7,6 +7,7 @@ import {
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
 import { loadStats } from '../snapshot-cache.js?v=20260711-4';
+import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 
 export const title = 'Opening Hand';
 export const navLabel = 'Opening Hand';
@@ -964,9 +965,7 @@ function showError(msg) {
 
 // Helpers
 function fmtDelta(val) {
-  if (val == null) return '\u2014';
-  const sign = val >= 0 ? '+' : '';
-  return `${sign}${val.toFixed(3)}`;
+  return formatSignedDeltaAdaptive(val);
 }
 
 // Formats big number digits nicely.

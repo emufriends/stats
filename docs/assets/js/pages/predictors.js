@@ -1,9 +1,10 @@
 import { cappedNumericRange, deltaRangeColor, frequencyColor } from '../color-scales.js?v=20260711-1';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
+  formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
-} from '../table-cells.js?v=20260710-1';
-import { loadStats } from '../snapshot-cache.js?v=20260711-6';
+} from '../table-cells.js?v=20260712-4';
+import { loadStats } from '../snapshot-cache.js?v=20260712-1';
 
 export const id = 'predictors';
 export const title = 'Predictors';
@@ -150,8 +151,8 @@ function renderHead() {
     ? 'Frequency<span class="col-tip" data-tip="percentage of filtered player observations where this condition is true">?</span>'
     : 'Elo &Delta;<span class="col-tip" data-tip="average Elo delta when this condition is true">?</span>';
   document.getElementById('tableHead').innerHTML = `<tr>
-    <th onclick="sortPredictors('condition')" style="width:80%">Condition<span class="sort-arrow">${arrow('condition')}</span></th>
-    <th onclick="sortPredictors('${metric}')" style="width:20%">${metricHeader}<span class="sort-arrow">${arrow(metric)}</span></th>
+    <th class="${headerSortedClass('condition')}" onclick="sortPredictors('condition')" style="width:80%;text-align:center;">Condition<span class="${arrowClass('condition')}">${arrow('condition')}</span></th>
+    <th class="${headerSortedClass(metric)}" onclick="sortPredictors('${metric}')" style="width:20%;text-align:center;">${metricHeader}<span class="${arrowClass(metric)}">${arrow(metric)}</span></th>
   </tr>`;
 }
 function render() {
@@ -194,6 +195,8 @@ function frequencyCell(row) {
   return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row.count)} / ${fmtInt(row.denominator)}" style="color:${frequencyColor(value)}">${value.toFixed(2)}%</td>`;
 }
 function arrow(col) { return currentSort.col === col ? (currentSort.dir === 'desc' ? '\u2193' : '\u2191') : '\u2195'; }
+function headerSortedClass(col) { return currentSort.col === col ? 'sorted' : ''; }
+function arrowClass(col) { return currentSort.col === col ? 'sort-arrow active' : 'sort-arrow'; }
 function renderLoading() { renderHead(); document.getElementById('tableBody').innerHTML = '<tr><td colspan="2"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching predictors...</div></div></td></tr>'; }
 function renderError(error) { document.getElementById('tableBody').innerHTML = `<tr><td colspan="2"><div class="state-overlay"><div class="state-title">Could not load predictors</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div></td></tr>`; }
 function renderMapChips() {
@@ -213,7 +216,7 @@ function resetFilters() {
 function applyFiltersFromSidebar() {
   loadData(++token); document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('active');
 }
-function fmtSigned(value) { return `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(3)}`; }
+function fmtSigned(value) { return formatSignedDeltaAdaptive(value); }
 function fmtInt(value) { return Number(value || 0).toLocaleString('en-US'); }
 function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
 const escapeAttr = escapeHtml;

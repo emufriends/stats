@@ -79,19 +79,34 @@ const sideNavContentHtml = `
       <span>Build</span>
     </a>
     <div class="nav-divider"></div>
-    <button type="button" class="side-nav-link nav-placeholder">
+    <a class="side-nav-link" href="#/conservation" data-page-id="conservation">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
         <path d="M12 2.5 20 6v5c0 5-3.2 8.3-8 10.5C7.2 19.3 4 16 4 11V6l8-3.5Z" />
       </svg>
-      <span>Projects</span>
-    </button>
+      <span>Conservation</span>
+    </a>
     <div class="nav-divider"></div>
     <button type="button" class="side-nav-link nav-placeholder">
+      <svg class="nav-icon nav-icon-scoring" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <text x="12" y="15.2" text-anchor="middle" aria-hidden="true">123</text>
+      </svg>
+      <span>Scoring</span>
+    </button>
+    <div class="nav-divider"></div>
+    <a class="side-nav-link" href="#/workers" data-page-id="workers">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
         <circle cx="12" cy="7" r="3.5" /><path d="M5.5 21c.5-5 2.7-8 6.5-8s6 3 6.5 8" />
       </svg>
       <span>Workers</span>
-    </button>
+    </a>
+    <div class="nav-divider"></div>
+    <a class="side-nav-link" href="#/players" data-page-id="players">
+      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <circle cx="12" cy="7" r="2.5" /><circle cx="6" cy="9" r="2" /><circle cx="18" cy="9" r="2" />
+        <path d="M7 20c.3-4 2-7 5-7s4.7 3 5 7M1.5 20c.2-3.2 1.7-5.5 4.5-5.5 1 0 1.8.3 2.5.8M22.5 20c-.2-3.2-1.7-5.5-4.5-5.5-1 0-1.8.3-2.5.8" />
+      </svg>
+      <span>Players</span>
+    </a>
     <div class="nav-divider"></div>
     <button type="button" class="side-nav-link nav-placeholder">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
@@ -101,13 +116,6 @@ const sideNavContentHtml = `
       <span>Records</span>
     </button>
     <div class="nav-divider"></div>
-    <button type="button" class="side-nav-link nav-placeholder">
-      <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
-        <circle cx="12" cy="7" r="2.5" /><circle cx="6" cy="9" r="2" /><circle cx="18" cy="9" r="2" />
-        <path d="M7 20c.3-4 2-7 5-7s4.7 3 5 7M1.5 20c.2-3.2 1.7-5.5 4.5-5.5 1 0 1.8.3 2.5.8M22.5 20c-.2-3.2-1.7-5.5-4.5-5.5-1 0-1.8.3-2.5.8" />
-      </svg>
-      <span>Players</span>
-    </button>
   </div>
   <button class="side-nav-scroll-btn side-nav-scroll-down" id="navScrollDown" onclick="scrollSideNav(1)" aria-label="Scroll navigation down"><span aria-hidden="true">&#9660;</span></button>`;
 
@@ -285,7 +293,3 @@ function initSideNavScroll() {
   sideNavScrollInitialized = true;
   window.addEventListener('resize', updateSideNavScrollState);
 }
-
-
-
-

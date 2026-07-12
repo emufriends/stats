@@ -253,8 +253,9 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, and Build. Home has no rail item; the topbar logo links to it. Build uses the former Buildings shovel item and routes to `#/build`. The remaining future-page placeholders are MW Action Cards, Projects, Workers, Records, and Players.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, Build, Conservation, Workers, Players, and the Records placeholder. Home has no rail item; the topbar logo links to it. Build routes to `#/build`; Conservation routes to `#/conservation`; Workers routes to `#/workers`; Players routes to `#/players`. Scoring occupies a non-clickable placeholder position between Conservation and Workers. Scoring, Arena, and Records are placeholders; Players General and Comparison are active views.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
+- Rail icons are either complete inline `<svg>...</svg>` elements or the Build PNG mask span. Keep every inline SVG wrapper balanced when reordering nav items; paths/circles outside an opening SVG are silently discarded by the browser.
 - Header topbar includes:
   - MW/Base switch
   - Ark Nova Statistics logo/wordmark
@@ -275,6 +276,8 @@ Central stylesheet for all pages. Important conventions:
   - collapsed = down
   - expanded = up
 - Phone table: outer `.table-wrap` is the framed table container, inner `.table-scroll` owns horizontal scrolling, and pagination sits outside `.table-scroll` so page buttons stay visible while columns scroll.
+- Statistical tables use the thick 2px `.table-wrap` frame. Two-table layouts such as Build Enclosures and Actions Starting position/Upgrades use the same visual frame on each panel even when the DOM wrapper class is page-specific.
+- Map header tooltips are a frontend display convention: backend map values remain `Map 1a: Observation Tower`, while tooltips show `Observation Tower (1a)`.
 - Phone table fixed width is currently `755px`; phone Card column is `110px`. Rank columns are hidden on phone layouts only; desktop and tablet retain them.
 - Avoid broad visual refactors unless requested. The user is happy with the current look.
 
@@ -483,7 +486,7 @@ Important Endgames definitions:
 - Keeprate's numeric value is not capped; only the blue bar width is capped at 100%.
 - Percentage cells reserve a fixed non-shrinking label width, including on phones, so
   two- and three-digit percentages retain identical bar-track lengths.
-- General-view desktop widths are `5/18/12/12/8/17/10/10/8` percent for
+- General-view desktop widths are `5/20/12/12/8/15/9/9/10` percent for
   Rank/Endgame/Delta scored/Delta dealt/Elo/Keeprate/Scored/Dealt/CP.
 - Scored/CP stats use non-conceded games only.
 - `delta dealt` uses raw non-conceded dealt rows for Base.
@@ -519,7 +522,7 @@ On phones, Home keeps the navigation rail expanded and reserves its width in the
 
 Amount is the mean non-null final icon count. Buckets `0` through `6` are exact counts and `7+` includes every value at least seven. Null icon fields are excluded rather than converted to zero. Each bucket's displayed Delta, sample SD, CI count, and prevalence count come from the same filtered icon/player population; frequency divides the bucket count by that icon's non-null `n_total`. Delta buckets below 1,000 observations use the Sponsor Endgames insufficient-data presentation. Default order is Amount descending.
 
-The full-width icon selector uses the PNG artwork under `assets/img/icons` and groups icons into Species, Habitat, and Other. It has no all/none control or decorative brackets. Individual icons toggle independently; a fully selected group-button click clears that group, while a partial/empty group-button click selects the whole group. A group remains visually active until all its members are deselected. Selected artwork is full-color and deselected artwork is greyed. Base omits Sea Animals from the selector, table, graph, ranges, and ranking universe. Attributes separators and Icons group separators share the same fixed 2px rule.
+The full-width icon selector uses the PNG artwork under `assets/img/icons` and groups icons into Species, Habitat, and Other. It has the same 45px structural height as other tab/attribute bars, with compact chips and separators so the table starts at the shared vertical position. It has no all/none control or decorative brackets. Individual icons toggle independently; a fully selected group-button click clears that group, while a partial/empty group-button click selects the whole group. A group remains visually active until all its members are deselected. Selected artwork is full-color and deselected artwork is greyed. Base omits Sea Animals from the selector, table, graph, ranges, and ranking universe. Attributes separators and Icons group separators share the same fixed 2px rule.
 
 The enlarged graph toggle at the selector's right edge swaps the table for an Endgames-style SVG line chart. It is centered within a flexible zone spanning from the final selector separator to the bar's right border. The selector defines the available lines, while the graph legend independently shows/hides those lines. Each icon has a permanent palette position assigned from the complete MW/Base icon order before selector filtering, so hiding lines never recolors survivors. Delta mode plots `Delta (0)` through `Delta (7+)`, omitting missing, impossible, and sub-1,000 points and breaking paths across gaps. Frequency mode plots the same buckets as percentages. Axes scale dynamically; tooltips contain icon, bucket, and value but no observation count.
 
@@ -599,7 +602,7 @@ Metrics:
 - Uses map codes as columns and metric names as rows.
 - Maps General has four `- / O / +` segmented controls in this order: Map Pack 1, Map Pack 2, Legacy Maps, and Beginner Maps. `-` excludes the category, `O` includes it with ordinary maps, and `+` shows only that category. Defaults are Map Pack 1 `O`, Map Pack 2 `O`, Legacy `-`, and Beginner `-`, producing columns 1a-8a, 9-14, and T1. Selecting `+` forces the other three controls to `-`; ordinary maps remain visible whenever no category is in `+` mode. Exclude/Include/Only labels use the shared dashboard tooltip, not native browser titles. A larger Reset button sits on the same Metrics control row and restores these switch defaults plus the default metric ordering without changing sidebar filters. These are client-side controls because the backend payload already contains all 25 maps.
 - Default sort is by `Turns` ascending. `Rounds` also sorts ascending because lower values are better; other metric rows sort descending.
-- Percentage metrics display one decimal. The rows after `$ gained` are `$ gained (income)`, `$ spent (Animals)`, `$ spent (Build)`, `$ spent (Donations)`, and `$ spent (Range)`. Income reads `Money_gained_through_income`. The four spending rows remain category averages divided by total spending and therefore display percentages despite their concise labels. Their per-map tooltips show the absolute category average with two decimals and no currency symbol. Zero denominators display `-`. Map headers and compact Games footer values also use the dashboard tooltip, with Games showing the full comma-grouped integer.
+- Percentage metrics display one decimal. The rows after `$ gained` are `$ gained (income)`, `$ spent (Animals)`, `$ spent (Build)`, `$ spent (Donations)`, and `$ spent (Range)`. Income reads `Money_gained_through_income`. `$ gained per turn` is the average of the per-player-game ratio `Money_gained / Number_of_turns`; it is not a ratio of aggregate averages. The four spending rows remain category averages divided by total spending and therefore display percentages despite their concise labels. Their per-map tooltips show the absolute category average with two decimals and no currency symbol. Zero denominators display `-`. Map headers use the global `Map name (code)` tooltip wording, and compact Games footer values use the dashboard tooltip with the full comma-grouped integer.
 - Filters are MW/Base, Elo ranges, and date range only. No map filter, no round filter, no Completed games toggle.
 - Metrics default date is `2026-01-13` onward because Map Pack 2 was added on January 13th, 2026. Home is unrestricted; the remaining dated pages default to `2025-01-01`.
 - The visible end-date input stays blank by default; blank means no upper date limit.
@@ -633,6 +636,7 @@ Tournament H2H:
 Played cards are deduplicated per table/player/card/round before aggregation. All six type combinations are supported for Card + Card; self-pairs and unobserved pairs are omitted, and individual baselines use the same active filters as interaction rows. Frontend defaults to minimum 1000 plays and Synergy descending. Every card/endgame entity cell displays its general Delta beneath its name. Card + Card supports one-card or exact unordered-pair header filtering.
 
 Sidebar filters are view-aware: Card + Card shows Map and Round, Card + Map hides Map and shows Round, and Card + Round shows Map and hides Round. Card + Map and Card + Round provide multi-select header filters for their represented dimension. Card + Map's Map header is filter-only; a narrowed selection replaces its filter icon with an `N/15` chip, and popup map chips expose styled full-name tooltips. Card selectors search both display names and aliases from `cards_altnames.csv`; their single-choice popup uses the same Inter 12px typography and row spacing as Attributes/Abilities. A selected card leaves the header label unchanged and replaces only the search icon with a muted-red clear X. Card + Map displays map names as `Observation Tower (1a)` while retaining raw full names for matching. Card + Card's six-value Type popup includes all/none controls and spans the Played plus Type columns exactly. Fixed-position Type popups are flush with their headers, follow layout/scroll changes, and close only after the complete popup leaves the viewport. Empty Type, Map, or Round selections return no rows, and `6+` means round 6 or later.
+The Card + Round header uses the same active-filter treatment as Card + Map: the header and filter button receive the active state, and the button displays the selected-round count as `N/6` while narrowed.
 
 Card + Card rows remain canonical unordered alphabetical pairs in the payload. When a
 Card 1 or Card 2 header filter is selected, the frontend projects the matching card
@@ -697,6 +701,8 @@ Specific is backend-backed and has a client-side `Elo Δ / Frequency` switch. De
 
 Specific conditions are Triggered endgame; More endgame points; More endgame CP; More ingame CP; More reefers; More small/medium/large animals; Round 1 Upgrade, Project, Release, 2+ association actions, and Humphead Wrasse; Round 1/2 New Zealand Fur Seal; First to 5/8 CP with and without the exclusive university/partner-zoo bonus; No project/sponsor in the starting hand; No sponsor in the starting hand with Sponsors at 5; and that final condition further restricted to second player, Association at 2, and Sponsors at 5.
 
+For Specific only, a checked Completed games only toggle sends `completed_only=true`, bypasses the default snapshot, and applies the completed-table predicate in the backend. General and Icon do not expose this toggle and remain hard-filtered to non-conceded tables.
+
 Endgame CP is sponsor CP plus scored endgame-card CP. Endgame points value each CP at 3 and sponsor endgame appeal at 1. Ingame CP is `Conservation - endgame CP`. Threshold timing uses the first `cp_history.move` reaching the target; reaching it when the opponent never does counts as first. Sponsor endgame values are deduplicated per sponsor before summing.
 
 Reefer, animal-size, Project, and Sponsor classifications come from the canonical `cards_attributes.csv`. The same file is packaged with the Cloud Function and its parsed groups are published to `card-stats/metadata/cards-attributes.json` during daily refresh. Keep the frontend and backend copies synchronized when changing card metadata; ordinary requests use the cached parsed copy and do not fetch the CSV repeatedly.
@@ -715,11 +721,11 @@ card-stats/predictors/specific/default-{mw|base}.json
 
 Starting position shows two non-sortable tables. The action-strength table compares Association, Build, Cards, and Sponsors at starting strengths 2-5. The comparison table covers Higher Association, Higher Build, Higher Cards, Higher Sponsors, and First player, with a double separator before First player. Delta cells use the usual CI and 1,000-observation rules, with one shared range across comparable Delta columns. Insufficient-data cells use the shared dashboard tooltip.
 
-Upgrades has no metric switch. Its two equal-width tables cover number of upgrades (`0-5`) and action upgrades (Animals, Association, Build, Cards, Sponsors); each table has three equal columns for its label, Elo Delta, and Frequency. One non-conceded payload supplies both metrics. Delta keeps CI/insufficient styling, while Frequency shows percentages with exact count tooltips and blue coloring. Its only default snapshots are `actions/upgrades/delta/default-{mw|base}.json`.
+Upgrades has no metric switch. Its two equal-width tables cover number of upgrades (`0-5`) and action upgrades (Animals, Association, Build, Cards, Sponsors); each table has three equal columns for its label, Elo Delta, and Frequency. One non-conceded payload supplies both metrics. Delta keeps CI/insufficient styling, while Frequency shows percentages with exact count tooltips. The Upgrade-count table uses the standard blue `0-50%` domain; the action-upgrade table uses `0-100%` because its normal values frequently exceed 50%. Its only default snapshots are `actions/upgrades/delta/default-{mw|base}.json`.
 
 Upgrade order has the same mode switch, one row per action, and columns for 1st through 4th upgrade. The left-side swap-axes button transposes the table locally into four timing rows and equal-width columns for Upgrade timing plus the five actions; it remains transposed across Elo Delta/Frequency and MW/Base changes, and resets on a new Actions mount. Elo values and CI metadata are unchanged. In the normal orientation, frequency divides by all upgrades of that action. In the transposed orientation, frequency divides by all upgrades occupying that timing slot. The tooltip always shows the applicable numerator and denominator, and swapping never requests data.
 
-Upgrades by map uses the map-grid framework with `Elo Δ / Frequency` and `Raw / vs. avg` switches. Rows are the five action upgrades, map columns are `1a-8a, 9-14, T1`, and the final `Avg` column stays as the raw reference when comparison mode is active.
+Upgrades by map uses the map-grid framework with `Elo Δ / Frequency` and `Raw / vs. avg` switches. Rows are the five action upgrades, map columns are `1a-8a, 9-14, T1`, and the final `Avg` column stays as the raw reference when comparison mode is active. Frequency denominators are the scoped non-conceded player-game observations for that action row: each map column divides upgraded observations on that map by all scoped observations on that map, while `Avg` divides upgraded observations overall by all scoped observations overall. Frequency `vs. avg` is calculated entirely in the browser as the map percentage minus the Avg percentage; changing only Raw/`vs. avg` must rerender the loaded payload and must not issue a request. Its tooltip continues to show the raw map numerator and denominator.
 
 Default snapshots live under:
 
@@ -729,6 +735,322 @@ card-stats/actions/upgrades/delta/default-{mw|base}.json
 card-stats/actions/upgrade_order/{delta|frequency}/default-{mw|base}.json
 card-stats/actions/upgrades_by_map/{delta|frequency}/default-{mw|base}.json
 ```
+
+### Conservation Page
+
+`assets/js/pages/conservation.js` is routed at `#/conservation`; the backend page id is `conservation`. Its API subview is `conservation_view: "projects" | "project_rewards" | "cp_rewards"`. The page occupies the former Projects nav position because all three tabs describe different conservation mechanisms in Ark Nova.
+
+#### Gameplay concepts
+
+Conservation Points (CP) are the green-track points that eventually meet the opposing Appeal track to determine final score. Three related game events must not be conflated:
+
+1. A player supports a conservation project through an Association action. This increments `Conservation_project_association_tasks` in Full Sample.
+2. After supporting a project, the player takes one project reward. Log Sample records that event in `project_rewards`.
+3. When the player's CP marker first reaches the 5 CP and 8 CP spaces, the player chooses a separate CP-track bonus from an offered pool. These choices are stored in the CP bonus fields and are not project rewards.
+
+A player can support at most seven projects, so the Projects tab deliberately has the complete fixed domain `0-7`. A project reward event has `cp`, `round`, `reward`, `order`, and `project`, but this dashboard uses only `reward` and `order`. `order=1` means the reward taken after the player's first supported project; it does not mean round one. Likewise, orders 2-7 describe the sequence of that player's project rewards, not game rounds.
+
+#### Prepared data and API flow
+
+Source BigQuery tables are read-only. Daily refresh copies the required fields into backend-owned derived tables. Prepared Full Sample contains the complete source row plus derived table-level `table_conceded`. Prepared Logs includes `project_rewards`, source ``5cp_bonus`` as `five_cp_bonus`, source ``8cp_bonus`` as `eight_cp_bonus`, `chosen_5cp_bonus`, `chosen_8cp_bonus`, and `cp_history`. The two aliased availability fields are arrays of offered reward strings; the chosen fields are the one reward actually taken.
+
+The flow is:
+
+```text
+read-only Full/Log Sample
+  -> backend-owned prepared tables with table_conceded
+  -> Conservation SQL aggregation
+  -> MW/Base Cloud Storage snapshots or filtered Cloud Function response
+  -> one frontend payload per tab
+  -> client-side metric/scope/comparison switches
+```
+
+The switches do not issue requests. A tab, dataset, or applied sidebar-filter change loads a new payload. During daily maintenance, three worker threads generate the six Conservation snapshots concurrently with the existing sequential page refreshes; this prevents the new queries from extending the already long refresh beyond the Cloud Function timeout. Snapshot paths are:
+
+```text
+card-stats/conservation/projects/default-{mw|base}.json
+card-stats/conservation/project-rewards/default-{mw|base}.json
+card-stats/conservation/cp-rewards/default-{mw|base}.json
+```
+
+#### Projects
+
+Projects is a fixed eight-row map table. `count_value` is the exact integer value of `Conservation_project_association_tasks`. Columns are Count, the 15 supported maps, and Avg. It uses a `12% / 15 x 5.5% / 5.5%` allocation.
+
+All Projects observations are from non-conceded tables. There is consequently no Completed games only toggle. The filters are player/opponent Elo, Maps, and Date Range.
+
+For a row `c` and map `m`:
+
+```text
+delta(m,c) = average elo_delta among scoped player-games on m with project count c
+frequency numerator(m,c) = scoped player-games on m with project count c
+frequency denominator(m,c) = all scoped player-games on m
+```
+
+Avg repeats these formulas across every selected map. Raw Delta uses its observation count for CI and the 1,000-observation rule. The Projects Avg Delta cell also exposes CI metadata, uses the special orange-green Avg scale, and shows the same insufficient-data tooltip when needed. Frequency has no CI or sufficiency suppression, shows the exact numerator/denominator tooltip, uses the standard blue `0-50%` domain, and reduces numerical body cells by 1px to keep dense percentage tables legible while leaving the Count label column at normal size. Avg keeps the special orange-green Delta and violet Frequency treatment.
+
+Example: if 320 of 1,000 completed player-games on Map 1a supported exactly three projects, the Map 1a Frequency in row 3 is `320 / 1,000 = 32.00%`.
+
+#### Project rewards
+
+Project rewards contains six generic choices followed by map-specific choices. Generic rewards can normally occur across maps; map-specific choices exist only on their named map. The table always keeps the two sections contiguous and places a double separator before Marketing (1a). Sorting is performed within each section. Overall is the default descending sort; Reward uses the configured game order rather than alphabetical order.
+
+The exact frontend/raw mappings are:
+
+| Frontend | Log `project_rewards.reward` | Scope |
+|---|---|---|
+| Snapping | Snapping | generic; unavailable on T1 |
+| 2-size | 2-size | generic; unavailable on Map 13 |
+| 5 money | 5 Money | generic |
+| Worker | Worker | generic |
+| 12 money | 12 Money | generic |
+| 3 X-tokens | 3 X Token | generic |
+| Marketing (1a) | Marketing | Map 1a |
+| 1 CP (2a) | 1 CP | Map 2a |
+| Determination (3a) | Determination | Map 3a |
+| University (4a) | University | Map 4a |
+| Unique building (5a) | Aviary/Reptile House | Map 5a; one literal raw value |
+| Clever (6a) | Clever | Map 6a |
+| Pouching (7a) | Pouching | Map 7a |
+| Partner zoo (8a) | Partner Zoo | Map 8a |
+| Token (9) | Remove Continent Cube | Map 9 |
+| 2 reputation (10) | 2 Reputation | Map 10 |
+| Upgrade (11) | Upgrade | Map 11 |
+| Animal magnet (12) | Animal Magnet | Map 12 |
+| Adapt (13) | Adapt 3 | Map 13 |
+| Person sponsor (14) | Play a person sponsor | Map 14 |
+| Draw + ability (T1) | Draw from range | T1 |
+| 3 reputation (T1) | 3 Reputation | T1 |
+
+Delta Overall averages `elo_delta` whenever that reward was selected. Delta order columns average only reward events at that exact `project_rewards.order`. Overall Delta uses its own color range, separate from the order columns. Delta defaults to conceded and non-conceded games; its visible Completed games only toggle changes the Delta population to `table_conceded=0`.
+
+Frequency uses a deliberately different, always non-conceded population. Overall asks “in how many applicable player-games was this reward taken?”:
+
+```text
+f Overall numerator = distinct applicable player-games containing the reward
+f Overall denominator = all applicable scoped player-games
+```
+
+For a map-specific reward, “applicable” means only its map. Generic rewards use all selected maps. If Map 13 is the only selected map, 2-size is unavailable and displays `-`; if T1 is the only selected map, Snapping displays `-`. A map-specific row also displays `-` when its map is not selected. These are unavailable populations, not zero-percent observations.
+
+Order Frequency answers a different question: “when this reward was taken, at which project number was it taken?” Its denominator is reward occurrences, not player-games:
+
+```text
+f nth numerator = completed-table occurrences of this reward with order=n
+f nth denominator = all completed-table occurrences of this reward
+```
+
+Therefore orders 1-7 sum to 100% apart from display rounding. For example, if a reward has 100 occurrences split 60/30/10 across orders 1/2/3, the cells are 60%, 30%, 10%, and 0% thereafter. If 250 distinct player-games take that reward among 1,000 applicable player-games, f Overall is 25%; that calculation is independent of the order distribution.
+
+Frequency cells remain visible at small denominators and have no CI. f Overall uses a blue `0-100%` domain; the seven order columns share the dashboard's `0-50%` domain. Delta cells use CI and become insufficient below 1,000 observations. Exact duplicate malformed reward events are deduplicated by table, player, normalized reward, and order before aggregation.
+
+#### CP rewards
+
+At both 5 CP and 8 CP the player sees three bonus options. `five_cp_bonus` and `eight_cp_bonus` record the two random alternatives; the fixed third option, 5 money, is implicit and is added by the query at both thresholds. `chosen_5cp_bonus` and `chosen_8cp_bonus` record the selected option. Availability and choice are intentionally separate: a non-money reward cannot enter a Frequency denominator merely because it exists in the game.
+
+The exact mappings are:
+
+| Frontend | Raw bonus string | Dataset |
+|---|---|---|
+| University | 1 University | MW + Base |
+| Partner zoo | 1 Partner-Zoo | MW + Base |
+| Posturing 3 | 3 bonus-kiosk-pavilion | MW only |
+| x2 | 1 Multiplier | MW + Base |
+| 10 money | 10 money | MW + Base |
+| 2 reputation | 2 reputation | MW + Base |
+| 3 X-tokens | 3 xtoken | MW + Base |
+| 3-size | 1 size-3 | MW + Base |
+| Marketing | 1 bonus-sponsor-gray | MW + Base |
+| Extra Shift | 1 bonus-extra-shift | MW only |
+| Bonus icon | 1 bonus-icon | MW only |
+| 3 cards | 3 take-in-range-or-deck | MW + Base |
+| Snap + Handsize | 1 bonus-increased-hand | MW only |
+| Ignore 3 | 3 bonus-ignore-conditions | MW only |
+| Adapt 3 | 3 bonus-scoring-cards | MW only |
+| 5 money | 5 money | MW + Base |
+
+MW has 16 configured rewards. Base omits the six MW-only rewards and has 10. Each reward has three backend rows, with `scope` equal to `5`, `8`, or `combined`; the frontend switches locally between them.
+
+Delta includes a player-game when the matching chosen field contains the reward. Combined Delta includes a reward chosen at either threshold but deduplicates it to one player-game/reward observation because a reward cannot normally be claimed twice.
+
+Frequency measures choice only when the player had full choice. Full choice means the player reached the threshold before the opponent. For each player and threshold, the backend finds the first `cp_history.move` where CP is at least 5 or 8. The player qualifies when their move is lower than the opponent's, or when the opponent never reaches the threshold. Equal moves do not qualify. A Frequency opportunity then exists only if the reward also appears in that threshold's availability array.
+
+```text
+frequency numerator = eligible offered opportunities where the reward was chosen
+frequency denominator = eligible offered opportunities for the reward
+```
+
+The `5` and `8` modes use one threshold. `combined` unions the threshold opportunities rather than collapsing them by player-game. The always-offered 5 money can therefore contribute one 5 CP opportunity and one 8 CP opportunity in the same game. Other rewards are never offered at both thresholds. Example: if 5 money has 80 eligible 5 CP offers and 70 eligible 8 CP offers, with 30 and 20 choices respectively, combined Frequency is `(30+20)/(80+70) = 33.33%`.
+
+The table uses the same map-grid allocation as Conservation Projects: Reward at 12%, each map at 5.5%, and a rightmost AVG column at 5.5%. AVG aggregates every map and uses the same special Avg styling as Projects: orange-green for Delta and violet for Frequency, with matching CI color metadata in Delta mode. AVG body values are normal weight rather than bold. Its header keeps the tooltip and sort indicator in a compact inline layout so it does not create horizontal overflow. Map columns aggregate only that map. Raw shows direct values. `vs. avg` displays `map value - AVG` while leaving AVG unchanged. For example, a Map 1a Delta of `+2.400` and AVG Delta of `+2.050` produces `+0.350` in comparison mode. The same subtraction applies to percentage points in Frequency mode.
+
+Delta cells use their chosen-observation counts for CI and insufficiency. Frequency has no CI or small-denominator suppression, uses exact count tooltips and the blue `0-50%` domain, and labels its meaning with `% (chosen when having full choice between all 3 options)`. In Frequency mode only, CP Rewards reduces numerical body cells by 1px; the Reward label column keeps the normal body size. Frequency comparison cells remain blue rather than using Elo Delta red/green, because they are percentage-point differences. The CP rewards sidebar has player/opponent Elo, Date Range, and Completed games only; it intentionally has no map filter because all map columns remain comparable in one table. The completion toggle applies to both metrics.
+
+### Workers Page
+
+Workers is routed at `#/workers` and uses `stats_page: "workers"` with
+`workers_view: "general" | "two_cp_worker"`. It uses the Actions → Upgrades by
+map table framework: a fixed-order label column, all 15 map columns, a final
+`Avg` reference column, `Raw / vs. avg`, and `Elo Δ / Frequency`. Worker rows
+are deliberately not sortable because their order is part of the gameplay
+meaning.
+
+General reads `Association_workers` from prepared Full Sample. This is the
+number of workers a player took overall, with valid values 1–4. It is always
+restricted to non-conceded tables. The rows are exactly `1`, `2`, `3`, and `4`,
+and the Frequency denominator is the valid 1–4 population for the selected
+scope. Delta averages `elo_delta` among the matching worker-count observations;
+CI sample size counts matching observations with non-null `elo_delta`.
+
+The Workers header also documents the gameplay timing convention: `Last worker:
+0 CP - 1 CP - 2 CP`, with 1 CP underlined once and 2 CP underlined twice. Map
+headers use single underlines for 2a, 4a, 5a, 8a, 11, 12, 14, and T1, and
+double underlines for 6a, 7a, and 10.
+
+In General + Frequency, a separated `n (Avg)` row reports the arithmetic mean
+of `Association_workers` among the valid 1–4 population for each map and for
+the overall scope. It is prevalence rather than a percentage: map cells use a
+muted light-blue scale and the overall cell uses a light-violet scale. In
+`vs. avg`, map values subtract the overall mean while the overall cell remains
+the raw reference. The row is hidden in Delta mode and on 2 CP Worker.
+
+2 CP Worker reads prepared Logs’ `two_cp_worker` field. `false` means the player
+chose the upgrade at the 2 CP decision and `true` means the player chose the
+worker. Rows are always `Upgrade`, then `Worker`. Null or malformed values are
+excluded because an early quit can leave the choice unset. The Frequency
+denominator is the valid Boolean population. Unlike General, this tab exposes
+the optional `Completed games only` toggle: unchecked includes valid conceded
+and non-conceded tables, while checked adds `table_conceded = 0`.
+
+For both tabs, the tabs are equal-width, map header tooltips use the global
+`Map name (code)` wording, and the 2 CP Worker table header is shortened to
+`2 CP`. Map cells use only that map’s player-game observations. Avg uses
+the complete selected map scope. Raw Delta cells use the normal CI and
+fewer-than-1,000 rule; Avg Delta uses the special orange-green Avg scale and
+the same CI metadata. Raw Frequency uses the fixed 0–50% blue scale; Avg
+Frequency uses the violet reference scale. Frequency cells expose the exact
+count/denominator tooltip through the shared dashboard hover behavior.
+`vs. avg` is `map value - Avg`, and its signed Frequency values remain blue
+percentage-point comparisons. Signed
+Frequency comparisons use two decimals below an absolute value of 10 and one
+decimal at 10 or above so the sign and value fit dense cells.
+
+Default snapshots are:
+
+```text
+card-stats/workers/general/default-{mw|base}.json
+card-stats/workers/two-cp-worker/default-{mw|base}.json
+```
+
+General snapshots are hard-filtered to non-conceded tables. 2 CP Worker
+snapshots include all valid Boolean choices with the completion toggle off.
+Filtered requests include Elo bounds, date range, dataset, view, and the
+optional completion flag in their cache key. Source Full Sample and Log tables
+remain read-only; prepared tables and snapshots are backend-owned derived
+data.
+
+### Players Page
+
+Players is routed at `#/players` and uses `stats_page: "players"` with
+`players_view: "general" | "comparison" | "arena"`. Tabs are ordered General,
+Comparison, Arena and are equal width. General and Comparison are active;
+Arena remains a visual placeholder.
+
+General displays six equal-width columns: Metric, Player, All, Winners, Experts,
+and Masters. Its 64 rows are the Maps/Metrics rows from Turns through Science
+icons, excluding Games and Rounds, with `Breaks triggered` and `Break%` inserted
+after Turns. `Breaks triggered` reads `Number_of_breaks_triggered` and `Break%`
+is `100 * Number_of_breaks_triggered / total_breaks`; an invalid or zero
+denominator displays `-`. The displayed money metric is `$ gained per turn`,
+calculated as the average of per-player-game `Money_gained / Number_of_turns`.
+
+All populations are player-game rows from non-conceded tables. The Player
+column is the selected exact `player` value. All is every scoped row. Winners
+require the player row to have `Game_result = 1` while the other row in the same
+table has `Game_result = 2`. A table where both rows have result 1 is a draw and
+does not enter Winners, although it remains eligible for All, Experts, or
+Masters. Experts use player `elo >= 500`; Masters use player `elo >= 700`.
+Malformed result combinations do not qualify as wins.
+
+Players filters are opponent Elo, maps, date range, and Last X games. The
+opponent Elo minimum is visually empty and means `0`; this is a Players-specific
+default. There is no player Elo filter and no completion toggle because
+concession is always excluded. Last X selects the selected player's newest
+qualifying rows by game date and deterministic table-id order. Date Range and
+Last X are mutually exclusive. Reset changes only filters and preserves selected
+players.
+
+The General API accepts `players_player` and `last_x_games`; its payload includes
+`player_game_count` and absolute tooltip fields for the four spending-share rows.
+Body value tooltips are otherwise absent, and an empty Player value is `-` with
+no tooltip. Player colors use the normal Elo-delta diverging family without the
+dashboard's usual ±2 clamp; each metric row has its own range.
+
+Comparison accepts `players_players`, an ordered array of one to five unique
+exact player names. It returns `players: [{name, game_count}]` plus metric rows
+whose `values` arrays contain each selected player's value and spending tooltip
+value. All selected players share the active filters, while Last X is applied
+independently to each player's newest rows. Selecting from any search bar adds
+the player to the leftmost available column; clearing a selection compacts the
+remaining players. Comparison prevents duplicate selections and begins color
+coding only after at least two players are selected. Its status text is
+`Number of games considered: p1 (x1), p2 (x2), ...`.
+
+Default snapshots are:
+
+```text
+card-stats/players/general/default-{mw|base}.json
+```
+
+The large player directory is separate and generated during daily refresh:
+
+```text
+card-stats/players/index/default-{mw|base}.json
+```
+
+It is a sorted, non-conceded, dataset-specific list. The frontend downloads it
+when Players first opens, then reuses it through memory and versioned Cache
+Storage; searches begin at three characters and show a bounded alphabetical
+suggestion list. The public cache bucket allows cross-origin GET/HEAD requests
+from the static site and local development servers. If direct snapshot delivery
+fails, the frontend sends `players_index: true` with `stats_page: "players"` and
+`is_mw`; the Cloud Function reads the same cache object and returns it through
+its CORS/gzip response path. This fallback never queries BigQuery. Index loading,
+failure, and retry states remain visible instead of becoming an empty directory.
+Searching does not query BigQuery per keystroke.
+
+The suggestion list is a viewport-positioned overlay outside the table scroll
+container, so it cannot be clipped by the sticky header or table frame. Player
+names are selected through escaped data attributes rather than executable inline
+strings. The table's inner scroll container owns the viewport height and vertical
+scrollbar, exposing the complete metric catalog while the header remains sticky.
+When no player is selected, null Player values display `-`; only real numerical
+zero values display as zero. The player search popup is a viewport-positioned
+overlay and closes immediately after selection.
+
+Across the dashboard, signed Frequency comparison values use an adaptive
+display precision: absolute values below 10 percentage points show two decimals;
+absolute values of 10 or more show one decimal. This affects only signed
+`vs. avg` percentage-point displays, not raw Frequency percentages or Elo
+Delta values. The sign, including the `±` zero form, is preserved.
+
+Elo Delta cells use a separate global precision rule: values with absolute
+magnitude below 10 display three decimals; values at or above 10 display two
+decimals. This applies to Elo Delta cells and insufficient-data cells across all
+pages, but not to ordinary Maps metrics, money, CP, or Frequency values. Maps
+Metrics ordinary numeric values with three integer digits retain two decimals
+so values such as `114.24` remain visible.
+
+#### Conservation null and malformed-data rules
+
+- A missing numeric value does not enter a Delta mean or CI.
+- A zero or missing Frequency denominator renders `-`, never an invented 0%.
+- A missing CP threshold move cannot qualify as first to that threshold.
+- A missing opponent threshold move qualifies only when the player has a valid threshold move.
+- A non-money CP reward absent from the availability array cannot enter the Frequency numerator or denominator even if malformed chosen data claims it; 5 money is the documented fixed exception and is injected as an opportunity at both thresholds.
+- Configured rewards remain present when they have no data, so MW/Base and filtered layouts do not shift.
+- Explicitly impossible map/reward combinations render `-`.
+- Source BigQuery tables are never updated; only prepared tables, cache blobs, and snapshots are replaceable derived artifacts.
 
 ### Shared Table UI
 
@@ -1303,7 +1625,7 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-Expected result: JSON with `status: ok`, `home_bootstrap: ok`, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build views, all four Combinations views, Predictors General/Icon, and all Actions views for MW/Base. Do not paste the token or command output if it includes secrets.
+Expected result: JSON with `status: ok`, `home_bootstrap: ok`, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build views, all four Combinations views, Predictors General/Icon, all Actions views, Workers General/2 CP Worker, Players General, and both Players indexes for MW/Base. Do not paste the token or command output if it includes secrets.
 ## Maintenance Token Rotation
 
 If the maintenance token is exposed, rotate it immediately.
@@ -1414,6 +1736,10 @@ $urls = @(
   'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/metrics/default-base.json',
   'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/tournament_h2h/default-mw.json',
   'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/tournament_h2h/default-base.json',
+  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-mw.json',
+  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-base.json',
+  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/index/default-mw.json',
+  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/index/default-base.json',
   'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/data-version.json'
 )
 

@@ -8,9 +8,12 @@ import {
 } from '../color-scales.js?v=20260711-1';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
+  formatSignedDeltaAdaptive,
+  formatSignedPercentAdaptive,
   isInsufficientObservationCount,
-} from '../table-cells.js?v=20260710-1';
-import { loadStats } from '../snapshot-cache.js?v=20260711-4';
+  mapTooltipLabel,
+} from '../table-cells.js?v=20260712-4';
+import { loadStats } from '../snapshot-cache.js?v=20260712-2';
 
 export const id = 'build';
 export const title = 'Build';
@@ -293,7 +296,7 @@ function renderHexes() {
     <table class="maps-table build-hexes-table ${mode === 'frequency' ? 'build-hexes-frequency' : ''}" id="statsTable">
       <thead><tr>
         <th class="build-hexes-bucket-header" style="width:10%">Empty hexes</th>
-        ${MAPS.map(([short, , full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(full)}" style="width:5.5%;text-align:center">${escapeHtml(short)}</th>`).join('')}
+        ${MAPS.map(([short, , full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(mapTooltipLabel(full))}" style="width:5.5%;text-align:center">${escapeHtml(short)}</th>`).join('')}
         <th style="width:7.5%">Avg</th>
       </tr></thead>
       <tbody>${displayRows.map(row => `<tr class="${expanded ? 'hexes-expanded-row' : ''}">
@@ -335,7 +338,7 @@ function hexesCell(row, field, range) {
     if (!Number.isFinite(value)) return '<td class="unavailable-cell">-</td>';
     const rawPct = frequencyFor(row, field);
     const total = Number(row[`denom_${field}`]) || 0;
-    const text = compareMode === 'average' ? fmtFrequencyComparison(value) : `${rawPct.toFixed(2)}%`;
+    const text = compareMode === 'average' ? formatSignedPercentAdaptive(value) : `${rawPct.toFixed(2)}%`;
     const tip = `${fmtInt(occurrences)} / ${fmtInt(total)}`;
     const frequencyCap = expanded ? 20 : 50;
     return `<td class="build-value-tooltip" data-value-tooltip="${tip}" style="color:${frequencyColor(value, frequencyCap)}">${text}</td>`;
@@ -418,15 +421,8 @@ function applyFiltersFromSidebar() {
   document.getElementById('sidebarOverlay')?.classList.remove('active');
 }
 
-function fmtFrequencyComparison(value) {
-  const decimals = Math.abs(Number(value)) >= 10 ? 1 : 2;
-  return `${fmtSigned(value, decimals, true)}%`;
-}
 function fmtSigned(value, decimals = 3, plusMinusZero = false) {
-  const number = Math.abs(Number(value)) < 0.5 * 10 ** -decimals ? 0 : Number(value);
-  if (!Number.isFinite(number)) return '\u2014';
-  if (number === 0 && plusMinusZero) return `\u00b1${number.toFixed(decimals)}`;
-  return `${number >= 0 ? '+' : '\u2212'}${Math.abs(number).toFixed(decimals)}`;
+  return formatSignedDeltaAdaptive(value, plusMinusZero);
 }
 function fmtInt(value) { return Number(value || 0).toLocaleString('en-US'); }
 function escapeHtml(value) {

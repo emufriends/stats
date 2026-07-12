@@ -9,6 +9,7 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260710-2';
+import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
 import { loadStats } from '../snapshot-cache.js?v=20260711-4';
 
 export const title = 'Endgames';
@@ -633,14 +634,14 @@ function generalHeadHtml() {
   return `
     <tr>
       <th style="width:5%;text-align:center;cursor:default;">#</th>
-      ${nameHeaderHtml('18%')}
+      ${nameHeaderHtml('20%')}
       <th onclick="sortBy('delta_in_hand')" style="width:12%;text-align:center">&Delta; (scored)<span class="col-tip" data-tip="average elo gain when scored at the end of the game">?</span><span class="sort-arrow" id="sort-delta_in_hand">\u2195</span></th>
       <th onclick="sortBy('delta_played')" style="width:12%;text-align:center">&Delta; (dealt)<span class="col-tip" data-tip="average elo gain when dealt at the start of the game">?</span><span class="sort-arrow" id="sort-delta_played">\u2195</span></th>
       <th onclick="sortBy('avg_elo')" style="width:8%;text-align:center">Elo<span class="col-tip" data-tip="average player elo when scored">?</span><span class="sort-arrow" id="sort-avg_elo">\u2195</span></th>
-      <th onclick="sortBy('playrate_pct')" style="width:17%;text-align:center">Keeprate <span class="col-tip" data-tip-fraction>?</span><span class="sort-arrow" id="sort-playrate_pct">\u2195</span></th>
-      <th onclick="sortBy('n_played')" style="width:10%;text-align:center">Scored<span class="col-tip" data-tip="n scored">?</span><span class="sort-arrow" id="sort-n_played">\u2195</span></th>
-      <th onclick="sortBy('n_seen')" style="width:10%;text-align:center">Dealt<span class="col-tip" data-tip="n dealt">?</span><span class="sort-arrow" id="sort-n_seen">\u2195</span></th>
-      <th onclick="sortBy('avg_cp')" style="width:8%;text-align:center">CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
+      <th onclick="sortBy('playrate_pct')" style="width:15%;text-align:center">Keeprate <span class="col-tip" data-tip-fraction>?</span><span class="sort-arrow" id="sort-playrate_pct">\u2195</span></th>
+      <th onclick="sortBy('n_played')" style="width:9%;text-align:center">Scored<span class="col-tip" data-tip="n scored">?</span><span class="sort-arrow" id="sort-n_played">\u2195</span></th>
+      <th onclick="sortBy('n_seen')" style="width:9%;text-align:center">Dealt<span class="col-tip" data-tip="n dealt">?</span><span class="sort-arrow" id="sort-n_seen">\u2195</span></th>
+      <th onclick="sortBy('avg_cp')" style="width:10%;text-align:center">CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
     </tr>`;
 }
 
@@ -659,7 +660,7 @@ function cpByMapHeadHtml() {
     <tr>
       <th style="width:4%;text-align:center;cursor:default;">#</th>
       ${nameHeaderHtml('16%')}
-      ${VALID_MAPS.map(map => `<th class="maps-custom-tip" onclick="sortBy('${map.field}')" data-tip="${escapeAttr(map.full)}" style="width:5%;text-align:center">${escapeHtml(map.short)}<span class="sort-arrow" id="sort-${map.field}">\u2195</span></th>`).join('')}
+      ${VALID_MAPS.map(map => `<th class="maps-custom-tip" onclick="sortBy('${map.field}')" data-tip="${escapeAttr(mapTooltipLabel(map.full))}" style="width:5%;text-align:center">${escapeHtml(map.short)}<span class="sort-arrow" id="sort-${map.field}">\u2195</span></th>`).join('')}
       <th onclick="sortBy('avg_cp')" style="width:5%;text-align:center">CP<span class="col-tip" data-tip="average conservation points scored">?</span><span class="sort-arrow" id="sort-avg_cp">\u2195</span></th>
     </tr>`;
 }
@@ -1324,9 +1325,7 @@ function showError(msg) {
 }
 
 function fmtDelta(val) {
-  if (val == null) return '\u2014';
-  const sign = val >= 0 ? '+' : '';
-  return `${sign}${Number(val).toFixed(3)}`;
+  return formatSignedDeltaAdaptive(val);
 }
 
 function fmtN(val) {

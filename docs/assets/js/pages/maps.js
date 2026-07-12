@@ -8,7 +8,8 @@ import {
   numericRange,
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260711-1';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-6';
+import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260712-1';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';
@@ -33,7 +34,7 @@ export const mainHtml = `
 
   <div class="table-wrap maps-table-wrap">
     <div class="table-scroll">
-      <table id="statsTable" class="maps-table">
+      <table id="statsTable" class="maps-table maps-metrics-table">
         <thead id="tableHead"></thead>
         <tbody id="tableBody">
           <tr><td colspan="17">
@@ -396,7 +397,7 @@ function renderActiveView() {
 function setTableModeClass() {
   const table = document.getElementById('statsTable');
   if (!table) return;
-  table.className = activeView === H2H_VIEW ? 'maps-table maps-h2h-table' : 'maps-table';
+  table.className = activeView === H2H_VIEW ? 'maps-table maps-h2h-table' : 'maps-table maps-metrics-table';
   const mobileWidth = activeView === H2H_VIEW
     ? 1025
     : 110 + Math.max(visibleMaps.length, 1) * 64;
@@ -424,7 +425,7 @@ function renderTableHead() {
   thead.innerHTML = `
     <tr>
       <th onclick="sortMapsByHeader()" style="width:${layout.metricWidthPct}%;text-align:center;">Maps${useNaturalMapOrder ? '<span class="maps-sort-indicator">&#8595;</span>' : ''}</th>
-      ${maps.map(map => `<th class="maps-map-header maps-custom-tip" data-tip="${escapeAttr(map.full)}" style="width:${layout.mapWidthPct}%;text-align:center;">${escapeHtml(map.code)}</th>`).join('')}
+      ${maps.map(map => `<th class="maps-map-header maps-custom-tip" data-tip="${escapeAttr(mapTooltipLabel(map.full))}" style="width:${layout.mapWidthPct}%;text-align:center;">${escapeHtml(map.code)}</th>`).join('')}
     </tr>`;
 }
 
@@ -634,13 +635,13 @@ function formatValue(raw, format) {
   if (!Number.isFinite(value)) return '-';
   if (format === 'compact') return compactNumber(value);
   if (format === 'percent') return `${value.toFixed(1)}%`;
-  return Math.abs(value) >= 100 ? value.toFixed(1) : value.toFixed(2);
+  return Math.abs(value) >= 100 ? value.toFixed(2) : value.toFixed(2);
 }
 
 function displayMetricName(metric) {
   return String(metric)
     .replaceAll('Points per money', 'Points per $')
-    .replaceAll('Money per turn', '$ per turn')
+    .replaceAll('Money per turn', '$ gained per turn')
     .replaceAll('Money gained', '$ gained')
     .replaceAll('Money spent', '$ spent')
     .replaceAll('Cards drawn from deck', 'Cards (deck)')
@@ -692,7 +693,7 @@ function renderH2h() {
   const rowMaps = sortedMapsForH2h(matrix);
   tbody.innerHTML = rowMaps.map(rowMap => `
     <tr>
-      <td class="maps-h2h-row-head maps-custom-tip" data-tip="${escapeAttr(rowMap.full)}">${escapeHtml(rowMap.code)}</td>
+      <td class="maps-h2h-row-head maps-custom-tip" data-tip="${escapeAttr(mapTooltipLabel(rowMap.full))}">${escapeHtml(rowMap.code)}</td>
       ${visibleMaps.map(colMap => h2hCellHtml(
         matrix.matchups.get(h2hKey(rowMap.full, colMap.full)),
         rowMap.full === colMap.full,
@@ -751,7 +752,7 @@ function renderH2hHead() {
   thead.innerHTML = `
     <tr>
       <th class="maps-h2h-corner" onclick="sortH2hByMap()">You \\ Opp${!h2hSortByOverall ? '<span class="maps-sort-indicator">&#8595;</span>' : ''}</th>
-      ${visibleMaps.map(map => `<th class="maps-h2h-map-head maps-custom-tip" data-tip="${escapeAttr(map.full)}">${escapeHtml(map.code)}</th>`).join('')}
+      ${visibleMaps.map(map => `<th class="maps-h2h-map-head maps-custom-tip" data-tip="${escapeAttr(mapTooltipLabel(map.full))}">${escapeHtml(map.code)}</th>`).join('')}
       <th class="maps-h2h-overall-head" onclick="sortH2hByOverall()">Overall${h2hSortByOverall ? '<span class="maps-sort-indicator">&#8595;</span>' : ''}</th>
     </tr>`;
 }
@@ -861,9 +862,7 @@ function formatWinPct(raw) {
 }
 
 function signedOneDecimal(raw) {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return '-';
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}`;
+  return formatSignedDeltaAdaptive(raw);
 }
 
 function compactNumber(value) {

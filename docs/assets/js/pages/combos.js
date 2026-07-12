@@ -6,6 +6,7 @@ import {
   relativeEloColor,
   synergyRangeColor,
 } from '../color-scales.js?v=20260707-1';
+import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
 
 export const title = 'Combos';
 export const navLabel = 'Combos';
@@ -128,7 +129,7 @@ export const sidebarHtml = `
 
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-4';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260712-2';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
@@ -822,7 +823,7 @@ function mapFilterHeader(width = '20%') {
       </div>
       <div class="combination-map-choice-grid">
         ${MAPS.map(([short, full]) => `<button class="chip ${selectedHeaderMaps.has(full) ? 'active' : ''}"
-          type="button" data-map="${escapeAttr(full)}" data-tooltip="${escapeAttr(full)}"
+          type="button" data-map="${escapeAttr(full)}" data-tooltip="${escapeAttr(mapTooltipLabel(full))}"
           onclick="toggleCombinationHeaderMap(this.dataset.map, event)">${escapeHtml(short)}</button>`).join('')}
       </div>
     </div>
@@ -833,12 +834,14 @@ function roundFilterHeader(width = '20%') {
   const active = sortState.col === 'round_name';
   const narrowed = selectedHeaderRounds.size !== ROUNDS.length;
   const arrow = active ? (sortState.dir === 'desc' ? '\u2193' : '\u2191') : '\u2195';
-  return `<th class="combination-round-filter-header ${active ? 'sorted' : ''}" style="width:${width}" onclick="sortCombinations('round_name')">
+  return `<th class="combination-round-filter-header ${active ? 'sorted' : ''} ${narrowed ? 'combination-header-filter-active' : ''}" style="width:${width}" onclick="sortCombinations('round_name')">
     <span class="combination-context-filter-header">
-      <span class="combination-context-filter-title ${narrowed ? 'combination-filter-active' : ''}">Round</span>
+      <span class="combination-context-filter-title">Round</span>
       <button class="combination-map-filter-btn ${narrowed ? 'search-active' : ''}" type="button"
               aria-label="Filter rounds" title="Filter rounds" onclick="toggleCombinationRoundPopup(event)">
-        <span class="type-filter-indicator type-filter-icon">${narrowed ? `(${selectedHeaderRounds.size})` : ''}</span>
+        ${narrowed
+          ? `<span class="combination-filter-count">${selectedHeaderRounds.size}/${ROUNDS.length}</span>`
+          : '<span class="type-filter-indicator type-filter-icon"></span>'}
       </button>
       <span class="sort-arrow ${active ? 'active' : ''}">${arrow}</span>
     </span>
@@ -1222,6 +1225,7 @@ function toggleCombinationHeaderRound(round, event) {
     selectedHeaderRounds.add(round);
   }
   currentPage = 1;
+  updateCombinationRoundHeader();
   applyClientFilters();
   reopenCombinationPopup('round');
 }
@@ -1229,6 +1233,7 @@ function toggleCombinationHeaderRound(round, event) {
 function selectAllCombinationHeaderRounds() {
   selectedHeaderRounds = new Set(ROUNDS);
   currentPage = 1;
+  updateCombinationRoundHeader();
   applyClientFilters();
   reopenCombinationPopup('round');
 }
@@ -1236,8 +1241,23 @@ function selectAllCombinationHeaderRounds() {
 function selectNoneCombinationHeaderRounds() {
   selectedHeaderRounds = new Set();
   currentPage = 1;
+  updateCombinationRoundHeader();
   applyClientFilters();
   reopenCombinationPopup('round');
+}
+
+function updateCombinationRoundHeader() {
+  const header = document.querySelector('.combination-round-filter-header');
+  if (!header) return;
+  const narrowed = selectedHeaderRounds.size !== ROUNDS.length;
+  header.classList.toggle('combination-header-filter-active', narrowed);
+  const button = header.querySelector('.combination-map-filter-btn');
+  if (button) {
+    button.classList.toggle('search-active', narrowed);
+    button.innerHTML = narrowed
+      ? `<span class="combination-filter-count">${selectedHeaderRounds.size}/${ROUNDS.length}</span>`
+      : '<span class="type-filter-indicator type-filter-icon"></span>';
+  }
 }
 
 
@@ -1477,8 +1497,7 @@ function eloColor(raw) {
 }
 
 function formatSigned(raw) {
-  const value = Number(raw);
-  return Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(3)}` : '-';
+  return formatSignedDeltaAdaptive(raw);
 }
 
 function formatNumber(raw, decimals) {

@@ -9,8 +9,9 @@ import {
 import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-4';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
+  formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
-} from '../table-cells.js?v=20260710-1';
+} from '../table-cells.js?v=20260712-4';
 
 export const title = 'Sponsor Endgames';
 export const navLabel = 'Sponsor Endgames';
@@ -586,9 +587,7 @@ function formatNumber(raw, decimals) {
 }
 
 function formatSigned(raw) {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return '-';
-  return `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
+  return formatSignedDeltaAdaptive(raw);
 }
 
 function formatInsufficientSigned(raw) {

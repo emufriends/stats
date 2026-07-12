@@ -7,9 +7,10 @@ import {
 } from '../color-scales.js?v=20260710-2';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
+  formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
-} from '../table-cells.js?v=20260710-1';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-6';
+} from '../table-cells.js?v=20260712-4';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260712-1';
 
 export const id = 'icons';
 export const title = 'Icons';
@@ -768,7 +769,7 @@ function format(value, decimals) {
 }
 
 function signed(value) {
-  return `${value >= 0 ? '+' : ''}${Number(value).toFixed(3)}`;
+  return formatSignedDeltaAdaptive(value);
 }
 
 function escapeHtml(value) {

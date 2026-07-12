@@ -104,6 +104,36 @@ export function frequencyColor(value, cap = 50) {
   return playrateColor(value, 0, cap);
 }
 
+// Workers' n (Avg) row is an absolute prevalence measure, not a percentage.
+// Keep it visually related to Frequency without using the stronger standard blue.
+export function workerAverageColor(value) {
+  return colorFromStops(value, [
+    [1, '#34536f'],
+    [2, '#557798'],
+    [3, '#7899b8'],
+    [4, '#9ab9d3'],
+  ]);
+}
+
+export function workerAverageDeltaColor(value, min, max) {
+  const normalized = normalizeToRange(value, min, max);
+  if (normalized === null) return 'var(--text-muted)';
+  return colorFromStops(normalized, [
+    [0, '#34536f'],
+    [0.5, '#7899b8'],
+    [1, '#9ab9d3'],
+  ]);
+}
+
+export function workerAverageVioletColor(value) {
+  return colorFromStops(value, [
+    [1, '#76679b'],
+    [2, '#9580bd'],
+    [3, '#b19bd3'],
+    [4, '#c6afe4'],
+  ]);
+}
+
 export function relativeEloColor(value, min, max) {
   const t = normalizeToRange(value, min, max);
   if (t === null) return 'var(--text-muted)';

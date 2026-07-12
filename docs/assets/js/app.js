@@ -1,7 +1,7 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260711-6';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260712-8';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor } from './color-scales.js?v=20260710-3';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
-import { preloadDefaultSnapshots, prioritizeSnapshotGroup } from './snapshot-cache.js?v=20260711-6';
+import { preloadDefaultSnapshots, prioritizeSnapshotGroup } from './snapshot-cache.js?v=20260712-3';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -11,7 +11,7 @@ import {
   setTopbarDataset,
   toggleNavCollapse,
   toggleSidebar,
-} from './layout.js?v=20260711-1';
+} from './layout.js?v=20260712-3';
 
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;
