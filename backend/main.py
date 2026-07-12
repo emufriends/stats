@@ -10,6 +10,7 @@ import math
 import os
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from types import SimpleNamespace
@@ -64,7 +65,7 @@ CARD_ATTRIBUTES_URL = os.environ.get(
 )
 CARD_ATTRIBUTES_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "cards_attributes.csv")
 CARD_ATTRIBUTES_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/cards-attributes.json"
-FILTER_CACHE_VERSION = "v9"
+FILTER_CACHE_VERSION = "v10"
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -76,6 +77,9 @@ STATS_PAGE_ICONS = "icons"
 STATS_PAGE_BUILD = "build"
 STATS_PAGE_PREDICTORS = "predictors"
 STATS_PAGE_ACTIONS = "actions"
+STATS_PAGE_CONSERVATION = "conservation"
+STATS_PAGE_WORKERS = "workers"
+STATS_PAGE_PLAYERS = "players"
 VALID_STATS_PAGES = {
     STATS_PAGE_CARDS,
     STATS_PAGE_HOME,
@@ -88,6 +92,9 @@ VALID_STATS_PAGES = {
     STATS_PAGE_BUILD,
     STATS_PAGE_PREDICTORS,
     STATS_PAGE_ACTIONS,
+    STATS_PAGE_CONSERVATION,
+    STATS_PAGE_WORKERS,
+    STATS_PAGE_PLAYERS,
 }
 ENDGAMES_VIEW_GENERAL = "general"
 ENDGAMES_VIEW_CP_DISTRIBUTION = "cp_distribution"
@@ -124,6 +131,68 @@ VALID_ACTIONS_VIEWS = {
     ACTIONS_VIEW_UPGRADE_ORDER,
     ACTIONS_VIEW_UPGRADES_BY_MAP,
 }
+CONSERVATION_VIEW_PROJECTS = "projects"
+CONSERVATION_VIEW_PROJECT_REWARDS = "project_rewards"
+CONSERVATION_VIEW_CP_REWARDS = "cp_rewards"
+VALID_CONSERVATION_VIEWS = {
+    CONSERVATION_VIEW_PROJECTS,
+    CONSERVATION_VIEW_PROJECT_REWARDS,
+    CONSERVATION_VIEW_CP_REWARDS,
+}
+WORKERS_VIEW_GENERAL = "general"
+WORKERS_VIEW_TWO_CP_WORKER = "two_cp_worker"
+VALID_WORKERS_VIEWS = {WORKERS_VIEW_GENERAL, WORKERS_VIEW_TWO_CP_WORKER}
+PLAYERS_VIEW_GENERAL = "general"
+PLAYERS_VIEW_ARENA = "arena"
+PLAYERS_VIEW_COMPARISON = "comparison"
+VALID_PLAYERS_VIEWS = {PLAYERS_VIEW_GENERAL, PLAYERS_VIEW_ARENA, PLAYERS_VIEW_COMPARISON}
+
+# Fixed reward catalogs make unavailable choices explicit instead of silently
+# dropping rows. The first six project rewards are generic; each remaining
+# reward is only meaningful on its associated map.
+PROJECT_REWARD_CONFIG = [
+    (1, "Snapping", "Snapping", None, "generic"),
+    (2, "2-size", "2-size", None, "generic"),
+    (3, "5 money", "5 Money", None, "generic"),
+    (4, "Worker", "Worker", None, "generic"),
+    (5, "12 money", "12 Money", None, "generic"),
+    (6, "3 X-tokens", "3 X Token", None, "generic"),
+    (7, "Marketing (1a)", "Marketing", VALID_MAPS[0], "map"),
+    (8, "1 CP (2a)", "1 CP", VALID_MAPS[1], "map"),
+    (9, "Determination (3a)", "Determination", VALID_MAPS[2], "map"),
+    (10, "University (4a)", "University", VALID_MAPS[3], "map"),
+    (11, "Unique building (5a)", "Aviary/Reptile House", VALID_MAPS[4], "map"),
+    (12, "Clever (6a)", "Clever", VALID_MAPS[5], "map"),
+    (13, "Pouching (7a)", "Pouching", VALID_MAPS[6], "map"),
+    (14, "Partner zoo (8a)", "Partner Zoo", VALID_MAPS[7], "map"),
+    (15, "Token (9)", "Remove Continent Cube", VALID_MAPS[8], "map"),
+    (16, "2 reputation (10)", "2 Reputation", VALID_MAPS[9], "map"),
+    (17, "Upgrade (11)", "Upgrade", VALID_MAPS[10], "map"),
+    (18, "Animal magnet (12)", "Animal Magnet", VALID_MAPS[11], "map"),
+    (19, "Adapt (13)", "Adapt 3", VALID_MAPS[12], "map"),
+    (20, "Person sponsor (14)", "Play a person sponsor", VALID_MAPS[13], "map"),
+    (21, "Draw + ability (T1)", "Draw from range", VALID_MAPS[14], "map"),
+    (22, "3 reputation (T1)", "3 Reputation", VALID_MAPS[14], "map"),
+]
+
+CP_REWARD_CONFIG = [
+    (1, "University", "1 University", False),
+    (2, "Partner zoo", "1 Partner-Zoo", False),
+    (3, "Posturing 3", "3 bonus-kiosk-pavilion", True),
+    (4, "x2", "1 Multiplier", False),
+    (5, "10 money", "10 money", False),
+    (6, "2 reputation", "2 reputation", False),
+    (7, "3 X-tokens", "3 xtoken", False),
+    (8, "3-size", "1 size-3", False),
+    (9, "Marketing", "1 bonus-sponsor-gray", False),
+    (10, "Extra Shift", "1 bonus-extra-shift", True),
+    (11, "Bonus icon", "1 bonus-icon", True),
+    (12, "3 cards", "3 take-in-range-or-deck", False),
+    (13, "Snap + Handsize", "1 bonus-increased-hand", True),
+    (14, "Ignore 3", "3 bonus-ignore-conditions", True),
+    (15, "Adapt 3", "3 bonus-scoring-cards", True),
+    (16, "5 money", "5 money", False),
+]
 COMBINATIONS_VIEW_CARD_CARD = "card_card"
 COMBINATIONS_VIEW_CARD_MAP = "card_map"
 COMBINATIONS_VIEW_CARD_ROUND = "card_round"
@@ -455,7 +524,7 @@ def _parse_stats_page(raw_value):
     if value not in VALID_STATS_PAGES:
         raise ValueError(
             "stats_page must be cards, home, opening_hand, endgames, maps, "
-            "sponsor_endgames, combinations, icons, build, predictors, or actions"
+            "sponsor_endgames, combinations, icons, build, predictors, actions, conservation, workers, or players"
         )
     return value
 
@@ -520,6 +589,33 @@ def _parse_actions_view(raw_value):
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_ACTIONS_VIEWS:
         raise ValueError("actions_view must be starting_position, upgrades, upgrade_order, or upgrades_by_map")
+    return value
+
+
+def _parse_conservation_view(raw_value):
+    if raw_value in (None, ""):
+        return CONSERVATION_VIEW_PROJECTS
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_CONSERVATION_VIEWS:
+        raise ValueError("conservation_view must be projects, project_rewards, or cp_rewards")
+    return value
+
+
+def _parse_workers_view(raw_value):
+    if raw_value in (None, ""):
+        return WORKERS_VIEW_GENERAL
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_WORKERS_VIEWS:
+        raise ValueError("workers_view must be general or two_cp_worker")
+    return value
+
+
+def _parse_players_view(raw_value):
+    if raw_value in (None, ""):
+        return PLAYERS_VIEW_GENERAL
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_PLAYERS_VIEWS:
+        raise ValueError("players_view must be general, arena, or comparison")
     return value
 
 
@@ -590,6 +686,9 @@ def _cache_blob_name(
     build_view=BUILD_VIEW_ENCLOSURES,
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
+    conservation_view=CONSERVATION_VIEW_PROJECTS,
+    workers_view=WORKERS_VIEW_GENERAL,
+    players_view=PLAYERS_VIEW_GENERAL,
 ):
     dataset = "mw" if int(is_mw) == 1 else "base"
     if stats_page == STATS_PAGE_HOME:
@@ -608,6 +707,15 @@ def _cache_blob_name(
         return f"{CACHE_PREFIX}/predictors/{predictors_view}/default-{dataset}.json"
     if stats_page == STATS_PAGE_ACTIONS:
         return f"{CACHE_PREFIX}/actions/{actions_view}/delta/default-{dataset}.json"
+    if stats_page == STATS_PAGE_CONSERVATION:
+        view_slug = conservation_view.replace("_", "-")
+        return f"{CACHE_PREFIX}/conservation/{view_slug}/default-{dataset}.json"
+    if stats_page == STATS_PAGE_WORKERS:
+        view_slug = workers_view.replace("_", "-")
+        return f"{CACHE_PREFIX}/workers/{view_slug}/default-{dataset}.json"
+    if stats_page == STATS_PAGE_PLAYERS:
+        view_slug = players_view.replace("_", "-")
+        return f"{CACHE_PREFIX}/players/{view_slug}/default-{dataset}.json"
     if stats_page == STATS_PAGE_COMBINATIONS:
         view_slug = combinations_view.replace("_", "-")
         return f"{CACHE_PREFIX}/combinations/{view_slug}/default-{dataset}.json"
@@ -816,12 +924,15 @@ def _read_cached_snapshot(
     build_view=BUILD_VIEW_ENCLOSURES,
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
+    conservation_view=CONSERVATION_VIEW_PROJECTS,
+    workers_view=WORKERS_VIEW_GENERAL,
+    players_view=PLAYERS_VIEW_GENERAL,
 ):
     return _read_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view
+            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view
         ),
         "hit",
     )
@@ -838,12 +949,15 @@ def _write_cached_snapshot(
     build_view=BUILD_VIEW_ENCLOSURES,
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
+    conservation_view=CONSERVATION_VIEW_PROJECTS,
+    workers_view=WORKERS_VIEW_GENERAL,
+    players_view=PLAYERS_VIEW_GENERAL,
 ):
     return _write_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view
+            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view
         ),
         payload,
         "refreshed",
@@ -930,6 +1044,10 @@ def _is_default_cache_request(
     date_to,
     completed_only,
     round_filter_active,
+    players_player=None,
+    players_view=PLAYERS_VIEW_GENERAL,
+    players_players=None,
+    last_x_games=None,
 ):
     if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_TOURNAMENT_H2H:
         return int(is_mw) in (0, 1)
@@ -945,6 +1063,23 @@ def _is_default_cache_request(
             and date_to is None
             and completed_only is None
             and not round_filter_active
+        )
+    if stats_page == STATS_PAGE_PLAYERS:
+        return (
+            players_view == PLAYERS_VIEW_GENERAL
+            and int(is_mw) in (0, 1)
+            and set(selected_maps) == set(VALID_MAPS)
+            and player_elo_min is None
+            and player_elo_max is None
+            and opponent_elo_min == 0
+            and opponent_elo_max is None
+            and date_from == DEFAULT_DATE_FROM
+            and date_to is None
+            and completed_only is None
+            and not round_filter_active
+            and not players_player
+            and not players_players
+            and not last_x_games
         )
     default_date_from = (
         MAPS_METRICS_DEFAULT_DATE_FROM
@@ -1021,6 +1156,9 @@ def _refresh_prepared_logs_table():
       l.sponsors_starting_strength,
       l.association_action_history,
       l.cp_history,
+      l.project_rewards,
+      l.`5cp_bonus` AS five_cp_bonus,
+      l.`8cp_bonus` AS eight_cp_bonus,
       l.has_round_1_upgrade,
       l.has_round_1_release,
       l.first_upgrade,
@@ -1228,6 +1366,48 @@ def _refresh_prepared_tables():
         "full_stats": full_stats,
         "card_plays": card_plays,
         "card_pairs": card_pairs,
+    }
+
+
+def _refresh_player_index_snapshot(is_mw):
+    """Publish the sorted non-conceded player directory used by autocomplete."""
+    dataset = "mw" if int(is_mw) == 1 else "base"
+    blob_name = f"{CACHE_PREFIX}/players/index/default-{dataset}.json"
+    query = f"""
+      SELECT DISTINCT TRIM(CAST(player AS STRING)) AS player
+      FROM `{PREPARED_FULL_STATS_TABLE}`
+      WHERE CAST(is_mw AS INT64) = @is_mw
+        AND Map IN UNNEST(@selected_maps)
+        AND COALESCE(table_conceded, 0) = 0
+        AND player IS NOT NULL
+        AND TRIM(CAST(player AS STRING)) != ''
+      ORDER BY player
+    """
+    started_at = time.perf_counter()
+    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    job = client.query(
+        query,
+        job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("is_mw", "INT64", int(is_mw)),
+            bigquery.ArrayQueryParameter("selected_maps", "STRING", VALID_MAPS),
+        ]),
+        location=BIGQUERY_LOCATION,
+    )
+    players = [str(row.player) for row in job.result() if row.player]
+    cache_ok = _write_cache_blob(
+        blob_name,
+        {"status": "ok", "players": players, "dataset": dataset},
+        "refreshed",
+    )
+    return {
+        "status": "ok" if cache_ok else "error",
+        "dataset": dataset,
+        "players": len(players),
+        "cache_status": "refreshed" if cache_ok else "cache_write_failed",
+        "total_ms": _ms_since(started_at),
+        "job_id": job.job_id,
+        "job_total_bytes_processed": job.total_bytes_processed,
+        "job_total_slot_ms": job.slot_millis,
     }
 
 
@@ -1987,8 +2167,9 @@ def _build_full_sample_where_sql(
     return " AND ".join(where_clauses), query_parameters
 
 
-def _build_maps_metrics_query(where_sql):
-    metric_definitions = [
+def _maps_metric_definitions():
+    """Canonical metric catalog shared by Maps/Metrics and Players/General."""
+    return [
         ("games", 1, "Games", None, True, "compact", False),
         ("turns", 2, "Turns", None, True, "number", True),
         ("rounds", 3, "Rounds", None, True, "number", True),
@@ -2054,6 +2235,10 @@ def _build_maps_metrics_query(where_sql):
         ("water_icons", 64, "Water icons", None, False, "number", False),
         ("science_icons", 65, "Science icons", None, False, "number", False),
     ]
+
+
+def _build_maps_metrics_query(where_sql):
+    metric_definitions = _maps_metric_definitions()
     metric_config_sql = ",\n        ".join(
         "STRUCT("
         f"{_sql_string(key)} AS metric_key, "
@@ -2233,6 +2418,286 @@ def _build_maps_metrics_query(where_sql):
     FROM metric_values
     GROUP BY sort_order, metric, tooltip, is_default, format, lower_is_better
     ORDER BY sort_order
+    """
+
+
+def _players_metric_definitions():
+    """Players keeps the Maps catalog but replaces Rounds with two break metrics."""
+    definitions = []
+    next_order = 1
+    for key, _sort_order, label, tooltip, is_default, value_format, lower_is_better in _maps_metric_definitions():
+        if key in {"games", "rounds"}:
+            continue
+        if key == "turns":
+            definitions.append((key, next_order, label, tooltip, is_default, value_format, lower_is_better))
+            next_order += 1
+            definitions.append((
+                "breaks_triggered", next_order, "Breaks triggered", None, False, "number", False
+            ))
+            next_order += 1
+            definitions.append((
+                "break_pct", next_order, "Break%", "percentage of available breaks that were triggered", False, "percent", False
+            ))
+            next_order += 1
+            continue
+        if key == "money_per_turn":
+            label = "$ gained per turn"
+        definitions.append((key, next_order, label, tooltip, is_default, value_format, lower_is_better))
+        next_order += 1
+    return definitions
+
+
+def _players_metric_expressions():
+    """Full Sample expressions for Players, including player-only break metrics."""
+    return {
+        "turns": "SAFE_CAST(Number_of_turns AS FLOAT64)",
+        "breaks_triggered": "SAFE_CAST(Number_of_breaks_triggered AS FLOAT64)",
+        "break_pct": "100 * SAFE_DIVIDE(SAFE_CAST(Number_of_breaks_triggered AS FLOAT64), NULLIF(SAFE_CAST(total_breaks AS FLOAT64), 0))",
+        "points_per_turn": "SAFE_CAST(points_per_turn AS FLOAT64)",
+        "points_per_money": "SAFE_CAST(points_per_money AS FLOAT64)",
+        "money_per_turn": "SAFE_DIVIDE(SAFE_CAST(Money_gained AS FLOAT64), NULLIF(SAFE_CAST(Number_of_turns AS FLOAT64), 0))",
+        "score": "SAFE_CAST(Score AS FLOAT64)",
+        "appeal": "SAFE_CAST(Appeal AS FLOAT64)",
+        "conservation": "SAFE_CAST(Conservation AS FLOAT64)",
+        "reputation": "SAFE_CAST(Reputation AS FLOAT64)",
+        "projects": "SAFE_CAST(Conservation_project_association_tasks AS FLOAT64)",
+        "upgrades": "SAFE_CAST(Upgraded_action_cards AS FLOAT64)",
+        "workers": "SAFE_CAST(Association_workers AS FLOAT64)",
+        "cover_pct": "100 * SAFE_DIVIDE(CASE WHEN Map IN ('Map 5: Park Restaurant', 'Map 5a: Park Restaurant', 'Map 10: Rescue Station') THEN 43 WHEN Map = 'Map 0' THEN 39 ELSE 42 END - SAFE_CAST(Empty_hexes AS FLOAT64), CASE WHEN Map IN ('Map 5: Park Restaurant', 'Map 5a: Park Restaurant', 'Map 10: Rescue Station') THEN 43 WHEN Map = 'Map 0' THEN 39 ELSE 42 END)",
+        "fill_pct": "100 * IF(SAFE_CAST(Empty_hexes AS INT64) = 0, 1, 0)",
+        "animals_pct": "100 * CAST(COALESCE(Upgraded_Animals_action_card, FALSE) AS INT64)",
+        "association_pct": "100 * CAST(COALESCE(Upgraded_Association_action_card, FALSE) AS INT64)",
+        "build_pct": "100 * CAST(COALESCE(Upgraded_Build_action_card, FALSE) AS INT64)",
+        "cards_pct": "100 * CAST(COALESCE(Upgraded_Cards_action_card, FALSE) AS INT64)",
+        "sponsors_pct": "100 * CAST(COALESCE(Upgraded_Sponsors_action_card, FALSE) AS INT64)",
+        "determinations": "SAFE_CAST(determinations AS FLOAT64)",
+        "animals_actions": "SAFE_CAST(Animals_actions AS FLOAT64)",
+        "association_actions": "SAFE_CAST(Association_actions AS FLOAT64)",
+        "build_actions": "SAFE_CAST(Build_actions AS FLOAT64)",
+        "cards_actions": "SAFE_CAST(Cards_actions AS FLOAT64)",
+        "sponsors_actions": "SAFE_CAST(Sponsors_actions AS FLOAT64)",
+        "universities": "SAFE_CAST(University_association_tasks AS FLOAT64)",
+        "partner_zoos": "SAFE_CAST(Partner_zoo_association_tasks AS FLOAT64)",
+        "x_tokens_gained": "SAFE_CAST(X_Tokens_gained AS FLOAT64)",
+        "x_tokens_spent": "SAFE_CAST(X_Tokens_used AS FLOAT64)",
+        "x_backs": "SAFE_CAST(X_Tokens_gained_instead_of_action AS FLOAT64)",
+        "money_gained": "SAFE_CAST(Money_gained AS FLOAT64)",
+        "money_gained_income": "SAFE_CAST(Money_gained_through_income AS FLOAT64)",
+        "cards_drawn_deck": "SAFE_CAST(Cards_drawn_from_deck AS FLOAT64)",
+        "cards_drawn_range": "SAFE_CAST(Cards_taken_from_reputation_range AS FLOAT64)",
+        "cards_snapped": "SAFE_CAST(Snapped_cards AS FLOAT64)",
+        "cards_discarded": "SAFE_CAST(Discarded_cards AS FLOAT64)",
+        "enclosures": "SAFE_CAST(Built_enclosures AS FLOAT64)",
+        "kiosks": "SAFE_CAST(Built_kiosks AS FLOAT64)",
+        "pavilions": "SAFE_CAST(Built_pavilions AS FLOAT64)",
+        "unique_buildings": "SAFE_CAST(Built_unique_buildings AS FLOAT64)",
+        "animals_played": "SAFE_CAST(Played_animals AS FLOAT64)",
+        "animals_released": "SAFE_CAST(Released_animals AS FLOAT64)",
+        "sponsors_played": "SAFE_CAST(Played_sponsors AS FLOAT64)",
+        "bird_icons": "SAFE_CAST(Bird_icons AS FLOAT64)",
+        "herbivore_icons": "SAFE_CAST(Herbivore_icons AS FLOAT64)",
+        "predator_icons": "SAFE_CAST(Predator_icons AS FLOAT64)",
+        "primate_icons": "SAFE_CAST(Primate_icons AS FLOAT64)",
+        "reptile_icons": "SAFE_CAST(Reptile_icons AS FLOAT64)",
+        "sea_animal_icons": "SAFE_CAST(Sea_Animal_icons AS FLOAT64)",
+        "bear_icons": "SAFE_CAST(Bear_icons AS FLOAT64)",
+        "petting_zoo_icons": "SAFE_CAST(Petting_Zoo_icons AS FLOAT64)",
+        "africa_icons": "SAFE_CAST(Africa_icons AS FLOAT64)",
+        "america_icons": "SAFE_CAST(Americas_icons AS FLOAT64)",
+        "asia_icons": "SAFE_CAST(Asia_icons AS FLOAT64)",
+        "australia_icons": "SAFE_CAST(Australia_icons AS FLOAT64)",
+        "europe_icons": "SAFE_CAST(Europe_icons AS FLOAT64)",
+        "rock_icons": "SAFE_CAST(Rock_icons AS FLOAT64)",
+        "water_icons": "SAFE_CAST(Water_icons AS FLOAT64)",
+        "science_icons": "SAFE_CAST(Science_icons AS FLOAT64)",
+    }
+
+
+def _players_money_fields():
+    return {
+        "money_spent_animals_pct": "Money_spent_on_animals",
+        "money_spent_build_pct": "Money_spent_on_enclosures",
+        "money_spent_donations_pct": "Money_spent_on_donations",
+        "money_spent_range_pct": "Money_spent_for_playing_cards_from_reputation_range",
+    }
+
+
+def _players_total_spent_sql():
+    return "(SAFE_CAST(Money_spent_on_animals AS FLOAT64) + SAFE_CAST(Money_spent_on_enclosures AS FLOAT64) + SAFE_CAST(Money_spent_on_donations AS FLOAT64) + SAFE_CAST(Money_spent_for_playing_cards_from_reputation_range AS FLOAT64))"
+
+
+def _build_players_query(where_sql):
+    metric_definitions = _players_metric_definitions()
+    expressions = _players_metric_expressions()
+    population_conditions = {
+        "player": "NULLIF(@players_player, '') IS NOT NULL AND player = @players_player AND (@last_x_games = 0 OR player_rank <= @last_x_games)",
+        "all": "TRUE",
+        "winners": "is_winner",
+        "experts": "SAFE_CAST(elo AS FLOAT64) >= 500",
+        "masters": "SAFE_CAST(elo AS FLOAT64) >= 700",
+    }
+    money_fields = _players_money_fields()
+    total_spent = _players_total_spent_sql()
+
+    def aggregate_expression(metric_key, population):
+        condition = population_conditions[population]
+        if metric_key in money_fields:
+            numerator = f"AVG(IF({condition}, SAFE_CAST({money_fields[metric_key]} AS FLOAT64), NULL))"
+            denominator = f"AVG(IF({condition}, {total_spent}, NULL))"
+            return f"100 * SAFE_DIVIDE({numerator}, {denominator})"
+        return f"AVG(IF({condition}, {expressions[metric_key]}, NULL))"
+
+    def count_expression(population):
+        return f"COUNTIF({population_conditions[population]})"
+
+    def tooltip_expression(metric_key, population):
+        if metric_key not in money_fields:
+            return "CAST(NULL AS FLOAT64)"
+        return f"AVG(IF({population_conditions[population]}, SAFE_CAST({money_fields[metric_key]} AS FLOAT64), NULL))"
+
+    unions = []
+    for key, sort_order, label, tooltip, is_default, value_format, lower_is_better in metric_definitions:
+        fields = [
+            f"{sort_order} AS sort_order", f"{_sql_string(label)} AS metric",
+            f"{_sql_string(tooltip) if tooltip else 'CAST(NULL AS STRING)'} AS tooltip",
+            f"{'TRUE' if is_default else 'FALSE'} AS is_default",
+            f"{_sql_string(value_format)} AS format",
+            f"{'TRUE' if lower_is_better else 'FALSE'} AS lower_is_better",
+        ]
+        for population in ("player", "all", "winners", "experts", "masters"):
+            value_name = "all_players" if population == "all" else population
+            fields.extend([
+                f"{aggregate_expression(key, population)} AS {value_name}",
+                f"{count_expression(population)} AS count_{value_name}",
+                f"{tooltip_expression(key, population)} AS tooltip_{value_name}",
+            ])
+        unions.append("SELECT " + ", ".join(fields) + " FROM scoped")
+    return f"""
+    WITH scoped_base AS (
+      SELECT
+        f.*,
+        MAX(IF(SAFE_CAST(f.Game_result AS INT64) = 2, 1, 0)) OVER (PARTITION BY f.table_id) AS has_result_two,
+        ROW_NUMBER() OVER (
+          PARTITION BY f.player
+          ORDER BY f.game_date DESC, CAST(f.table_id AS STRING) DESC
+        ) AS player_rank
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+        AND COALESCE(f.table_conceded, 0) = 0
+    ),
+    scoped AS (
+      SELECT *, SAFE_CAST(Game_result AS INT64) = 1 AND has_result_two = 1 AS is_winner
+      FROM scoped_base
+    )
+    {' UNION ALL '.join(unions)}
+    ORDER BY sort_order
+    """
+
+
+def _build_players_comparison_query(where_sql):
+    metric_definitions = _players_metric_definitions()
+    expressions = _players_metric_expressions()
+    money_fields = _players_money_fields()
+    total_spent = _players_total_spent_sql()
+    metric_config_sql = ",\n        ".join(
+        "STRUCT("
+        f"{_sql_string(key)} AS metric_key, {sort_order} AS sort_order, "
+        f"{_sql_string(label)} AS metric, "
+        f"{_sql_string(tooltip) if tooltip else 'CAST(NULL AS STRING)'} AS tooltip, "
+        f"{'TRUE' if is_default else 'FALSE'} AS is_default, "
+        f"{_sql_string(value_format)} AS format, "
+        f"{'TRUE' if lower_is_better else 'FALSE'} AS lower_is_better"
+        ")"
+        for key, sort_order, label, tooltip, is_default, value_format, lower_is_better in metric_definitions
+    )
+    metric_keys_sql = ", ".join(item[0] for item in metric_definitions)
+    ordinary_keys = [key for key, *_ in metric_definitions if key not in money_fields]
+    ordinary_selects = ",\n        ".join(
+        f"AVG({expressions[key]}) AS {key}" for key in ordinary_keys
+    )
+    money_selects = ",\n        ".join(
+        f"AVG(SAFE_CAST({source} AS FLOAT64)) AS {key}_raw"
+        for key, source in money_fields.items()
+    )
+    return f"""
+    WITH ranked AS (
+      SELECT f.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY f.player
+          ORDER BY f.game_date DESC, CAST(f.table_id AS STRING) DESC
+        ) AS player_rank
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+        AND COALESCE(f.table_conceded, 0) = 0
+        AND f.player IN UNNEST(@players_players)
+    ),
+    scoped AS (
+      SELECT *
+      FROM ranked
+      WHERE @last_x_games = 0 OR player_rank <= @last_x_games
+    ),
+    per_player_base AS (
+      SELECT
+        player,
+        COUNT(*) AS game_count,
+        {ordinary_selects},
+        {money_selects}
+      FROM scoped
+      GROUP BY player
+    ),
+    per_player AS (
+      SELECT
+        base.*,
+        100 * SAFE_DIVIDE(money_spent_animals_pct_raw,
+          money_spent_animals_pct_raw + money_spent_build_pct_raw + money_spent_donations_pct_raw + money_spent_range_pct_raw
+        ) AS money_spent_animals_pct,
+        100 * SAFE_DIVIDE(money_spent_build_pct_raw,
+          money_spent_animals_pct_raw + money_spent_build_pct_raw + money_spent_donations_pct_raw + money_spent_range_pct_raw
+        ) AS money_spent_build_pct,
+        100 * SAFE_DIVIDE(money_spent_donations_pct_raw,
+          money_spent_animals_pct_raw + money_spent_build_pct_raw + money_spent_donations_pct_raw + money_spent_range_pct_raw
+        ) AS money_spent_donations_pct,
+        100 * SAFE_DIVIDE(money_spent_range_pct_raw,
+          money_spent_animals_pct_raw + money_spent_build_pct_raw + money_spent_donations_pct_raw + money_spent_range_pct_raw
+        ) AS money_spent_range_pct
+      FROM per_player_base base
+    ),
+    metric_rows AS (
+      SELECT
+        player,
+        game_count,
+        metric_key,
+        value,
+        CASE metric_key
+          WHEN 'money_spent_animals_pct' THEN money_spent_animals_pct_raw
+          WHEN 'money_spent_build_pct' THEN money_spent_build_pct_raw
+          WHEN 'money_spent_donations_pct' THEN money_spent_donations_pct_raw
+          WHEN 'money_spent_range_pct' THEN money_spent_range_pct_raw
+          ELSE NULL
+        END AS tooltip_value
+      FROM per_player
+      UNPIVOT INCLUDE NULLS (value FOR metric_key IN ({metric_keys_sql}))
+    ),
+    metric_config AS (
+      SELECT * FROM UNNEST([{metric_config_sql}])
+    )
+    SELECT
+      c.sort_order,
+      c.metric,
+      c.tooltip,
+      c.is_default,
+      c.format,
+      c.lower_is_better,
+      ARRAY_AGG(STRUCT(
+        r.player AS player,
+        r.value AS value,
+        r.tooltip_value AS tooltip_value,
+        r.game_count AS game_count
+      ) ORDER BY r.player) AS player_values
+    FROM metric_rows r
+    JOIN metric_config c USING(metric_key)
+    GROUP BY c.sort_order, c.metric, c.tooltip, c.is_default, c.format, c.lower_is_better
+    ORDER BY c.sort_order
     """
 
 
@@ -3247,6 +3712,382 @@ def _build_actions_query(where_sql, actions_view):
     return _build_actions_starting_position_query(where_sql)
 
 
+def _build_workers_query(where_sql, workers_view):
+    """Return fixed-order worker rows using the Actions map-grid schema.
+
+    General reads Full Sample's Association_workers and is always restricted to
+    completed tables. The 2 CP Worker choice is stored in Logs; its optional
+    completion predicate is supplied through where_sql, while null choices are
+    excluded so incomplete early logs cannot become a false Upgrade/Worker row.
+    """
+    if workers_view == WORKERS_VIEW_GENERAL:
+        source_table = PREPARED_FULL_STATS_TABLE
+        source_alias = "f"
+        valid_sql = (
+            "SAFE_CAST(f.Association_workers AS INT64) IN (1, 2, 3, 4) "
+            "AND COALESCE(f.table_conceded, 0) = 0"
+        )
+        bucket_expr = "SAFE_CAST(f.Association_workers AS INT64)"
+        config_sql = ",\n        ".join(
+            f"STRUCT({value} AS sort_order, {value} AS bucket, CAST({value} AS STRING) AS label)"
+            for value in range(1, 5)
+        )
+    else:
+        source_table = PREPARED_LOGS_TABLE
+        source_alias = "l"
+        valid_sql = "l.two_cp_worker IS TRUE OR l.two_cp_worker IS FALSE"
+        bucket_expr = "IF(l.two_cp_worker, 2, 1)"
+        config_sql = (
+            "STRUCT(1 AS sort_order, 1 AS bucket, 'Upgrade' AS label),\n        "
+            "STRUCT(2 AS sort_order, 2 AS bucket, 'Worker' AS label)"
+        )
+
+    worker_average_selects = []
+    if workers_view == WORKERS_VIEW_GENERAL:
+        worker_average_selects.append("AVG(s.worker_count) AS worker_avg_avg")
+        worker_average_selects.extend(
+            f"AVG(IF(s.Map = {_sql_string(map_meta['full'])}, s.worker_count, NULL)) AS worker_avg_{map_meta['key']}"
+            for map_meta in ALL_MAPS_FOR_METRICS[:15]
+        )
+
+    map_selects = []
+    for map_meta in ALL_MAPS_FOR_METRICS[:15]:
+        key = map_meta["key"]
+        full = _sql_string(map_meta["full"])
+        map_selects.extend([
+            f"ROUND(AVG(IF(s.Map = {full} AND s.bucket = c.bucket, s.elo_delta, NULL)), 3) AS {key}",
+            f"COUNTIF(s.Map = {full} AND s.bucket = c.bucket) AS count_{key}",
+            f"COUNTIF(s.Map = {full}) AS denom_{key}",
+            f"AVG(IF(s.Map = {full} AND s.bucket = c.bucket, s.elo_delta, NULL)) AS {key}_ci_mean",
+            f"STDDEV_SAMP(IF(s.Map = {full} AND s.bucket = c.bucket, s.elo_delta, NULL)) AS {key}_ci_sd",
+            f"COUNTIF(s.Map = {full} AND s.bucket = c.bucket AND s.elo_delta IS NOT NULL) AS {key}_ci_n",
+        ])
+
+    return f"""
+    WITH scoped AS (
+        SELECT
+        {source_alias}.Map,
+        {source_alias}.elo_delta,
+        {bucket_expr} AS bucket
+        {', SAFE_CAST(f.Association_workers AS FLOAT64) AS worker_count' if workers_view == WORKERS_VIEW_GENERAL else ''}
+      FROM `{source_table}` {source_alias}
+      WHERE {where_sql}
+        AND ({valid_sql})
+    ),
+    config AS (
+      SELECT * FROM UNNEST([
+        {config_sql}
+      ])
+    )
+    SELECT
+      c.sort_order,
+      c.label,
+      ROUND(AVG(IF(s.bucket = c.bucket, s.elo_delta, NULL)), 3) AS avg,
+      COUNTIF(s.bucket = c.bucket) AS count_avg,
+      COUNT(*) AS denom_avg,
+      AVG(IF(s.bucket = c.bucket, s.elo_delta, NULL)) AS avg_ci_mean,
+      STDDEV_SAMP(IF(s.bucket = c.bucket, s.elo_delta, NULL)) AS avg_ci_sd,
+      COUNTIF(s.bucket = c.bucket AND s.elo_delta IS NOT NULL) AS avg_ci_n,
+      {', '.join(worker_average_selects) if worker_average_selects else 'CAST(NULL AS FLOAT64) AS worker_avg_avg'},
+      {", ".join(map_selects)}
+    FROM config c
+    LEFT JOIN scoped s ON TRUE
+    GROUP BY c.sort_order, c.label
+    ORDER BY c.sort_order
+    """
+
+
+def _project_reward_config_sql():
+    return ",\n        ".join(
+        "STRUCT("
+        f"{sort_order} AS sort_order, {_sql_string(label)} AS label, "
+        f"{_sql_string(raw_value)} AS raw_value, "
+        f"{_sql_string(map_name) if map_name else 'CAST(NULL AS STRING)'} AS map_name, "
+        f"{_sql_string(group_name)} AS group_name)"
+        for sort_order, label, raw_value, map_name, group_name in PROJECT_REWARD_CONFIG
+    )
+
+
+def _cp_reward_config_sql():
+    return ",\n        ".join(
+        "STRUCT("
+        f"{sort_order} AS sort_order, {_sql_string(label)} AS label, "
+        f"{_sql_string(raw_value)} AS raw_value, {str(mw_only).upper()} AS mw_only)"
+        for sort_order, label, raw_value, mw_only in CP_REWARD_CONFIG
+    )
+
+
+def _build_conservation_projects_query(where_sql):
+    map_selects = []
+    for map_meta in ALL_MAPS_FOR_METRICS[:15]:
+        key = map_meta["key"]
+        full = _sql_string(map_meta["full"])
+        condition = f"Map = {full} AND project_count = count_value"
+        map_selects.extend([
+            f"ROUND(AVG(IF({condition}, elo_delta, NULL)), 3) AS {key}",
+            f"COUNTIF({condition}) AS count_{key}",
+            f"COUNTIF(Map = {full}) AS denom_{key}",
+            f"AVG(IF({condition}, elo_delta, NULL)) AS {key}_ci_mean",
+            f"STDDEV_SAMP(IF({condition}, elo_delta, NULL)) AS {key}_ci_sd",
+            f"COUNTIF(({condition}) AND elo_delta IS NOT NULL) AS {key}_ci_n",
+        ])
+    map_select_sql = ",\n      ".join(map_selects)
+    return f"""
+    WITH configured AS (
+      SELECT count_value, count_value + 1 AS sort_order
+      FROM UNNEST(GENERATE_ARRAY(0, 7)) AS count_value
+    ),
+    scoped AS (
+      SELECT
+        f.Map,
+        SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta,
+        SAFE_CAST(f.Conservation_project_association_tasks AS INT64) AS project_count
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+        AND COALESCE(f.table_conceded, 0) = 0
+    )
+    SELECT
+      c.sort_order,
+      c.count_value,
+      ROUND(AVG(IF(s.project_count = c.count_value, s.elo_delta, NULL)), 3) AS avg,
+      COUNTIF(s.project_count = c.count_value) AS count_avg,
+      COUNT(s.Map) AS denom_avg,
+      AVG(IF(s.project_count = c.count_value, s.elo_delta, NULL)) AS avg_ci_mean,
+      STDDEV_SAMP(IF(s.project_count = c.count_value, s.elo_delta, NULL)) AS avg_ci_sd,
+      COUNTIF(s.project_count = c.count_value AND s.elo_delta IS NOT NULL) AS avg_ci_n,
+      {map_select_sql}
+    FROM configured c
+    LEFT JOIN scoped s ON TRUE
+    GROUP BY c.sort_order, c.count_value
+    ORDER BY c.sort_order
+    """
+
+
+def _build_conservation_project_rewards_query(where_sql):
+    delta_fields = []
+    for key, condition in [("overall", "TRUE")] + [
+        (f"order_{order}", f"reward_order = {order}") for order in range(1, 8)
+    ]:
+        delta_fields.extend([
+            f"ROUND(AVG(IF({condition}, elo_delta, NULL)), 3) AS delta_{key}",
+            f"COUNTIF({condition}) AS count_delta_{key}",
+            f"AVG(IF({condition}, elo_delta, NULL)) AS delta_{key}_ci_mean",
+            f"STDDEV_SAMP(IF({condition}, elo_delta, NULL)) AS delta_{key}_ci_sd",
+            f"COUNTIF(({condition}) AND elo_delta IS NOT NULL) AS delta_{key}_ci_n",
+        ])
+    frequency_fields = [
+        "COUNT(DISTINCT IF(table_conceded = 0, CONCAT(CAST(table_id AS STRING), '\\x1f', player), NULL)) AS freq_overall_numer",
+    ]
+    for order in range(1, 8):
+        frequency_fields.extend([
+            f"COUNTIF(table_conceded = 0 AND reward_order = {order}) AS freq_order_{order}_numer",
+            f"COUNTIF(table_conceded = 0) AS freq_order_{order}_denom",
+        ])
+    config_sql = _project_reward_config_sql()
+    delta_select_sql = ",\n        ".join(delta_fields)
+    frequency_select_sql = ",\n        ".join(frequency_fields)
+    return f"""
+    WITH configured AS (
+      SELECT * FROM UNNEST([
+        {config_sql}
+      ])
+    ),
+    scoped AS (
+      SELECT *
+      FROM `{PREPARED_LOGS_TABLE}`
+      WHERE {where_sql}
+    ),
+    reward_events AS (
+      SELECT
+        s.table_id,
+        s.player,
+        s.Map,
+        s.table_conceded,
+        s.elo_delta,
+        LOWER(TRIM(reward.reward)) AS raw_value,
+        SAFE_CAST(reward.`order` AS INT64) AS reward_order
+      FROM scoped s
+      CROSS JOIN UNNEST(IFNULL(s.project_rewards, [])) AS reward
+      WHERE reward.reward IS NOT NULL
+      GROUP BY s.table_id, s.player, s.Map, s.table_conceded, s.elo_delta, raw_value, reward_order
+    ),
+    matched_events AS (
+      SELECT c.sort_order, e.*
+      FROM configured c
+      JOIN reward_events e ON e.raw_value = LOWER(c.raw_value)
+        AND (c.map_name IS NULL OR e.Map = c.map_name)
+    ),
+    event_aggregates AS (
+      SELECT
+        sort_order,
+        {delta_select_sql},
+        {frequency_select_sql}
+      FROM matched_events
+      GROUP BY sort_order
+    ),
+    game_denominators AS (
+      SELECT
+        c.sort_order,
+        COUNTIF(s.table_conceded = 0 AND (c.map_name IS NULL OR s.Map = c.map_name)) AS freq_overall_denom,
+        COUNTIF(
+          (c.map_name IS NULL OR s.Map = c.map_name)
+          AND NOT (c.raw_value = '2-size' AND s.Map = 'Map 13: Drawing Board')
+          AND NOT (c.raw_value = 'Snapping' AND s.Map = 'Map T1: Tournament 1')
+        ) > 0 AS available
+      FROM configured c
+      LEFT JOIN scoped s ON TRUE
+      GROUP BY c.sort_order
+    )
+    SELECT
+      c.sort_order,
+      c.label,
+      c.group_name,
+      c.map_name AS applicable_map,
+      COALESCE(g.available, FALSE) AS available,
+      e.* EXCEPT(sort_order),
+      g.freq_overall_denom
+    FROM configured c
+    LEFT JOIN event_aggregates e USING(sort_order)
+    LEFT JOIN game_denominators g USING(sort_order)
+    ORDER BY c.sort_order
+    """
+
+
+def _build_conservation_cp_rewards_query(where_sql):
+    config_sql = _cp_reward_config_sql()
+    delta_selects = []
+    frequency_selects = []
+    for key, map_name in [("overall", None)] + [
+        (item["key"], item["full"]) for item in ALL_MAPS_FOR_METRICS[:15]
+    ]:
+        map_condition = "TRUE" if map_name is None else f"Map = {_sql_string(map_name)}"
+        observed_condition = f"table_id IS NOT NULL AND ({map_condition})"
+        delta_selects.extend([
+            f"ROUND(AVG(IF({observed_condition}, elo_delta, NULL)), 3) AS delta_{key}",
+            f"COUNTIF({observed_condition}) AS count_delta_{key}",
+            f"AVG(IF({observed_condition}, elo_delta, NULL)) AS delta_{key}_ci_mean",
+            f"STDDEV_SAMP(IF({observed_condition}, elo_delta, NULL)) AS delta_{key}_ci_sd",
+            f"COUNTIF(({observed_condition}) AND elo_delta IS NOT NULL) AS delta_{key}_ci_n",
+        ])
+        frequency_selects.extend([
+            f"COUNTIF(({observed_condition}) AND chosen) AS freq_{key}_numer",
+            f"COUNTIF({observed_condition}) AS freq_{key}_denom",
+        ])
+    delta_select_sql = ", ".join(delta_selects)
+    frequency_select_sql = ", ".join(frequency_selects)
+    return f"""
+    WITH configured AS (
+      SELECT * FROM UNNEST([
+        {config_sql}
+      ])
+      WHERE @is_mw = 1 OR NOT mw_only
+    ),
+    scoped AS (
+      SELECT *
+      FROM `{PREPARED_LOGS_TABLE}`
+      WHERE {where_sql}
+    ),
+    paired AS (
+      SELECT
+        me.*,
+        (SELECT MIN(SAFE_CAST(h.move AS INT64)) FROM UNNEST(IFNULL(me.cp_history, [])) h WHERE SAFE_CAST(h.cp AS INT64) >= 5) AS my_5_move,
+        (SELECT MIN(SAFE_CAST(h.move AS INT64)) FROM UNNEST(IFNULL(opp.cp_history, [])) h WHERE SAFE_CAST(h.cp AS INT64) >= 5) AS opp_5_move,
+        (SELECT MIN(SAFE_CAST(h.move AS INT64)) FROM UNNEST(IFNULL(me.cp_history, [])) h WHERE SAFE_CAST(h.cp AS INT64) >= 8) AS my_8_move,
+        (SELECT MIN(SAFE_CAST(h.move AS INT64)) FROM UNNEST(IFNULL(opp.cp_history, [])) h WHERE SAFE_CAST(h.cp AS INT64) >= 8) AS opp_8_move
+      FROM scoped me
+      LEFT JOIN scoped opp ON me.table_id = opp.table_id AND me.player != opp.player
+    ),
+    chosen_base AS (
+      SELECT table_id, player, Map, elo_delta, 5 AS threshold, LOWER(TRIM(chosen_5cp_bonus)) AS raw_value
+      FROM paired WHERE chosen_5cp_bonus IS NOT NULL
+      UNION ALL
+      SELECT table_id, player, Map, elo_delta, 8, LOWER(TRIM(chosen_8cp_bonus))
+      FROM paired WHERE chosen_8cp_bonus IS NOT NULL
+    ),
+    chosen_scoped AS (
+      SELECT CAST(threshold AS STRING) AS scope, * EXCEPT(threshold) FROM chosen_base
+      UNION ALL
+      SELECT 'combined' AS scope, table_id, player, Map, ANY_VALUE(elo_delta), raw_value
+      FROM chosen_base
+      GROUP BY table_id, player, Map, raw_value
+    ),
+    opportunity_raw AS (
+      SELECT
+        p.table_id, p.player, p.Map, 5 AS threshold,
+        LOWER(TRIM(available_reward)) AS raw_value,
+        LOWER(TRIM(p.chosen_5cp_bonus)) = LOWER(TRIM(available_reward)) AS chosen
+      FROM paired p
+      CROSS JOIN UNNEST(IFNULL(p.five_cp_bonus, [])) AS available_reward
+      WHERE p.my_5_move IS NOT NULL AND (p.opp_5_move IS NULL OR p.my_5_move < p.opp_5_move)
+      UNION ALL
+      SELECT
+        p.table_id, p.player, p.Map, 8,
+        LOWER(TRIM(available_reward)),
+        LOWER(TRIM(p.chosen_8cp_bonus)) = LOWER(TRIM(available_reward))
+      FROM paired p
+      CROSS JOIN UNNEST(IFNULL(p.eight_cp_bonus, [])) AS available_reward
+      WHERE p.my_8_move IS NOT NULL AND (p.opp_8_move IS NULL OR p.my_8_move < p.opp_8_move)
+      UNION ALL
+      -- Five money is the fixed third option and is not present in the arrays
+      -- that store the two random alternatives.
+      SELECT
+        p.table_id, p.player, p.Map, 5, '5 money',
+        LOWER(TRIM(p.chosen_5cp_bonus)) = '5 money'
+      FROM paired p
+      WHERE p.my_5_move IS NOT NULL AND (p.opp_5_move IS NULL OR p.my_5_move < p.opp_5_move)
+      UNION ALL
+      SELECT
+        p.table_id, p.player, p.Map, 8, '5 money',
+        LOWER(TRIM(p.chosen_8cp_bonus)) = '5 money'
+      FROM paired p
+      WHERE p.my_8_move IS NOT NULL AND (p.opp_8_move IS NULL OR p.my_8_move < p.opp_8_move)
+    ),
+    opportunity_base AS (
+      SELECT table_id, player, Map, threshold, raw_value, LOGICAL_OR(chosen) AS chosen
+      FROM opportunity_raw
+      GROUP BY table_id, player, Map, threshold, raw_value
+    ),
+    opportunity_scoped AS (
+      SELECT CAST(threshold AS STRING) AS scope, * EXCEPT(threshold) FROM opportunity_base
+      UNION ALL
+      -- Keep threshold opportunities separate in combined mode. In particular,
+      -- always-offered 5 money can contribute one denominator observation at
+      -- each threshold in the same player-game.
+      SELECT 'combined' AS scope, * EXCEPT(threshold) FROM opportunity_base
+    ),
+    scopes AS (SELECT scope FROM UNNEST(['5', '8', 'combined']) AS scope),
+    delta_aggregates AS (
+      SELECT c.sort_order, s.scope, {delta_select_sql}
+      FROM configured c
+      CROSS JOIN scopes s
+      LEFT JOIN chosen_scoped d ON d.scope = s.scope AND d.raw_value = LOWER(c.raw_value)
+      GROUP BY c.sort_order, s.scope
+    ),
+    frequency_aggregates AS (
+      SELECT c.sort_order, s.scope, {frequency_select_sql}
+      FROM configured c
+      CROSS JOIN scopes s
+      LEFT JOIN opportunity_scoped o ON o.scope = s.scope AND o.raw_value = LOWER(c.raw_value)
+      GROUP BY c.sort_order, s.scope
+    )
+    SELECT c.sort_order, c.label, c.mw_only, s.scope,
+      d.* EXCEPT(sort_order, scope), f.* EXCEPT(sort_order, scope)
+    FROM configured c
+    CROSS JOIN scopes s
+    LEFT JOIN delta_aggregates d USING(sort_order, scope)
+    LEFT JOIN frequency_aggregates f USING(sort_order, scope)
+    ORDER BY s.scope, c.sort_order
+    """
+
+
+def _build_conservation_query(where_sql, conservation_view):
+    if conservation_view == CONSERVATION_VIEW_PROJECT_REWARDS:
+        return _build_conservation_project_rewards_query(where_sql)
+    if conservation_view == CONSERVATION_VIEW_CP_REWARDS:
+        return _build_conservation_cp_rewards_query(where_sql)
+    return _build_conservation_projects_query(where_sql)
+
+
 def _sponsor_cp_config_sql():
     parts = []
     for sponsor in SPONSOR_CP_CARDS:
@@ -3894,6 +4735,12 @@ def _query_card_stats(
     build_view=BUILD_VIEW_ENCLOSURES,
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
+    conservation_view=CONSERVATION_VIEW_PROJECTS,
+    workers_view=WORKERS_VIEW_GENERAL,
+    players_view=PLAYERS_VIEW_GENERAL,
+    players_player=None,
+    players_players=None,
+    last_x_games=None,
     hexes_expanded=False,
     combination_paged=False,
     combination_page=COMBINATION_PAGE_DEFAULT,
@@ -3996,6 +4843,67 @@ def _query_card_stats(
             completed_only,
         )
         query = _build_actions_query(where_sql, actions_view)
+    elif stats_page == STATS_PAGE_CONSERVATION and conservation_view == CONSERVATION_VIEW_PROJECTS:
+        where_sql, query_parameters = _build_full_sample_where_sql(
+            is_mw,
+            selected_maps,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            None,
+        )
+        query = _build_conservation_query(where_sql, conservation_view)
+    elif stats_page == STATS_PAGE_WORKERS and workers_view == WORKERS_VIEW_GENERAL:
+        where_sql, query_parameters = _build_full_sample_where_sql(
+            is_mw,
+            selected_maps,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            None,
+        )
+        query = _build_workers_query(where_sql, workers_view)
+    elif stats_page == STATS_PAGE_WORKERS:
+        where_sql, query_parameters = _build_where_sql(
+            is_mw,
+            selected_maps,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            completed_only,
+        )
+        query = _build_workers_query(where_sql, workers_view)
+    elif stats_page == STATS_PAGE_PLAYERS:
+        where_sql, query_parameters = _build_full_sample_where_sql(
+            is_mw,
+            selected_maps,
+            None,
+            None,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            True,
+        )
+        query_parameters.extend([
+            bigquery.ScalarQueryParameter("players_player", "STRING", players_player or ""),
+            bigquery.ArrayQueryParameter("players_players", "STRING", players_players or []),
+            bigquery.ScalarQueryParameter("last_x_games", "INT64", int(last_x_games or 0)),
+        ])
+        query = (
+            _build_players_comparison_query(where_sql)
+            if players_view == PLAYERS_VIEW_COMPARISON
+            else _build_players_query(where_sql)
+        )
     else:
         where_sql, query_parameters = _build_where_sql(
             is_mw,
@@ -4015,6 +4923,10 @@ def _query_card_stats(
             query = _build_build_enclosures_query(where_sql)
     if stats_page == STATS_PAGE_ACTIONS:
         query = _build_actions_query(where_sql, actions_view)
+    if stats_page == STATS_PAGE_CONSERVATION:
+        query = _build_conservation_query(where_sql, conservation_view)
+    if stats_page == STATS_PAGE_WORKERS:
+        query = _build_workers_query(where_sql, workers_view)
     if stats_page == STATS_PAGE_COMBINATIONS:
         if combination_paged:
             query = _build_combinations_paged_query(
@@ -4080,6 +4992,85 @@ def _query_card_stats(
             rows.append({
                 "metric": row.metric,
                 "value": row.value,
+            })
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+
+    if stats_page == STATS_PAGE_PLAYERS:
+        if players_view == PLAYERS_VIEW_COMPARISON:
+            for row in results:
+                values = []
+                for item in (row.player_values or []):
+                    item_player = item.get("player") if isinstance(item, dict) else item.player
+                    item_value = item.get("value") if isinstance(item, dict) else item.value
+                    item_tooltip = item.get("tooltip_value") if isinstance(item, dict) else item.tooltip_value
+                    item_count = item.get("game_count") if isinstance(item, dict) else item.game_count
+                    values.append({
+                        "player": item_player,
+                        "value": item_value,
+                        "tooltip_value": item_tooltip,
+                        "game_count": int(item_count or 0),
+                    })
+                rows.append({
+                    "sort_order": row.sort_order,
+                    "metric": row.metric,
+                    "tooltip": row.tooltip,
+                    "is_default": bool(row.is_default),
+                    "format": row.format,
+                    "lower_is_better": bool(row.lower_is_better),
+                    "values": values,
+                })
+            iteration_ms = _ms_since(iteration_started_at)
+            timing = {
+                "client_ms": client_ms,
+                "submit_ms": submit_ms,
+                "query_wait_ms": query_wait_ms,
+                "iteration_ms": iteration_ms,
+                "job_id": job.job_id,
+                "job_created": _dt_iso(job.created),
+                "job_started": _dt_iso(job.started),
+                "job_ended": _dt_iso(job.ended),
+                "job_cache_hit": job.cache_hit,
+                "job_total_bytes_processed": job.total_bytes_processed,
+                "job_total_slot_ms": job.slot_millis,
+            }
+            return rows, timing
+        for row in results:
+            rows.append({
+                "sort_order": row.sort_order,
+                "metric": row.metric,
+                "tooltip": row.tooltip,
+                "is_default": bool(row.is_default),
+                "format": row.format,
+                "lower_is_better": bool(row.lower_is_better),
+                "player": row.player,
+                "all": row.all_players,
+                "winners": row.winners,
+                "experts": row.experts,
+                "masters": row.masters,
+                "count_player": int(row.count_player or 0),
+                "count_all": int(row.count_all_players or 0),
+                "count_winners": int(row.count_winners or 0),
+                "count_experts": int(row.count_experts or 0),
+                "count_masters": int(row.count_masters or 0),
+                "tooltip_player": row.tooltip_player,
+                "tooltip_all": row.tooltip_all_players,
+                "tooltip_winners": row.tooltip_winners,
+                "tooltip_experts": row.tooltip_experts,
+                "tooltip_masters": row.tooltip_masters,
             })
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
@@ -4226,6 +5217,67 @@ def _query_card_stats(
         }
         return rows, timing
 
+    if stats_page == STATS_PAGE_CONSERVATION:
+        schema_field_names = {field.name for field in results.schema}
+        map_keys = [item["key"] for item in ALL_MAPS_FOR_METRICS[:15]]
+        for row in results:
+            if conservation_view == CONSERVATION_VIEW_PROJECTS:
+                item = {
+                    "sort_order": row.sort_order,
+                    "count_value": row.count_value,
+                }
+                prefixes = ["avg", *map_keys]
+                for prefix in prefixes:
+                    item[prefix] = getattr(row, prefix, None)
+                    item[f"count_{prefix}"] = getattr(row, f"count_{prefix}", 0)
+                    item[f"denom_{prefix}"] = getattr(row, f"denom_{prefix}", 0)
+                    _attach_ci95(item, row, schema_field_names, prefix)
+            elif conservation_view == CONSERVATION_VIEW_PROJECT_REWARDS:
+                item = {
+                    "sort_order": row.sort_order,
+                    "label": row.label,
+                    "group_name": row.group_name,
+                    "applicable_map": row.applicable_map,
+                    "available": bool(row.available),
+                }
+                for key in ["overall", *[f"order_{value}" for value in range(1, 8)]]:
+                    prefix = f"delta_{key}"
+                    item[prefix] = getattr(row, prefix, None)
+                    item[f"count_{prefix}"] = getattr(row, f"count_{prefix}", 0)
+                    item[f"freq_{key}_numer"] = getattr(row, f"freq_{key}_numer", 0)
+                    item[f"freq_{key}_denom"] = getattr(row, f"freq_{key}_denom", 0)
+                    _attach_ci95(item, row, schema_field_names, prefix)
+            else:
+                item = {
+                    "sort_order": row.sort_order,
+                    "label": row.label,
+                    "mw_only": bool(row.mw_only),
+                    "scope": row.scope,
+                }
+                for key in ["overall", *map_keys]:
+                    prefix = f"delta_{key}"
+                    item[prefix] = getattr(row, prefix, None)
+                    item[f"count_{prefix}"] = getattr(row, f"count_{prefix}", 0)
+                    item[f"freq_{key}_numer"] = getattr(row, f"freq_{key}_numer", 0)
+                    item[f"freq_{key}_denom"] = getattr(row, f"freq_{key}_denom", 0)
+                    _attach_ci95(item, row, schema_field_names, prefix)
+            rows.append(item)
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+
     if stats_page == STATS_PAGE_ACTIONS:
         schema_field_names = {field.name for field in results.schema}
         for row in results:
@@ -4262,6 +5314,43 @@ def _query_card_stats(
                     if denom_field in schema_field_names:
                         item[denom_field] = getattr(row, denom_field, 0)
                     _attach_ci95(item, row, schema_field_names, prefix)
+            rows.append(item)
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+
+    if stats_page == STATS_PAGE_WORKERS:
+        schema_field_names = {field.name for field in results.schema}
+        map_keys = [item["key"] for item in ALL_MAPS_FOR_METRICS[:15]]
+        for row in results:
+            item = {
+                "sort_order": getattr(row, "sort_order", None),
+                "label": getattr(row, "label", None),
+            }
+            for prefix in ["avg", *map_keys]:
+                if prefix in schema_field_names:
+                    item[prefix] = getattr(row, prefix, None)
+                    for suffix in ("count", "denom"):
+                        field_name = f"{suffix}_{prefix}"
+                        if field_name in schema_field_names:
+                            item[field_name] = getattr(row, field_name, 0)
+                    _attach_ci95(item, row, schema_field_names, prefix)
+            if "worker_avg_avg" in schema_field_names:
+                item["worker_avg_avg"] = getattr(row, "worker_avg_avg", None)
+                for key in map_keys:
+                    item[f"worker_avg_{key}"] = getattr(row, f"worker_avg_{key}", None)
             rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
@@ -4571,6 +5660,9 @@ def _refresh_default_snapshot_from_prepared(
     build_view=BUILD_VIEW_ENCLOSURES,
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
+    conservation_view=CONSERVATION_VIEW_PROJECTS,
+    workers_view=WORKERS_VIEW_GENERAL,
+    players_view=PLAYERS_VIEW_GENERAL,
     completed_only_override=None,
     cache_blob_override=None,
 ):
@@ -4588,9 +5680,9 @@ def _refresh_default_snapshot_from_prepared(
         [],
         False,
         stats_page,
-        None if is_home else 300,
+        None if is_home or stats_page == STATS_PAGE_PLAYERS else 300,
         None,
-        None if is_home else 300,
+        0 if stats_page == STATS_PAGE_PLAYERS else None if is_home else 300,
         None,
         snapshot_date_from,
         None,
@@ -4604,6 +5696,12 @@ def _refresh_default_snapshot_from_prepared(
         "build_view": build_view,
         "predictors_view": predictors_view,
         "actions_view": actions_view,
+        "conservation_view": conservation_view,
+        "workers_view": workers_view,
+        "players_view": players_view,
+        "players_player": None,
+        "players_players": [],
+        "last_x_games": None,
         "use_query_cache": False,
     }
     expanded_rows = None
@@ -4630,9 +5728,15 @@ def _refresh_default_snapshot_from_prepared(
         "build_view": build_view if stats_page == STATS_PAGE_BUILD else None,
         "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
         "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
+        "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
+        "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
+        "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
         "maps": (
             ALL_MAPS_FOR_METRICS
-            if stats_page in (STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS)
+            if stats_page in (
+                STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS,
+                STATS_PAGE_CONSERVATION, STATS_PAGE_WORKERS,
+            )
             else None
         ),
         "data": rows,
@@ -4652,6 +5756,10 @@ def _refresh_default_snapshot_from_prepared(
             if stats_page == STATS_PAGE_PREDICTORS
             else f"{stats_page}_{actions_view}_default_snapshot"
             if stats_page == STATS_PAGE_ACTIONS
+            else f"{stats_page}_{conservation_view}_default_snapshot"
+            if stats_page == STATS_PAGE_CONSERVATION
+            else f"{stats_page}_{workers_view}_default_snapshot"
+            if stats_page == STATS_PAGE_WORKERS
             else f"{stats_page}_default_snapshot"
         ),
         "is_mw": int(is_mw),
@@ -4664,6 +5772,9 @@ def _refresh_default_snapshot_from_prepared(
         "job_total_bytes_processed": timing["job_total_bytes_processed"],
         "job_total_slot_ms": timing["job_total_slot_ms"],
     }
+    if stats_page == STATS_PAGE_PLAYERS and players_view == PLAYERS_VIEW_GENERAL:
+        payload["players_players"] = []
+        payload["player_game_count"] = int(rows[0].get("count_player") or 0) if rows else 0
     if combination_ranges is not None:
         payload["combination_snapshot_min_plays"] = COMBINATION_DEFAULT_MIN_PLAYS
         payload["combination_ranges"] = combination_ranges
@@ -4675,7 +5786,7 @@ def _refresh_default_snapshot_from_prepared(
         else _write_cached_snapshot(
             is_mw, payload, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view
+        build_view, predictors_view, actions_view, conservation_view, workers_view, players_view
         )
     )
     return {
@@ -4693,6 +5804,8 @@ def _refresh_default_snapshot_from_prepared(
         "build_view": build_view if stats_page == STATS_PAGE_BUILD else None,
         "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
         "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
+        "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
+        "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
         "cache_status": "refreshed" if cache_write_ok else "cache_write_failed",
         "rows": len(rows),
         "total_ms": payload["total_ms"],
@@ -4707,6 +5820,26 @@ def _run_daily_refresh():
     card_attributes = _load_card_attribute_groups(force_refresh=True)
     prepared = _refresh_prepared_tables()
     data_version = _write_data_version(prepared)
+    players_index_mw = _refresh_player_index_snapshot(1)
+    players_index_base = _refresh_player_index_snapshot(0)
+    # Conservation adds six substantial aggregations. Start three workers now
+    # so they overlap the existing sequential snapshot refresh instead of
+    # extending an already long maintenance request beyond its timeout.
+    conservation_executor = ThreadPoolExecutor(max_workers=3)
+    conservation_futures = {
+        (dataset, view): conservation_executor.submit(
+            _refresh_default_snapshot_from_prepared,
+            dataset,
+            STATS_PAGE_CONSERVATION,
+            conservation_view=view,
+        )
+        for dataset in (1, 0)
+        for view in (
+            CONSERVATION_VIEW_PROJECTS,
+            CONSERVATION_VIEW_PROJECT_REWARDS,
+            CONSERVATION_VIEW_CP_REWARDS,
+        )
+    }
     home_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_HOME)
     home_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_HOME)
     home_bootstrap = _write_home_bootstrap_asset()
@@ -4838,6 +5971,33 @@ def _run_daily_refresh():
         completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_by_map/frequency/default-base.json",
     )
+    workers_general_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_WORKERS, workers_view=WORKERS_VIEW_GENERAL
+    )
+    workers_general_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_WORKERS, workers_view=WORKERS_VIEW_GENERAL
+    )
+    workers_two_cp_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_WORKERS, workers_view=WORKERS_VIEW_TWO_CP_WORKER
+    )
+    workers_two_cp_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_WORKERS, workers_view=WORKERS_VIEW_TWO_CP_WORKER
+    )
+    players_general_mw = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_PLAYERS, players_view=PLAYERS_VIEW_GENERAL
+    )
+    players_general_base = _refresh_default_snapshot_from_prepared(
+        0, STATS_PAGE_PLAYERS, players_view=PLAYERS_VIEW_GENERAL
+    )
+    try:
+        conservation_projects_mw = conservation_futures[(1, CONSERVATION_VIEW_PROJECTS)].result()
+        conservation_projects_base = conservation_futures[(0, CONSERVATION_VIEW_PROJECTS)].result()
+        conservation_project_rewards_mw = conservation_futures[(1, CONSERVATION_VIEW_PROJECT_REWARDS)].result()
+        conservation_project_rewards_base = conservation_futures[(0, CONSERVATION_VIEW_PROJECT_REWARDS)].result()
+        conservation_cp_rewards_mw = conservation_futures[(1, CONSERVATION_VIEW_CP_REWARDS)].result()
+        conservation_cp_rewards_base = conservation_futures[(0, CONSERVATION_VIEW_CP_REWARDS)].result()
+    finally:
+        conservation_executor.shutdown(wait=True)
     combinations_card_card_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_CARD
     )
@@ -4881,14 +6041,20 @@ def _run_daily_refresh():
         actions_upgrade_order_frequency_mw, actions_upgrade_order_frequency_base,
         actions_upgrades_by_map_delta_mw, actions_upgrades_by_map_delta_base,
         actions_upgrades_by_map_frequency_mw, actions_upgrades_by_map_frequency_base,
-        combinations_card_card_mw, combinations_card_card_base,
+         conservation_projects_mw, conservation_projects_base,
+         conservation_project_rewards_mw, conservation_project_rewards_base,
+         conservation_cp_rewards_mw, conservation_cp_rewards_base,
+         workers_general_mw, workers_general_base,
+         workers_two_cp_mw, workers_two_cp_base,
+         players_general_mw, players_general_base,
+         combinations_card_card_mw, combinations_card_card_base,
         combinations_card_round_mw, combinations_card_round_base,
         combinations_card_map_mw, combinations_card_map_base,
         combinations_card_endgame_mw, combinations_card_endgame_base,
     ]
     status = (
         "ok"
-        if data_version and home_bootstrap and all(item["status"] == "ok" for item in snapshots)
+        if data_version and home_bootstrap and players_index_mw["status"] == "ok" and players_index_base["status"] == "ok" and all(item["status"] == "ok" for item in snapshots)
         else "error"
     )
     return {
@@ -4951,6 +6117,20 @@ def _run_daily_refresh():
         "actions_upgrades_by_map_delta_base": actions_upgrades_by_map_delta_base,
         "actions_upgrades_by_map_frequency_mw": actions_upgrades_by_map_frequency_mw,
         "actions_upgrades_by_map_frequency_base": actions_upgrades_by_map_frequency_base,
+        "conservation_projects_mw": conservation_projects_mw,
+        "conservation_projects_base": conservation_projects_base,
+        "conservation_project_rewards_mw": conservation_project_rewards_mw,
+        "conservation_project_rewards_base": conservation_project_rewards_base,
+         "conservation_cp_rewards_mw": conservation_cp_rewards_mw,
+         "conservation_cp_rewards_base": conservation_cp_rewards_base,
+         "workers_general_mw": workers_general_mw,
+         "workers_general_base": workers_general_base,
+         "workers_two_cp_mw": workers_two_cp_mw,
+        "workers_two_cp_base": workers_two_cp_base,
+        "players_index_mw": players_index_mw,
+        "players_index_base": players_index_base,
+        "players_general_mw": players_general_mw,
+        "players_general_base": players_general_base,
         "combinations_card_card_mw": combinations_card_card_mw,
         "combinations_card_card_base": combinations_card_card_base,
         "combinations_card_round_mw": combinations_card_round_mw,
@@ -5116,14 +6296,69 @@ def get_card_stats(request):
             if stats_page == STATS_PAGE_ACTIONS
             else ACTIONS_VIEW_STARTING_POSITION
         )
+        conservation_view = (
+            _parse_conservation_view(params.get("conservation_view"))
+            if stats_page == STATS_PAGE_CONSERVATION
+            else CONSERVATION_VIEW_PROJECTS
+        )
+        workers_view = (
+            _parse_workers_view(params.get("workers_view"))
+            if stats_page == STATS_PAGE_WORKERS
+            else WORKERS_VIEW_GENERAL
+        )
+        players_view = (
+            _parse_players_view(params.get("players_view"))
+            if stats_page == STATS_PAGE_PLAYERS
+            else PLAYERS_VIEW_GENERAL
+        )
+        players_players = []
+        if stats_page == STATS_PAGE_PLAYERS:
+            raw_players = params.get("players_players", [])
+            if raw_players is None:
+                raw_players = []
+            if not isinstance(raw_players, list):
+                raise ValueError("players_players must be an array")
+            players_players = [
+                item.strip() for item in raw_players
+                if isinstance(item, str) and item.strip()
+            ]
+            if len(players_players) > 5:
+                raise ValueError("players_players may contain at most five players")
+            if len(set(players_players)) != len(players_players):
+                raise ValueError("players_players must not contain duplicate players")
         is_mw = _parse_is_mw(params.get("is_mw", 1))
-        default_elo_min = None if stats_page == STATS_PAGE_HOME else 300
+        if params.get("players_index") is True:
+            if stats_page != STATS_PAGE_PLAYERS:
+                raise ValueError("players_index is only valid for the Players page")
+            # Autocomplete fallback: proxy the already-generated public index
+            # through the Function's CORS/gzip response path. This reads only a
+            # backend-owned cache object and never runs a BigQuery query.
+            dataset = "mw" if is_mw == 1 else "base"
+            index_payload = _read_cache_blob(
+                f"{CACHE_PREFIX}/players/index/default-{dataset}.json",
+                "players_index_proxy",
+            )
+            if index_payload is None:
+                return _json_http_response(
+                    {"status": "error", "message": "Player index snapshot is unavailable"},
+                    503,
+                    headers,
+                    request,
+                )
+            index_payload["source"] = "players_index_snapshot"
+            return _json_http_response(index_payload, 200, headers, request)
+        default_player_elo_min = None if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS) else 300
+        default_opponent_elo_min = (
+            0 if stats_page == STATS_PAGE_PLAYERS
+            else None if stats_page == STATS_PAGE_HOME
+            else 300
+        )
         player_elo_min = _parse_int_param(
-            params.get("player_elo_min", default_elo_min), "player_elo_min", default_elo_min
+            params.get("player_elo_min", default_player_elo_min), "player_elo_min", default_player_elo_min
         )
         player_elo_max = _parse_int_param(params.get("player_elo_max"), "player_elo_max")
         opponent_elo_min = _parse_int_param(
-            params.get("opponent_elo_min", default_elo_min), "opponent_elo_min", default_elo_min
+            params.get("opponent_elo_min", default_opponent_elo_min), "opponent_elo_min", default_opponent_elo_min
         )
         opponent_elo_max = _parse_int_param(params.get("opponent_elo_max"), "opponent_elo_max")
         default_date_from = (
@@ -5143,6 +6378,29 @@ def get_card_stats(request):
             raise ValueError("date_from must be on or before date_to")
         raw_completed_only = params["completed_only"] if "completed_only" in params else None
         completed_only = _parse_optional_bool(raw_completed_only, "completed_only")
+        players_player = params.get("players_player")
+        if players_player is not None and not isinstance(players_player, str):
+            raise ValueError("players_player must be a string or null")
+        players_player = players_player.strip() if players_player else None
+        last_x_games = _parse_int_param(params.get("last_x_games"), "last_x_games")
+        if last_x_games is not None and last_x_games < 1:
+            raise ValueError("last_x_games must be a positive integer")
+        if stats_page != STATS_PAGE_PLAYERS:
+            players_player = None
+            players_players = []
+            last_x_games = None
+        elif players_view == PLAYERS_VIEW_GENERAL:
+            players_players = []
+            if last_x_games is not None and not players_player:
+                raise ValueError("last_x_games requires a selected player")
+        elif players_view == PLAYERS_VIEW_COMPARISON:
+            players_player = None
+            if last_x_games is not None and not players_players:
+                raise ValueError("last_x_games requires at least one comparison player")
+        else:
+            players_player = None
+            players_players = []
+            last_x_games = None
     except ValueError as exc:
         return _json_http_response({"status": "error", "message": str(exc)}, 400, headers, request)
 
@@ -5170,6 +6428,9 @@ def get_card_stats(request):
         STATS_PAGE_BUILD,
         STATS_PAGE_PREDICTORS,
         STATS_PAGE_ACTIONS,
+        STATS_PAGE_CONSERVATION,
+        STATS_PAGE_WORKERS,
+        STATS_PAGE_PLAYERS,
     ):
         selected_rounds, round_filter_active = [], False
     if stats_page == STATS_PAGE_COMBINATIONS and combinations_view == COMBINATIONS_VIEW_CARD_ROUND:
@@ -5179,12 +6440,24 @@ def get_card_stats(request):
         STATS_PAGE_MAPS,
         STATS_PAGE_SPONSOR_ENDGAMES,
         STATS_PAGE_ICONS,
-        STATS_PAGE_PREDICTORS,
     ):
+        completed_only = None
+    if stats_page == STATS_PAGE_PREDICTORS and predictors_view != PREDICTORS_VIEW_SPECIFIC:
         completed_only = None
     if stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
         # Hexes always uses the completed-table population; its UI has no toggle.
         completed_only = None
+    if stats_page == STATS_PAGE_CONSERVATION and conservation_view == CONSERVATION_VIEW_PROJECTS:
+        # Projects always use completed tables; the page intentionally has no toggle.
+        completed_only = None
+    if stats_page == STATS_PAGE_WORKERS and workers_view == WORKERS_VIEW_GENERAL:
+        # General Workers is intentionally a hard completed-table population.
+        completed_only = None
+    if stats_page == STATS_PAGE_PLAYERS:
+        # Players always compares completed player-game observations.
+        completed_only = None
+    if stats_page == STATS_PAGE_CONSERVATION and conservation_view == CONSERVATION_VIEW_CP_REWARDS:
+        selected_maps = VALID_MAPS
     if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_TOURNAMENT_H2H:
         player_elo_min = 300
         player_elo_max = None
@@ -5209,6 +6482,10 @@ def get_card_stats(request):
         date_to,
         completed_only,
         round_filter_active,
+        players_player,
+        players_view,
+        players_players,
+        last_x_games,
     )
     if stats_page == STATS_PAGE_COMBINATIONS and (
         combination_paged or combination_min_plays != COMBINATION_DEFAULT_MIN_PLAYS
@@ -5220,6 +6497,7 @@ def get_card_stats(request):
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
             build_view, predictors_view, actions_view
+            , conservation_view, workers_view, players_view
         )
         if cached_payload:
             return _json_http_response(cached_payload, 200, headers, request)
@@ -5245,6 +6523,14 @@ def get_card_stats(request):
         build_view if stats_page == STATS_PAGE_BUILD else
         predictors_view if stats_page == STATS_PAGE_PREDICTORS else
         actions_view if stats_page == STATS_PAGE_ACTIONS else
+        conservation_view if stats_page == STATS_PAGE_CONSERVATION else
+        workers_view if stats_page == STATS_PAGE_WORKERS else
+        {
+            "view": players_view,
+            "player": players_player,
+            "players": players_players,
+            "last_x_games": last_x_games,
+        } if stats_page == STATS_PAGE_PLAYERS else
         None
     )
     filter_cache_blob_name = None
@@ -5313,6 +6599,12 @@ def get_card_stats(request):
             "build_view": build_view,
             "predictors_view": predictors_view,
             "actions_view": actions_view,
+            "conservation_view": conservation_view,
+            "workers_view": workers_view,
+            "players_view": players_view,
+            "players_player": players_player,
+            "players_players": players_players,
+            "last_x_games": last_x_games,
             "use_query_cache": (stats_page != STATS_PAGE_ENDGAMES and not debug_timing),
         }
         expanded_rows = None
@@ -5346,14 +6638,34 @@ def get_card_stats(request):
             "build_view": build_view if stats_page == STATS_PAGE_BUILD else None,
             "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
             "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
+            "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
+            "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
+            "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
+            "players_player": players_player if stats_page == STATS_PAGE_PLAYERS else None,
+            "last_x_games": last_x_games if stats_page == STATS_PAGE_PLAYERS else None,
             "maps": (
                 ALL_MAPS_FOR_METRICS
-                if stats_page in (STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS)
+                if stats_page in (STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS, STATS_PAGE_CONSERVATION)
                 else None
             ),
             "data": rows,
             "cache_status": "live",
         }
+        if stats_page == STATS_PAGE_PLAYERS:
+            payload["players_players"] = players_players
+            if players_view == PLAYERS_VIEW_COMPARISON:
+                count_by_player = {}
+                if rows:
+                    count_by_player = {
+                        item.get("player"): int(item.get("game_count") or 0)
+                        for item in rows[0].get("values", [])
+                    }
+                payload["players"] = [
+                    {"name": name, "game_count": count_by_player.get(name, 0)}
+                    for name in players_players
+                ]
+            else:
+                payload["player_game_count"] = int(rows[0].get("count_player") or 0) if rows else 0
         if default_combination_floor:
             payload["combination_snapshot_min_plays"] = COMBINATION_DEFAULT_MIN_PLAYS
             payload["combination_ranges"] = default_combination_ranges
@@ -5367,7 +6679,7 @@ def get_card_stats(request):
             cache_write_ok = _write_cached_snapshot(
                 is_mw, payload, stats_page, endgames_view, maps_view,
                 sponsor_endgames_view, combinations_view,
-                build_view, predictors_view, actions_view
+                build_view, predictors_view, actions_view, conservation_view, workers_view, players_view
             )
             payload["cache_status"] = "refreshed" if refresh_data and cache_write_ok else "miss"
             if not cache_write_ok:
