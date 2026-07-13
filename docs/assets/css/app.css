@@ -3496,6 +3496,7 @@
     }
 
     .players-main-header .players-arena-season-control {
+      margin-left: auto;
       height: 24.6667px;
       min-height: 24.6667px;
       box-sizing: border-box;
