@@ -4,22 +4,16 @@
 
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
-const MEMORY_MAX_ENTRIES = 64;
-const BACKGROUND_WORKERS = 2;
-const BACKGROUND_DELAY_MS = 1200;
+const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
+const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
+const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
 const inFlight = new Map();
-const backgroundQueue = [];
-const queuedUrls = new Set();
-const backgroundControllers = new Map();
-const idleWaiters = [];
-
-let backgroundStarted = false;
-let backgroundWorkersActive = 0;
 let foregroundActivity = 0;
-let backgroundTimer = 0;
 let cacheCleanupStarted = false;
+let defaultPackInit = null;
+let currentPackReady = false;
 
 const DEFAULT_SNAPSHOT_MANIFEST = [
   ['cards', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/default-mw.json'],
@@ -159,17 +153,8 @@ async function snapshotLoader(url) {
 
 async function runForeground(loader) {
   foregroundActivity += 1;
-  backgroundControllers.forEach(controller => controller.abort());
   try { return await loader(); }
-  finally {
-    foregroundActivity -= 1;
-    if (!foregroundActivity) idleWaiters.splice(0).forEach(resolve => resolve());
-  }
-}
-
-function waitForForegroundIdle() {
-  if (!foregroundActivity) return Promise.resolve();
-  return new Promise(resolve => idleWaiters.push(resolve));
+  finally { foregroundActivity -= 1; }
 }
 
 async function loadCached(key, loader) {
@@ -193,12 +178,18 @@ export function loadSnapshot(url) {
   return runForeground(() => loadCached(cacheKey('snapshot', requestUrl), () => snapshotLoader(url)));
 }
 
-export function fetchStats(params) {
+export function peekSnapshot(url) {
+  const key = cacheKey('snapshot', versionedUrl(url));
+  return memoryCache.get(key) || null;
+}
+
+export function fetchStats(params, { signal } = {}) {
   return runForeground(() => loadCached(cacheKey('filtered', params), async () => {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
+      signal,
     });
     const payload = await response.json();
     if (!response.ok || payload.status !== 'ok') {
@@ -208,98 +199,132 @@ export function fetchStats(params) {
   }));
 }
 
-export async function loadStats(params, defaultUrl = null) {
+export async function loadStats(params, defaultUrl = null, options = {}) {
   if (defaultUrl) {
-    try { return await loadSnapshot(defaultUrl); } catch { return fetchStats(params); }
+    try { return await loadSnapshot(defaultUrl); } catch { return fetchStats(params, options); }
   }
-  return fetchStats(params);
+  return fetchStats(params, options);
 }
 
-async function prefetchSnapshot(url) {
-  const requestUrl = versionedUrl(url);
-  const cache = await snapshotStorage();
-  if (!cache) {
-    const response = await fetch(requestUrl, { cache: 'default' });
-    if (response.ok) await response.arrayBuffer();
-    return;
-  }
-  if (await cache.match(requestUrl)) return;
-  const controller = new AbortController();
-  backgroundControllers.set(requestUrl, controller);
+function packCacheName(version = dataVersion()) {
+  return `${DEFAULT_PACK_CACHE_PREFIX}${String(version).replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+}
+
+function snapshotBlobPath(url) {
   try {
-    const response = await fetch(requestUrl, {
-      cache: 'default',
-      signal: controller.signal,
-      priority: 'low',
-    });
-    if (!response.ok) throw new Error(`Snapshot prefetch failed (${response.status})`);
-    await cache.put(requestUrl, response);
-  } finally {
-    backgroundControllers.delete(requestUrl);
-  }
+    const path = new URL(url).pathname.replace(/^\/+/, '');
+    return path.replace(/^ark-nova-stats-dashboard-cache\//, '');
+  } catch { return ''; }
 }
 
-async function backgroundWorker() {
-  while (backgroundQueue.length) {
-    await waitForForegroundIdle();
-    const item = backgroundQueue.shift();
-    if (!item) return;
-    queuedUrls.delete(item.url);
-    try {
-      await prefetchSnapshot(item.url);
-    } catch (error) {
-      if (error?.name === 'AbortError') {
-        if (!queuedUrls.has(item.url)) {
-          queuedUrls.add(item.url);
-          backgroundQueue.unshift(item);
-        }
-        await waitForForegroundIdle();
-      }
+function seedDefaultPack(payload) {
+  if (!payload || typeof payload.snapshots !== 'object') return false;
+  const byPath = new Map(DEFAULT_SNAPSHOT_MANIFEST.map(([, url]) => [snapshotBlobPath(url), url]));
+  let seeded = 0;
+  Object.entries(payload.snapshots).forEach(([path, snapshot]) => {
+    const url = byPath.get(path);
+    if (!url || !snapshot) return;
+    memoryPut(cacheKey('snapshot', versionedUrl(url)), snapshot);
+    seeded += 1;
+  });
+  return seeded > 0;
+}
+
+async function cachedPackFrom(cacheName) {
+  try {
+    const cache = await caches.open(cacheName);
+    const keys = await cache.keys();
+    const request = keys.find(item => new URL(item.url).pathname.endsWith('/card-stats/bootstrap/default-pack.json'));
+    if (!request) return null;
+    const response = await cache.match(request);
+    return response ? await response.json() : null;
+  } catch { return null; }
+}
+
+async function hydrateNewestCachedPack() {
+  if (!('caches' in window)) return null;
+  try {
+    const names = (await caches.keys())
+      .filter(name => name.startsWith(DEFAULT_PACK_CACHE_PREFIX))
+      .sort()
+      .reverse();
+    for (const name of names) {
+      const payload = await cachedPackFrom(name);
+      if (!currentPackReady && seedDefaultPack(payload)) return { name, payload };
+      if (currentPackReady) return null;
     }
-  }
+  } catch { /* The daily pack is an optimization, never a hard dependency. */ }
+  return null;
 }
 
-function startBackgroundWorkers() {
-  while (backgroundWorkersActive < BACKGROUND_WORKERS && backgroundQueue.length) {
-    backgroundWorkersActive += 1;
-    void backgroundWorker().finally(() => {
-      backgroundWorkersActive -= 1;
-      if (backgroundQueue.length) startBackgroundWorkers();
-    });
+async function installCurrentPack() {
+  const version = dataVersion();
+  const requestUrl = versionedUrl(DEFAULT_PACK_URL);
+  const cacheName = packCacheName(version);
+  let response = null;
+  if ('caches' in window) {
+    try {
+      const cache = await caches.open(cacheName);
+      response = await cache.match(requestUrl);
+      if (!response) {
+        const fetched = await fetch(requestUrl, { cache: 'default', priority: 'low' });
+        if (!fetched.ok) throw new Error(`Default pack request failed (${fetched.status})`);
+        await cache.put(requestUrl, fetched.clone());
+        response = fetched;
+      }
+    } catch { response = null; }
   }
+  if (!response) {
+    response = await fetch(requestUrl, { cache: 'default', priority: 'low' });
+    if (!response.ok) throw new Error(`Default pack request failed (${response.status})`);
+  }
+  const payload = await response.json();
+  if (!seedDefaultPack(payload)) throw new Error('Default pack has no recognized snapshots');
+  currentPackReady = true;
+
+  if ('caches' in window) {
+    try {
+      const names = (await caches.keys())
+        .filter(name => name.startsWith(DEFAULT_PACK_CACHE_PREFIX))
+        .sort()
+        .reverse();
+      const keep = new Set([cacheName, names.find(name => name !== cacheName)].filter(Boolean));
+      await Promise.all(names.filter(name => !keep.has(name)).map(name => caches.delete(name)));
+    } catch { /* Cache cleanup is best-effort. */ }
+  }
+  cleanOldSnapshotCaches();
+  return payload;
 }
 
-function scheduleBackgroundPreload() {
-  if (backgroundTimer) return;
-  const start = () => {
-    backgroundTimer = 0;
-    cleanOldSnapshotCaches();
-    startBackgroundWorkers();
-  };
-  if ('requestIdleCallback' in window) {
-    backgroundTimer = window.requestIdleCallback(start, { timeout: BACKGROUND_DELAY_MS });
-  } else {
-    backgroundTimer = window.setTimeout(start, BACKGROUND_DELAY_MS);
-  }
+export function initializeDefaultSnapshots() {
+  if (defaultPackInit) return defaultPackInit;
+  const current = installCurrentPack();
+  defaultPackInit = (async () => {
+    const cached = await hydrateNewestCachedPack();
+    if (cached) {
+      void current.catch(() => {});
+      return cached.payload;
+    }
+    return current;
+  })();
+  return defaultPackInit;
 }
 
-export function preloadDefaultSnapshots(priorityGroup = '') {
-  const ordered = [...DEFAULT_SNAPSHOT_MANIFEST].sort(([group]) => group === priorityGroup ? -1 : 1);
-  for (const [group, url] of ordered) {
-    const requestUrl = versionedUrl(url);
-    if (memoryCache.has(cacheKey('snapshot', requestUrl)) || queuedUrls.has(requestUrl)) continue;
-    queuedUrls.add(requestUrl);
-    backgroundQueue.push({ group, url });
-  }
-  scheduleBackgroundPreload();
+export async function waitForDefaultSnapshotWarmup(timeoutMs = 120) {
+  const warmup = initializeDefaultSnapshots().catch(() => null);
+  if (!timeoutMs) return warmup;
+  return Promise.race([
+    warmup,
+    new Promise(resolve => window.setTimeout(() => resolve(null), timeoutMs)),
+  ]);
+}
+
+export function preloadDefaultSnapshots() {
+  void initializeDefaultSnapshots().catch(() => {});
 }
 
 export function prioritizeSnapshotGroup(group) {
-  const priority = DEFAULT_SNAPSHOT_MANIFEST.filter(([itemGroup]) => itemGroup === group);
-  for (const item of priority) {
-    const requestUrl = versionedUrl(item[1]);
-    const index = backgroundQueue.findIndex(entry => versionedUrl(entry.url) === requestUrl);
-    if (index >= 0) backgroundQueue.unshift(...backgroundQueue.splice(index, 1));
-  }
-  scheduleBackgroundPreload();
+  if (currentPackReady) return;
+  const urls = DEFAULT_SNAPSHOT_MANIFEST.filter(([itemGroup]) => itemGroup === group).map(([, url]) => url);
+  urls.forEach(url => { void loadSnapshot(url).catch(() => {}); });
 }

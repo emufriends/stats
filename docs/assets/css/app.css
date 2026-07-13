@@ -671,6 +671,13 @@
 
     .date-input:focus { border-color: var(--accent-dim); }
 
+    .date-input:disabled,
+    .range-input:disabled {
+      opacity: .42;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
     .date-input-shell {
       position: relative;
       display: flex;
@@ -4888,3 +4895,8 @@
     }
 
     .sidebar-overlay.active { display: block; }
+.players-table-wrap.players-updating {
+  opacity: 0.58;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}

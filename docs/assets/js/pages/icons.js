@@ -10,7 +10,7 @@ import {
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260712-1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260713-1';
 
 export const id = 'icons';
 export const title = 'Icons';

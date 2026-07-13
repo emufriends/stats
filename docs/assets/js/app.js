@@ -1,7 +1,12 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260712-8';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260713-1';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor } from './color-scales.js?v=20260710-3';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
-import { preloadDefaultSnapshots, prioritizeSnapshotGroup } from './snapshot-cache.js?v=20260712-3';
+import {
+  initializeDefaultSnapshots,
+  preloadDefaultSnapshots,
+  prioritizeSnapshotGroup,
+  waitForDefaultSnapshotWarmup,
+} from './snapshot-cache.js?v=20260713-1';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -44,6 +49,10 @@ let rankFitFrame = 0;
 let rankFitTimer = 0;
 const minimumWarningTimers = new WeakMap();
 
+// Home owns a tiny synchronous bootstrap. All other defaults begin warming as
+// soon as the shell module loads, without delaying Home's first paint.
+void initializeDefaultSnapshots().catch(() => {});
+
 async function renderCurrentRoute() {
   // Dynamic imports can resolve out of order if the hash changes quickly.
   // Only the newest render token is allowed to touch the DOM.
@@ -52,6 +61,7 @@ async function renderCurrentRoute() {
 
   const pageId = getRoutePageId(PAGES, DEFAULT_PAGE_ID);
   const pageDef = PAGES[pageId] || PAGES[DEFAULT_PAGE_ID];
+  if (pageDef.id !== 'home') await waitForDefaultSnapshotWarmup(120);
   const page = await pageDef.load();
   if (renderToken !== routeRenderToken) return;
 

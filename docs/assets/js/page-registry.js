@@ -11,7 +11,7 @@ export const PAGES = {
     id: 'home',
     title: 'Home',
     navLabel: 'Home',
-    load: () => import('./pages/home.js?v=20260710-1'),
+    load: () => import('./pages/home.js?v=20260713-1'),
   },
   cards: {
     id: 'cards',
@@ -29,7 +29,7 @@ export const PAGES = {
     id: 'maps',
     title: 'Maps',
     navLabel: 'Maps',
-    load: () => import('./pages/maps.js?v=20260712-5'),
+    load: () => import('./pages/maps.js?v=20260713-1'),
   },
   combos: {
     id: 'combos',
@@ -89,6 +89,6 @@ export const PAGES = {
     id: 'players',
     title: 'Players',
     navLabel: 'Players',
-    load: () => import('./pages/players.js?v=20260712-5'),
+    load: () => import('./pages/players.js?v=20260713-1'),
   },
 };

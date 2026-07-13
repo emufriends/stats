@@ -9,7 +9,7 @@ import {
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260711-1';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260712-1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260713-1';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';
@@ -644,14 +644,14 @@ function displayMetricName(metric) {
     .replaceAll('Money per turn', '$ gained per turn')
     .replaceAll('Money gained', '$ gained')
     .replaceAll('Money spent', '$ spent')
-    .replaceAll('Cards drawn from deck', 'Cards (deck)')
-    .replaceAll('Cards drawn from range', 'Cards (range)');
+    .replaceAll('Cards drawn from deck', 'Cards drawn (deck)')
+    .replaceAll('Cards drawn from range', 'Cards drawn (Range)');
 }
 
 function metricTooltip(row) {
   if (row.tooltip) return row.tooltip;
-  if (row.metric === 'Cards drawn from deck') return 'Cards drawn from deck';
-  if (row.metric === 'Cards drawn from range') return 'Cards drawn from reputation range';
+  if (row.metric === 'Cards drawn from deck' || row.metric === 'Cards drawn (deck)') return 'Cards drawn from deck';
+  if (row.metric === 'Cards drawn from range' || row.metric === 'Cards drawn (Range)') return 'Cards drawn from reputation range';
   return '';
 }
 

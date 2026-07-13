@@ -1,5 +1,5 @@
 export const id = 'home';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260711-4';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260713-1';
 export const title = 'Home';
 export const navLabel = 'Home';
 
@@ -196,9 +196,9 @@ function getParams() {
     stats_page: 'home',
     is_mw: isMW,
     maps: selectedMaps,
-    player_elo_min: val('playerEloMin') === '' ? 0 : Number(val('playerEloMin')),
+    player_elo_min: val('playerEloMin') === '' ? null : Number(val('playerEloMin')),
     player_elo_max: val('playerEloMax') ? Number(val('playerEloMax')) : null,
-    opponent_elo_min: val('opponentEloMin') === '' ? 0 : Number(val('opponentEloMin')),
+    opponent_elo_min: val('opponentEloMin') === '' ? null : Number(val('opponentEloMin')),
     opponent_elo_max: val('opponentEloMax') ? Number(val('opponentEloMax')) : null,
     date_from: val('dateFrom') || null,
     date_to: val('dateTo') || null,

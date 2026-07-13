@@ -604,7 +604,7 @@ Metrics:
 - Default sort is by `Turns` ascending. `Rounds` also sorts ascending because lower values are better; other metric rows sort descending.
 - Percentage metrics display one decimal. The rows after `$ gained` are `$ gained (income)`, `$ spent (Animals)`, `$ spent (Build)`, `$ spent (Donations)`, and `$ spent (Range)`. Income reads `Money_gained_through_income`. `$ gained per turn` is the average of the per-player-game ratio `Money_gained / Number_of_turns`; it is not a ratio of aggregate averages. The four spending rows remain category averages divided by total spending and therefore display percentages despite their concise labels. Their per-map tooltips show the absolute category average with two decimals and no currency symbol. Zero denominators display `-`. Map headers use the global `Map name (code)` tooltip wording, and compact Games footer values use the dashboard tooltip with the full comma-grouped integer.
 - Filters are MW/Base, Elo ranges, and date range only. No map filter, no round filter, no Completed games toggle.
-- Metrics default date is `2026-01-13` onward because Map Pack 2 was added on January 13th, 2026. Home is unrestricted; the remaining dated pages default to `2025-01-01`.
+- Metrics default date is `2026-01-13` onward because Map Pack 2 was added on January 13th, 2026. Home and both active Players views are unrestricted by date by default; the remaining dated pages default to `2025-01-01`.
 - The visible end-date input stays blank by default; blank means no upper date limit.
 - Map Pack 1 consists of Maps 9 and 10. Map Pack 2 consists of Maps 11-14 and T1. Legacy maps are Maps 1-8 (the non-alternate versions); beginner maps are Maps A and 0. Fill% is calculated from `Empty_hexes`: total hexes default to 42, Maps 5/5a/10 use 43, and Map 0 uses 39.
 
@@ -976,15 +976,23 @@ Players filters are opponent Elo, maps, date range, and Last X games. The
 opponent Elo minimum is visually empty and means `0`; this is a Players-specific
 default. There is no player Elo filter and no completion toggle because
 concession is always excluded. Last X selects the selected player's newest
-qualifying rows by game date and deterministic table-id order. Date Range and
-Last X are mutually exclusive. Reset changes only filters and preserves selected
-players.
+qualifying rows by `game_ended_at DESC` and deterministic table-id order. Both
+date fields are empty by default. Date Range and Last X are strictly mutually
+exclusive: typing either date boundary disables both pointer and keyboard input
+for Last X, while typing Last X disables both date inputs. Clearing the active
+field re-enables the other control immediately. Disabled fields serialize as
+`null`, and the backend rejects any manually constructed request that contains
+both a date boundary and Last X. Reset clears both mechanisms, changes only
+filters, and preserves selected players.
 
 The General API accepts `players_player` and `last_x_games`; its payload includes
 `player_game_count` and absolute tooltip fields for the four spending-share rows.
 Body value tooltips are otherwise absent, and an empty Player value is `-` with
-no tooltip. Player colors use the normal Elo-delta diverging family without the
-dashboard's usual ±2 clamp; each metric row has its own range.
+no tooltip. Player colors use the normal Elo-delta diverging family without a
+fixed clamp; each metric row has its own range. `Turns` has
+`lower_is_better: true`, so its color direction is reversed without changing its
+number or sort behavior. The current card labels are `Cards drawn (deck)` and
+`Cards drawn (Range)`.
 
 Comparison accepts `players_players`, an ordered array of one to five unique
 exact player names. It returns `players: [{name, game_count}]` plus metric rows
@@ -1018,6 +1026,35 @@ fails, the frontend sends `players_index: true` with `stats_page: "players"` and
 its CORS/gzip response path. This fallback never queries BigQuery. Index loading,
 failure, and retry states remain visible instead of becoming an empty directory.
 Searching does not query BigQuery per keystroke.
+
+Interactive statistics read the backend-owned
+`dashboard_cache.players_stats_prepared` table, not Full Sample directly. The
+daily refresh derives one narrow player-game row per source observation,
+including table-level concession, winner status, all 64 metric values, the four
+raw spending amounts, timestamp, and table ID. It is partitioned by game date and
+clustered by player, dataset, map, and opponent Elo. Player leads because exact
+player lookup is the latency-sensitive path. General uses one aggregate
+for All/Winners/Experts/Masters and a separate exact-player aggregate. The player
+filter is applied before `ROW_NUMBER()`, so Last X never ranks unrelated players.
+When both components are missing they are submitted concurrently and merged into
+the established payload shape.
+
+Players component caches are data-versioned. A baseline key contains dataset,
+maps, opponent-Elo bounds, and date bounds. A selected-player key adds the exact
+player and Last X. The ordinary full-response filter cache remains the first
+repeat-request layer; Comparison includes its normalized selected-player set and
+Last X in its response cache key. With default filters, General takes its
+comparison columns from the daily Players snapshot and queries only the selected
+player. Changing a player under unchanged custom filters reuses the baseline
+component. Exact repeats avoid BigQuery.
+
+The same refresh also builds
+`dashboard_cache.players_default_prepared`, one compact aggregate row per exact
+player and dataset for the default population (valid maps, opponent Elo at least
+0, no date restriction, non-conceded). Default-filter General selections and
+default-filter Comparison lookups read this table, so they do not rescan the wide
+player-game table. Last X and any custom filter intentionally fall back to
+`players_stats_prepared` because they require game-level rows.
 
 The suggestion list is a viewport-positioned overlay outside the table scroll
 container, so it cannot be clipped by the sticky header or table frame. Player
@@ -1251,11 +1288,13 @@ Prepared Full Sample and card interaction tables:
 
 ```text
 ark-nova-stats-dashboard.dashboard_cache.full_stats_prepared
+ark-nova-stats-dashboard.dashboard_cache.players_stats_prepared
+ark-nova-stats-dashboard.dashboard_cache.players_default_prepared
 ark-nova-stats-dashboard.dashboard_cache.card_plays_prepared
 ark-nova-stats-dashboard.dashboard_cache.card_pairs_prepared
 ```
 
-Filtered Home requests read the prepared Full Sample. Combos reads the partitioned/clustered flattened card-play table; Card + Card additionally reads the prepared unordered pair table instead of rebuilding every pair per request. Both interaction tables are rebuilt after the prepared Log table during daily refresh.
+Filtered Home requests read the prepared Full Sample. Players reads its narrow prepared table. Combos reads the partitioned/clustered flattened card-play table; Card + Card additionally reads the prepared unordered pair table instead of rebuilding every pair per request. These are backend-owned derived tables rebuilt during daily refresh. The source Full Sample and Log Sample are read-only and are never altered by refresh, filtering, snapshots, or caches.
 
 Tournament H2H cache table:
 
@@ -1279,7 +1318,7 @@ Default date filter:
 2025-01-01 onward
 ```
 
-Exceptions: Home has no default date restriction. Maps Metrics defaults to `2026-01-13` onward. Tournament H2H ignores date filters entirely.
+Exceptions: Home and Players have no default date restriction. Maps Metrics defaults to `2026-01-13` onward. Tournament H2H ignores date filters entirely.
 
 Maps excluded from standard card/endgame pages:
 
@@ -1376,6 +1415,13 @@ endgames
 maps
 sponsor_endgames
 combinations
+icons
+build
+predictors
+actions
+conservation
+workers
+players
 ```
 
 Backend also accepts `page` as a legacy alias, but frontend uses `stats_page`.
@@ -1385,6 +1431,7 @@ Maintenance-only request bodies:
 ```json
 {"daily_refresh": true}
 {"refresh_prepared": true}
+{"refresh_players_prepared": true}
 {"refresh_data": true}
 ```
 
@@ -1445,10 +1492,51 @@ card-stats/data-version.json
 Filter cache version:
 
 ```text
-v9
+v11
 ```
 
-Default snapshots are public gzip-encoded JSON files. Home additionally has a generated JavaScript bootstrap containing both default datasets so its first paint has no loading state. The frontend loads the active snapshot in the foreground, then schedules two low-priority background workers after the browser is idle. Background workers cache raw responses in versioned Cache Storage entries and do not parse or synchronously serialize JSON until a page is opened. Memory and in-flight request caches prevent duplicate downloads; Cache Storage persists them across reloads. Navigation, hover, and focus prioritize the relevant snapshot, while foreground or filtered work aborts background downloads and requeues them afterward. The current daily data version is part of both cache names and snapshot URLs, and obsolete cache versions are removed. The large Card-Card combination snapshot remains a separate cached asset. Non-default filter requests go through the Cloud Function and may use compressed Cloud Storage filter-cache blobs. Large JSON responses from the function are gzip-compressed when the browser advertises support. The filter cache key includes the explicit data-version marker, so daily refresh invalidates old filter results. The first visit still requires network transfer; subsequent cached default navigation does not.
+The daily combined snapshot asset is:
+
+```text
+card-stats/bootstrap/default-pack.json
+```
+
+Default snapshots are public gzip-encoded JSON files. Home additionally has
+`card-stats/home/defaults.js`, a tiny parser-loaded JavaScript bootstrap containing
+both Home datasets and the current data version. Home's blank Elo inputs map to
+`null`, so an unfiltered mount recognizes this embedded payload and renders it
+synchronously without an API request or loading overlay.
+
+After Home paint, the frontend requests the combined pack immediately. The pack
+contains every active MW/Base default statistics payload, including Combos, but
+not the player-name indexes. It is parsed once and atomically seeds the shared
+in-memory snapshot cache; in-flight sharing prevents duplicate work. A snapshot
+already in memory is returned before a loading indicator can appear. If a
+non-Home route opens before pack warmup, that route's individual snapshot is
+requested directly after a short foreground priority window.
+
+The pack itself is persisted in versioned Cache Storage. During a daily version
+transition, the newest previously successful pack is hydrated first while the
+current pack downloads. The current pack becomes active only after a complete,
+valid parse, so displayed data never changes halfway through installation. Cache
+Storage retains the current and immediately previous successful pack versions;
+individual snapshot fetching remains the fallback where Cache Storage is absent.
+The backend publishes a new pack only after every constituent default snapshot
+refresh succeeds, preventing mixed-version packs.
+
+Filtered requests always go through the Cloud Function and show an updating state
+immediately. Memory/in-flight caching and Cloud Storage filter caches prevent
+duplicate work. Large Function JSON responses are gzip-compressed when supported,
+and data-versioned keys invalidate old results after refresh. The first-ever pack
+download still requires network transfer; Home remains immediate, and subsequent
+default navigation is memory-local or persistent-cache-local.
+
+Performance budgets are: under 100 ms for a memory/default-pack hit with no visible
+loader; under 500 ms for an exact repeated filtered Players request; under 3 seconds
+target and 5 seconds maximum for an uncached default-filter player selection; and
+5 seconds maximum for representative uncached filtered General or five-player
+Comparison requests. Measure Function wall time, BigQuery wait, bytes processed,
+and slot time separately before considering a paid minimum Function instance.
 
 ## Daily Refresh / Scheduler
 
@@ -1625,7 +1713,7 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-Expected result: JSON with `status: ok`, `home_bootstrap: ok`, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build views, all four Combinations views, Predictors General/Icon, all Actions views, Workers General/2 CP Worker, Players General, and both Players indexes for MW/Base. Do not paste the token or command output if it includes secrets.
+Expected result: JSON with `status: ok`, `home_bootstrap: ok`, `default_pack: ok`, a successful `players` prepared-table entry, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build views, all four Combinations views, all Predictors and Actions views, all Conservation views, Workers General/2 CP Worker, Players General, and both Players indexes for MW/Base. Do not paste the token or command output if it includes secrets.
 ## Maintenance Token Rotation
 
 If the maintenance token is exposed, rotate it immediately.
@@ -1654,7 +1742,7 @@ gcloud functions deploy get-card-stats `
   --allow-unauthenticated `
   --project=ark-nova-stats-dashboard `
   --service-account=dashboard-backend@ark-nova-stats-dashboard.iam.gserviceaccount.com `
-  --timeout=540s `
+  --timeout=1200s `
   --update-env-vars="MAINTENANCE_TOKEN=$maintenanceToken" | Out-Null
 ```
 
@@ -1685,14 +1773,14 @@ gcloud functions deploy get-card-stats `
   --allow-unauthenticated `
   --project=ark-nova-stats-dashboard `
   --service-account=dashboard-backend@ark-nova-stats-dashboard.iam.gserviceaccount.com `
-  --timeout=540s `
+  --timeout=1200s `
   --set-env-vars="CACHE_BUCKET=ark-nova-stats-dashboard-cache,BIGQUERY_JOB_PROJECT=ark-nova-stats-dashboard,BIGQUERY_LOCATION=US,PREPARED_LOGS_TABLE=ark-nova-stats-dashboard.dashboard_cache.card_logs_prepared,MAINTENANCE_TOKEN=$maintenanceToken"
 ```
 
 Important:
 
 - `BIGQUERY_LOCATION=US` is required.
-- `--timeout=540s` is important for daily refresh.
+- `--timeout=1200s` is reserved for the authenticated daily refresh, which rebuilds all derived tables and 66 default payloads before atomically publishing the pack. Normal interactive requests are expected to finish within the page-specific performance budgets.
 - `MAINTENANCE_TOKEN` must match Scheduler header.
 - Do not run deploy from `C:\Windows\system32`; use the function folder or specify `--source`.
 

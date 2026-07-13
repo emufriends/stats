@@ -1,5 +1,5 @@
 import { divergingRangeColor } from '../color-scales.js?v=20260711-1';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260712-4';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260713-1';
 
 export const id = 'players';
 export const title = 'Players';
@@ -9,7 +9,6 @@ const API_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
 const INDEX_URL = dataset => `${API_ROOT}/index/default-${dataset ? 'mw' : 'base'}.json`;
 const SNAPSHOT_URL = dataset => `${API_ROOT}/general/default-${dataset ? 'mw' : 'base'}.json`;
-const DEFAULT_DATE_FROM = '2025-01-01';
 const MAPS = [
   ['1a', 'Map 1a: Observation Tower'], ['2a', 'Map 2a: Outdoor Areas'],
   ['3a', 'Map 3a: Silver Lake'], ['4a', 'Map 4a: Commercial Harbor'],
@@ -58,7 +57,7 @@ export const sidebarHtml = `
   </div><div class="chip-grid" id="playersMapChips"></div></div>
   <hr class="divider" />
   <div class="filter-group"><span class="filter-label">Date Range</span>
-    <input class="date-input" type="text" id="playersDateFrom" value="${DEFAULT_DATE_FROM}" placeholder="yyyy-mm-dd" oninput="onPlayersDateInput()" />
+    <input class="date-input" type="text" id="playersDateFrom" placeholder="yyyy-mm-dd" oninput="onPlayersDateInput()" />
     <input class="date-input" type="text" id="playersDateTo" placeholder="yyyy-mm-dd" oninput="onPlayersDateInput()" />
   </div>
   <hr class="divider" />
@@ -82,6 +81,8 @@ let selectedMaps = MAPS.map(([, full]) => full);
 let rows = [];
 let playerGameCount = 0;
 let comparisonCounts = [];
+let statsAbortController = null;
+let statsLoading = false;
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true;
@@ -114,6 +115,8 @@ export function unmount() {
   mounted = false;
   token += 1;
   playerIndexRequest += 1;
+  statsAbortController?.abort();
+  statsAbortController = null;
   hideTooltip();
   closeSuggestions();
 }
@@ -147,7 +150,10 @@ function syncTabs() {
 function value(id) { return document.getElementById(id)?.value ?? ''; }
 
 function params() {
-  const last = value('playersLastX');
+  const lastInput = document.getElementById('playersLastX');
+  const dateFromInput = document.getElementById('playersDateFrom');
+  const dateToInput = document.getElementById('playersDateTo');
+  const last = lastInput?.disabled ? '' : value('playersLastX');
   return {
     stats_page: 'players',
     players_view: view,
@@ -155,8 +161,8 @@ function params() {
     maps: selectedMaps,
     opponent_elo_min: value('playersOpponentEloMin') === '' ? 0 : Number(value('playersOpponentEloMin')),
     opponent_elo_max: value('playersOpponentEloMax') === '' ? null : Number(value('playersOpponentEloMax')),
-    date_from: value('playersDateFrom') || null,
-    date_to: value('playersDateTo') || null,
+    date_from: dateFromInput?.disabled ? null : (value('playersDateFrom') || null),
+    date_to: dateToInput?.disabled ? null : (value('playersDateTo') || null),
     players_player: view === 'general' ? selectedPlayer : null,
     players_players: view === 'comparison' ? selectedPlayers : [],
     last_x_games: last === '' ? null : Number(last),
@@ -166,7 +172,7 @@ function params() {
 function isDefault(request) {
   return view === 'general' && !selectedPlayer && request.last_x_games === null
     && request.opponent_elo_min === 0 && request.opponent_elo_max === null
-    && request.date_from === DEFAULT_DATE_FROM && request.date_to === null
+    && request.date_from === null && request.date_to === null
     && selectedMaps.length === MAPS.length;
 }
 
@@ -207,6 +213,8 @@ function retryPlayersIndex() { loadPlayerIndex(); }
 
 async function loadData(activeToken) {
   if (view === 'arena') {
+    statsAbortController?.abort();
+    statsLoading = false;
     document.getElementById('playersContent').innerHTML = '<div class="build-placeholder players-placeholder"><h2>Arena</h2><p>This Players view is reserved for a future update.</p></div>';
     updatePlayersMeta();
     return;
@@ -218,16 +226,27 @@ async function loadData(activeToken) {
       if (!mounted || activeToken !== token) return;
       rows = (payload.data || []).map(row => ({ ...row, values: [] }));
       comparisonCounts = [];
+      statsLoading = false;
       renderTable();
     } catch (error) {
-      if (mounted && activeToken === token) renderError(error);
+      if (mounted && activeToken === token) {
+        statsLoading = false;
+        renderError(error);
+      }
     }
     return;
   }
   renderLoading();
   const request = params();
+  statsAbortController?.abort();
+  statsAbortController = new AbortController();
+  const requestController = statsAbortController;
   try {
-    const payload = await loadStats(request, isDefault(request) ? SNAPSHOT_URL(isMW) : null);
+    const payload = await loadStats(
+      request,
+      isDefault(request) ? SNAPSHOT_URL(isMW) : null,
+      { signal: requestController.signal },
+    );
     if (!mounted || activeToken !== token) return;
     rows = Array.isArray(payload.data) ? payload.data : [];
     if (view === 'comparison') {
@@ -235,9 +254,19 @@ async function loadData(activeToken) {
     } else {
       playerGameCount = Number(payload.player_game_count) || 0;
     }
+    statsLoading = false;
     renderTable();
   } catch (error) {
-    if (mounted && activeToken === token) renderError(error);
+    if (error?.name === 'AbortError') return;
+    if (mounted && activeToken === token) {
+      statsLoading = false;
+      if (rows.length) {
+        document.querySelector('.players-table-wrap')?.classList.remove('players-updating');
+        updatePlayersMeta(error?.message || String(error));
+      } else renderError(error);
+    }
+  } finally {
+    if (statsAbortController === requestController) statsAbortController = null;
   }
 }
 
@@ -314,7 +343,7 @@ function comparisonValueCell(row, item, range, colorEnabled) {
 }
 
 function valueCell(value, row, range, tooltipValue) {
-  const style = Number.isFinite(value) && range.min !== null ? ` style="color:${divergingRangeColor(value, range.min, range.max, false)}"` : '';
+  const style = Number.isFinite(value) && range.min !== null ? ` style="color:${divergingRangeColor(value, range.min, range.max, row.lower_is_better === true)}"` : '';
   const tip = Number.isFinite(tooltipValue) ? ` data-tip="${escapeAttr(formatValue(tooltipValue, 'number'))}"` : '';
   return `<td class="players-value-cell"${style}${tip}>${formatValue(value, row.format)}</td>`;
 }
@@ -337,7 +366,7 @@ function selectNonePlayersMaps() { selectedMaps = []; renderMapChips(); }
 function resetPlayersFilters() {
   const set = (id, next) => { const el = document.getElementById(id); if (el) el.value = next; };
   set('playersOpponentEloMin', ''); set('playersOpponentEloMax', '');
-  set('playersDateFrom', DEFAULT_DATE_FROM); set('playersDateTo', ''); set('playersLastX', '');
+  set('playersDateFrom', ''); set('playersDateTo', ''); set('playersLastX', '');
   selectedMaps = MAPS.map(([, full]) => full);
   renderMapChips(); syncDateLastControls(); loadData(++token);
 }
@@ -351,14 +380,24 @@ function applyPlayersFilters() {
 function onPlayersDateInput() { syncDateLastControls(); }
 function onPlayersLastInput() { syncDateLastControls(); }
 function syncDateLastControls() {
-  const dateActive = (value('playersDateFrom') !== '' && value('playersDateFrom') !== DEFAULT_DATE_FROM) || value('playersDateTo') !== '';
+  const dateActive = value('playersDateFrom').trim() !== '' || value('playersDateTo').trim() !== '';
   const lastActive = value('playersLastX') !== '';
   const from = document.getElementById('playersDateFrom');
   const to = document.getElementById('playersDateTo');
   const last = document.getElementById('playersLastX');
-  if (lastActive) { if (from) from.disabled = true; if (to) to.disabled = true; }
-  else if (dateActive) { if (last) last.disabled = true; }
-  else { if (from) from.disabled = false; if (to) to.disabled = false; if (last) last.disabled = false; }
+  if (lastActive) {
+    if (from) from.disabled = true;
+    if (to) to.disabled = true;
+    if (last) last.disabled = false;
+  } else if (dateActive) {
+    if (from) from.disabled = false;
+    if (to) to.disabled = false;
+    if (last) last.disabled = true;
+  } else {
+    if (from) from.disabled = false;
+    if (to) to.disabled = false;
+    if (last) last.disabled = false;
+  }
 }
 
 function onPlayersSearchInput(event) {
@@ -422,10 +461,12 @@ function clearPlayersSearch(event) {
   loadData(++token);
 }
 
-function updatePlayersMeta() {
+function updatePlayersMeta(errorMessage = '') {
   const meta = document.getElementById('playersMeta');
   if (!meta) return;
-  if (playerIndexState === 'loading') meta.textContent = 'Loading player list...';
+  if (errorMessage) meta.textContent = `Could not update player statistics: ${errorMessage}`;
+  else if (statsLoading) meta.textContent = 'Updating player statistics...';
+  else if (playerIndexState === 'loading') meta.textContent = 'Loading player list...';
   else if (playerIndexState === 'error') meta.textContent = `Could not load player list${playerIndexError ? `: ${playerIndexError}` : ''}. Use the retry button in the Player header.`;
   else if (view === 'comparison') meta.textContent = selectedPlayers.length ? `Number of games considered: ${comparisonCounts.map(item => `${item.name} (${item.game_count})`).join(', ')}` : 'Select players to compare.';
   else meta.textContent = selectedPlayer ? `Number of games considered: ${playerGameCount}` : 'Select a player to populate the Player column.';
@@ -441,8 +482,8 @@ function displayMetricName(metric) {
     .replaceAll('Points per money', 'Points per $')
     .replaceAll('Money gained', '$ gained')
     .replaceAll('Money spent', '$ spent')
-    .replaceAll('Cards drawn from deck', 'Cards (deck)')
-    .replaceAll('Cards drawn from range', 'Cards (range)');
+    .replaceAll('Cards drawn from deck', 'Cards drawn (deck)')
+    .replaceAll('Cards drawn from range', 'Cards drawn (Range)');
 }
 
 function finiteNumber(raw) {
@@ -459,7 +500,16 @@ function formatValue(raw, format) {
   return value.toFixed(2);
 }
 
-function renderLoading() { document.getElementById('playersContent').innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching player statistics...</div></div>'; }
+function renderLoading() {
+  statsLoading = true;
+  const existing = document.querySelector('.players-table-wrap');
+  if (existing && rows.length) {
+    existing.classList.add('players-updating');
+    updatePlayersMeta();
+    return;
+  }
+  document.getElementById('playersContent').innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching player statistics...</div></div>';
+}
 function renderError(error) { document.getElementById('playersContent').innerHTML = `<div class="state-overlay"><div class="state-title">Could not load player statistics</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div>`; }
 function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
 const escapeAttr = escapeHtml;
