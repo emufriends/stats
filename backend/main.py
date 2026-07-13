@@ -65,7 +65,7 @@ CARD_ATTRIBUTES_URL = os.environ.get(
 )
 CARD_ATTRIBUTES_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "cards_attributes.csv")
 CARD_ATTRIBUTES_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/cards-attributes.json"
-FILTER_CACHE_VERSION = "v10"
+FILTER_CACHE_VERSION = "v11"
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -292,6 +292,14 @@ PREPARED_LOGS_TABLE = os.environ.get(
 PREPARED_FULL_STATS_TABLE = os.environ.get(
     "PREPARED_FULL_STATS_TABLE",
     "ark-nova-stats-dashboard.dashboard_cache.full_stats_prepared",
+)
+PREPARED_PLAYERS_TABLE = os.environ.get(
+    "PREPARED_PLAYERS_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.players_stats_prepared",
+)
+PREPARED_PLAYERS_DEFAULT_TABLE = os.environ.get(
+    "PREPARED_PLAYERS_DEFAULT_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.players_default_prepared",
 )
 PREPARED_CARD_PLAYS_TABLE = os.environ.get(
     "PREPARED_CARD_PLAYS_TABLE",
@@ -989,6 +997,80 @@ def _write_home_bootstrap_asset():
         return False
 
 
+def _default_snapshot_pack_blob_names():
+    """Return the active frontend default manifest, excluding autocomplete indexes."""
+    names = []
+    for dataset in ("mw", "base"):
+        names.extend([
+            f"{CACHE_PREFIX}/default-{dataset}.json",
+            f"{CACHE_PREFIX}/opening-hand/default-{dataset}.json",
+            f"{CACHE_PREFIX}/endgames/default-{dataset}.json",
+            f"{CACHE_PREFIX}/endgames/cp-distribution/default-{dataset}.json",
+            f"{CACHE_PREFIX}/endgames/cp-by-map/default-{dataset}.json",
+            f"{CACHE_PREFIX}/maps/metrics/default-{dataset}.json",
+            f"{CACHE_PREFIX}/maps/tournament_h2h/default-{dataset}.json",
+            f"{CACHE_PREFIX}/sponsor-endgames/cp/default-{dataset}.json",
+            f"{CACHE_PREFIX}/sponsor-endgames/appeal/default-{dataset}.json",
+            f"{CACHE_PREFIX}/icons/default-{dataset}.json",
+            f"{CACHE_PREFIX}/build/enclosures/delta/default-{dataset}.json",
+            f"{CACHE_PREFIX}/build/enclosures/frequency/default-{dataset}.json",
+            f"{CACHE_PREFIX}/build/hexes/delta/default-{dataset}.json",
+            f"{CACHE_PREFIX}/build/hexes/frequency/default-{dataset}.json",
+            f"{CACHE_PREFIX}/predictors/general/default-{dataset}.json",
+            f"{CACHE_PREFIX}/predictors/icon/default-{dataset}.json",
+            f"{CACHE_PREFIX}/predictors/specific/default-{dataset}.json",
+            f"{CACHE_PREFIX}/actions/starting_position/delta/default-{dataset}.json",
+            f"{CACHE_PREFIX}/actions/upgrades/delta/default-{dataset}.json",
+            f"{CACHE_PREFIX}/actions/upgrade_order/delta/default-{dataset}.json",
+            f"{CACHE_PREFIX}/actions/upgrade_order/frequency/default-{dataset}.json",
+            f"{CACHE_PREFIX}/actions/upgrades_by_map/delta/default-{dataset}.json",
+            f"{CACHE_PREFIX}/actions/upgrades_by_map/frequency/default-{dataset}.json",
+            f"{CACHE_PREFIX}/conservation/projects/default-{dataset}.json",
+            f"{CACHE_PREFIX}/conservation/project-rewards/default-{dataset}.json",
+            f"{CACHE_PREFIX}/conservation/cp-rewards/default-{dataset}.json",
+            f"{CACHE_PREFIX}/workers/general/default-{dataset}.json",
+            f"{CACHE_PREFIX}/workers/two-cp-worker/default-{dataset}.json",
+            f"{CACHE_PREFIX}/players/general/default-{dataset}.json",
+            f"{CACHE_PREFIX}/combinations/card-card/default-{dataset}.json",
+            f"{CACHE_PREFIX}/combinations/card-map/default-{dataset}.json",
+            f"{CACHE_PREFIX}/combinations/card-round/default-{dataset}.json",
+            f"{CACHE_PREFIX}/combinations/card-endgame/default-{dataset}.json",
+        ])
+    return names
+
+
+def _write_default_snapshot_pack(data_version):
+    """Publish all current default payloads as one atomically cached daily asset."""
+    if not CACHE_BUCKET or not data_version:
+        return False
+    try:
+        bucket = storage.Client().bucket(CACHE_BUCKET)
+        snapshots = {}
+        for blob_name in _default_snapshot_pack_blob_names():
+            blob = bucket.blob(blob_name)
+            if not blob.exists():
+                raise RuntimeError(f"Default snapshot is missing: {blob_name}")
+            raw = blob.download_as_bytes(raw_download=True)
+            if raw.startswith(b"\x1f\x8b"):
+                raw = gzip.decompress(raw)
+            snapshots[blob_name] = json.loads(raw.decode("utf-8"))
+        payload = {
+            "status": "ok",
+            "data_version": data_version,
+            "snapshots": snapshots,
+        }
+        encoded = json.dumps(payload, default=_json_default, separators=(",", ":")).encode("utf-8")
+        blob = bucket.blob(f"{CACHE_PREFIX}/bootstrap/default-pack.json")
+        blob.cache_control = "public, max-age=31536000, immutable"
+        blob.content_encoding = "gzip"
+        blob.upload_from_string(
+            gzip.compress(encoded, compresslevel=6, mtime=0),
+            content_type="application/json",
+        )
+        return True
+    except Exception:
+        logging.exception("Failed to publish the daily default snapshot pack")
+        return False
 def _filter_cache_blob_name(
     stats_page,
     is_mw,
@@ -1073,7 +1155,7 @@ def _is_default_cache_request(
             and player_elo_max is None
             and opponent_elo_min == 0
             and opponent_elo_max is None
-            and date_from == DEFAULT_DATE_FROM
+            and date_from is None
             and date_to is None
             and completed_only is None
             and not round_filter_active
@@ -1230,6 +1312,106 @@ def _refresh_prepared_full_stats_table():
     }
 
 
+def _refresh_prepared_players_table():
+    """Build the narrow player-game table used by Players aggregations.
+
+    Full Sample remains read-only. Expensive per-game formulas and winner
+    pairing are materialized here once per daily refresh so interactive queries
+    scan only the columns they actually need.
+    """
+    definitions = _players_metric_definitions()
+    expressions = _players_metric_expressions()
+    money_fields = _players_money_fields()
+    ordinary_keys = [key for key, *_ in definitions if key not in money_fields]
+    metric_selects = ",\n      ".join(
+        f"{expressions[key]} AS {key}" for key in ordinary_keys
+    )
+    money_selects = ",\n      ".join(
+        f"SAFE_CAST({source} AS FLOAT64) AS {key}_raw"
+        for key, source in money_fields.items()
+    )
+    query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_PLAYERS_TABLE}`
+    PARTITION BY game_date
+    -- Player leads the clustering order because exact-player lookup is the
+    -- latency-sensitive path. Dataset, map, and opponent Elo still prune the
+    -- common filtered scans within each player's blocks.
+    CLUSTER BY player, is_mw, Map, opponent_elo
+    AS
+    WITH tagged AS (
+      SELECT
+        f.*,
+        MAX(IF(SAFE_CAST(f.Game_result AS INT64) = 2, 1, 0))
+          OVER (PARTITION BY f.table_id) AS has_result_two
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+    )
+    SELECT
+      table_id,
+      CAST(player AS STRING) AS player,
+      CAST(is_mw AS INT64) AS is_mw,
+      Map,
+      SAFE_CAST(game_ended_at AS TIMESTAMP) AS game_ended_at,
+      game_date,
+      SAFE_CAST(elo AS FLOAT64) AS elo,
+      -- Opponent Elo is filtered with integer request bounds. BigQuery cannot
+      -- cluster FLOAT64 columns, so the derived Players table stores this
+      -- filter-only field as INT64 without changing the read-only source.
+      SAFE_CAST(opponent_elo AS INT64) AS opponent_elo,
+      CAST(COALESCE(table_conceded, 0) AS INT64) AS table_conceded,
+      SAFE_CAST(Game_result AS INT64) = 1 AND has_result_two = 1 AS is_winner,
+      {metric_selects},
+      {money_selects}
+    FROM tagged
+    """
+
+    started_at = time.perf_counter()
+    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    # BigQuery cannot change clustering order through CREATE OR REPLACE. This
+    # table is a backend-owned derivative, so nightly maintenance replaces it;
+    # Full Sample remains untouched.
+    client.query(
+        f"DROP TABLE IF EXISTS `{PREPARED_PLAYERS_TABLE}`",
+        location=BIGQUERY_LOCATION,
+    ).result()
+    job = client.query(query, location=BIGQUERY_LOCATION)
+    job.result()
+    default_selects = ",\n      ".join(
+        [f"AVG({key}) AS {key}" for key in ordinary_keys]
+        + [f"AVG({key}_raw) AS {key}_raw" for key in money_fields]
+    )
+    valid_maps_sql = ", ".join(_sql_string(value) for value in VALID_MAPS)
+    default_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_PLAYERS_DEFAULT_TABLE}`
+    CLUSTER BY player, is_mw
+    AS
+    SELECT
+      player,
+      is_mw,
+      COUNT(*) AS game_count,
+      {default_selects}
+    FROM `{PREPARED_PLAYERS_TABLE}`
+    WHERE table_conceded = 0
+      AND opponent_elo >= 0
+      AND Map IN ({valid_maps_sql})
+    GROUP BY player, is_mw
+    """
+    default_job = client.query(default_query, location=BIGQUERY_LOCATION)
+    default_job.result()
+    return {
+        "status": "ok",
+        "prepared_table": PREPARED_PLAYERS_TABLE,
+        "total_ms": _ms_since(started_at),
+        "job_id": job.job_id,
+        "job_created": _dt_iso(job.created),
+        "job_started": _dt_iso(job.started),
+        "job_ended": _dt_iso(job.ended),
+        "job_total_bytes_processed": job.total_bytes_processed,
+        "job_total_slot_ms": job.slot_millis,
+        "default_prepared_table": PREPARED_PLAYERS_DEFAULT_TABLE,
+        "default_job_id": default_job.job_id,
+    }
+
+
 def _refresh_prepared_card_plays_table():
     excluded_projects_sql = ", ".join(_sql_string(value) for value in sorted(EXCLUDED_PROJECTS))
     query = f"""
@@ -1356,6 +1538,7 @@ def _refresh_prepared_card_pairs_table():
 def _refresh_prepared_tables():
     logs = _refresh_prepared_logs_table()
     full_stats = _refresh_prepared_full_stats_table()
+    players = _refresh_prepared_players_table()
     card_plays = _refresh_prepared_card_plays_table()
     card_pairs = _refresh_prepared_card_pairs_table()
     return {
@@ -1364,6 +1547,7 @@ def _refresh_prepared_tables():
         "job_id": full_stats["job_id"],
         "logs": logs,
         "full_stats": full_stats,
+        "players": players,
         "card_plays": card_plays,
         "card_pairs": card_pairs,
     }
@@ -1375,7 +1559,7 @@ def _refresh_player_index_snapshot(is_mw):
     blob_name = f"{CACHE_PREFIX}/players/index/default-{dataset}.json"
     query = f"""
       SELECT DISTINCT TRIM(CAST(player AS STRING)) AS player
-      FROM `{PREPARED_FULL_STATS_TABLE}`
+      FROM `{PREPARED_PLAYERS_TABLE}`
       WHERE CAST(is_mw AS INT64) = @is_mw
         AND Map IN UNNEST(@selected_maps)
         AND COALESCE(table_conceded, 0) = 0
@@ -2207,8 +2391,8 @@ def _maps_metric_definitions():
         ("money_spent_build_pct", 35, "Money spent (Build)", "Build spending as a percentage of total money spent", False, "percent", False),
         ("money_spent_donations_pct", 36, "Money spent (Donations)", "Donations spending as a percentage of total money spent", False, "percent", False),
         ("money_spent_range_pct", 37, "Money spent (Range)", "Range spending as a percentage of total money spent", False, "percent", False),
-        ("cards_drawn_deck", 39, "Cards drawn from deck", None, False, "number", False),
-        ("cards_drawn_range", 40, "Cards drawn from range", None, False, "number", False),
+        ("cards_drawn_deck", 39, "Cards drawn (deck)", None, False, "number", False),
+        ("cards_drawn_range", 40, "Cards drawn (Range)", None, False, "number", False),
         ("cards_snapped", 41, "Cards snapped", None, False, "number", False),
         ("cards_discarded", 42, "Cards discarded", None, False, "number", False),
         ("enclosures", 43, "Enclosures", None, False, "number", False),
@@ -2526,68 +2710,127 @@ def _players_total_spent_sql():
     return "(SAFE_CAST(Money_spent_on_animals AS FLOAT64) + SAFE_CAST(Money_spent_on_enclosures AS FLOAT64) + SAFE_CAST(Money_spent_on_donations AS FLOAT64) + SAFE_CAST(Money_spent_for_playing_cards_from_reputation_range AS FLOAT64))"
 
 
-def _build_players_query(where_sql):
+def _build_players_query(where_sql, component="combined"):
+    """Aggregate every Players metric after one scan of each required population.
+
+    `baseline` excludes the selected-player branch, while `selected` avoids the
+    global comparison populations. The live endpoint uses those components for
+    independent caching; default snapshot generation uses `combined`.
+    """
+    if component not in {"combined", "baseline", "selected"}:
+        raise ValueError("Invalid Players query component")
+    # Put the exact player predicate in the physical prepared-table scan for a
+    # selected-only request. Leaving it in a downstream CTE prevents reliable
+    # cluster pruning and makes a one-player query scan the global population.
+    selected_scope_sql = (
+        "AND NULLIF(@players_player, '') IS NOT NULL AND f.player = @players_player"
+        if component == "selected" else ""
+    )
     metric_definitions = _players_metric_definitions()
-    expressions = _players_metric_expressions()
-    population_conditions = {
-        "player": "NULLIF(@players_player, '') IS NOT NULL AND player = @players_player AND (@last_x_games = 0 OR player_rank <= @last_x_games)",
-        "all": "TRUE",
-        "winners": "is_winner",
-        "experts": "SAFE_CAST(elo AS FLOAT64) >= 500",
-        "masters": "SAFE_CAST(elo AS FLOAT64) >= 700",
-    }
     money_fields = _players_money_fields()
-    total_spent = _players_total_spent_sql()
+    ordinary_keys = [key for key, *_ in metric_definitions if key not in money_fields]
+    baseline_conditions = {
+        "all_players": "TRUE",
+        "winners": "is_winner",
+        "experts": "elo >= 500",
+        "masters": "elo >= 700",
+    }
 
-    def aggregate_expression(metric_key, population):
-        condition = population_conditions[population]
-        if metric_key in money_fields:
-            numerator = f"AVG(IF({condition}, SAFE_CAST({money_fields[metric_key]} AS FLOAT64), NULL))"
-            denominator = f"AVG(IF({condition}, {total_spent}, NULL))"
-            return f"100 * SAFE_DIVIDE({numerator}, {denominator})"
-        return f"AVG(IF({condition}, {expressions[metric_key]}, NULL))"
+    baseline_fields = []
+    for population, condition in baseline_conditions.items():
+        baseline_fields.append(f"COUNTIF({condition}) AS count_{population}")
+        baseline_fields.extend(
+            f"AVG(IF({condition}, {key}, NULL)) AS {key}_{population}"
+            for key in ordinary_keys
+        )
+        baseline_fields.extend(
+            f"AVG(IF({condition}, {key}_raw, NULL)) AS {key}_raw_{population}"
+            for key in money_fields
+        )
+    selected_fields = ["COUNT(*) AS count_player"]
+    selected_fields.extend(f"AVG({key}) AS {key}_player" for key in ordinary_keys)
+    selected_fields.extend(f"AVG({key}_raw) AS {key}_raw_player" for key in money_fields)
 
-    def count_expression(population):
-        return f"COUNTIF({population_conditions[population]})"
+    if component == "selected":
+        baseline_agg = "SELECT " + ", ".join(
+            ["0 AS count_all_players", "0 AS count_winners", "0 AS count_experts", "0 AS count_masters"]
+            + [f"CAST(NULL AS FLOAT64) AS {key}_{population}" for population in baseline_conditions for key in ordinary_keys]
+            + [f"CAST(NULL AS FLOAT64) AS {key}_raw_{population}" for population in baseline_conditions for key in money_fields]
+        )
+    else:
+        baseline_agg = "SELECT\n        " + ",\n        ".join(baseline_fields) + "\n      FROM scoped"
+    if component == "baseline":
+        selected_agg = "SELECT " + ", ".join(
+            ["0 AS count_player"]
+            + [f"CAST(NULL AS FLOAT64) AS {key}_player" for key in ordinary_keys]
+            + [f"CAST(NULL AS FLOAT64) AS {key}_raw_player" for key in money_fields]
+        )
+    else:
+        selected_agg = "SELECT\n        " + ",\n        ".join(selected_fields) + "\n      FROM selected"
 
-    def tooltip_expression(metric_key, population):
-        if metric_key not in money_fields:
-            return "CAST(NULL AS FLOAT64)"
-        return f"AVG(IF({population_conditions[population]}, SAFE_CAST({money_fields[metric_key]} AS FLOAT64), NULL))"
+    def metric_value(key, population, source):
+        if key not in money_fields:
+            return f"{source}.{key}_{population}"
+        numerator = f"{source}.{key}_raw_{population}"
+        denominator = " + ".join(
+            f"{source}.{money_key}_raw_{population}" for money_key in money_fields
+        )
+        return f"100 * SAFE_DIVIDE({numerator}, {denominator})"
+
+    def tooltip_value(key, population, source):
+        return (
+            f"{source}.{key}_raw_{population}"
+            if key in money_fields else "CAST(NULL AS FLOAT64)"
+        )
 
     unions = []
     for key, sort_order, label, tooltip, is_default, value_format, lower_is_better in metric_definitions:
         fields = [
-            f"{sort_order} AS sort_order", f"{_sql_string(label)} AS metric",
+            f"{sort_order} AS sort_order",
+            f"{_sql_string(label)} AS metric",
             f"{_sql_string(tooltip) if tooltip else 'CAST(NULL AS STRING)'} AS tooltip",
             f"{'TRUE' if is_default else 'FALSE'} AS is_default",
             f"{_sql_string(value_format)} AS format",
             f"{'TRUE' if lower_is_better else 'FALSE'} AS lower_is_better",
+            f"{metric_value(key, 'player', 's')} AS player",
+            "s.count_player AS count_player",
+            f"{tooltip_value(key, 'player', 's')} AS tooltip_player",
         ]
-        for population in ("player", "all", "winners", "experts", "masters"):
-            value_name = "all_players" if population == "all" else population
+        for population in baseline_conditions:
             fields.extend([
-                f"{aggregate_expression(key, population)} AS {value_name}",
-                f"{count_expression(population)} AS count_{value_name}",
-                f"{tooltip_expression(key, population)} AS tooltip_{value_name}",
+                f"{metric_value(key, population, 'b')} AS {population}",
+                f"b.count_{population} AS count_{population}",
+                f"{tooltip_value(key, population, 'b')} AS tooltip_{population}",
             ])
-        unions.append("SELECT " + ", ".join(fields) + " FROM scoped")
+        unions.append("SELECT " + ", ".join(fields) + " FROM baseline_agg b CROSS JOIN selected_agg s")
+
     return f"""
-    WITH scoped_base AS (
-      SELECT
-        f.*,
-        MAX(IF(SAFE_CAST(f.Game_result AS INT64) = 2, 1, 0)) OVER (PARTITION BY f.table_id) AS has_result_two,
-        ROW_NUMBER() OVER (
-          PARTITION BY f.player
-          ORDER BY f.game_date DESC, CAST(f.table_id AS STRING) DESC
-        ) AS player_rank
-      FROM `{PREPARED_FULL_STATS_TABLE}` f
+    WITH scoped AS (
+      SELECT f.*
+      FROM `{PREPARED_PLAYERS_TABLE}` f
       WHERE {where_sql}
         AND COALESCE(f.table_conceded, 0) = 0
+        {selected_scope_sql}
     ),
-    scoped AS (
-      SELECT *, SAFE_CAST(Game_result AS INT64) = 1 AND has_result_two = 1 AS is_winner
-      FROM scoped_base
+    selected_ranked AS (
+      SELECT
+        f.*,
+        ROW_NUMBER() OVER (
+          ORDER BY f.game_ended_at DESC, CAST(f.table_id AS STRING) DESC
+        ) AS player_rank
+      FROM scoped f
+      WHERE NULLIF(@players_player, '') IS NOT NULL
+        AND f.player = @players_player
+    ),
+    selected AS (
+      SELECT * FROM selected_ranked
+      WHERE @last_x_games = 0 OR player_rank <= @last_x_games
+    ),
+    baseline_agg AS (
+      {baseline_agg}
+    ),
+    selected_agg AS (
+      {selected_agg}
     )
     {' UNION ALL '.join(unions)}
     ORDER BY sort_order
@@ -2596,9 +2839,7 @@ def _build_players_query(where_sql):
 
 def _build_players_comparison_query(where_sql):
     metric_definitions = _players_metric_definitions()
-    expressions = _players_metric_expressions()
     money_fields = _players_money_fields()
-    total_spent = _players_total_spent_sql()
     metric_config_sql = ",\n        ".join(
         "STRUCT("
         f"{_sql_string(key)} AS metric_key, {sort_order} AS sort_order, "
@@ -2613,20 +2854,19 @@ def _build_players_comparison_query(where_sql):
     metric_keys_sql = ", ".join(item[0] for item in metric_definitions)
     ordinary_keys = [key for key, *_ in metric_definitions if key not in money_fields]
     ordinary_selects = ",\n        ".join(
-        f"AVG({expressions[key]}) AS {key}" for key in ordinary_keys
+        f"AVG({key}) AS {key}" for key in ordinary_keys
     )
     money_selects = ",\n        ".join(
-        f"AVG(SAFE_CAST({source} AS FLOAT64)) AS {key}_raw"
-        for key, source in money_fields.items()
+        f"AVG({key}_raw) AS {key}_raw" for key in money_fields
     )
     return f"""
     WITH ranked AS (
       SELECT f.*,
         ROW_NUMBER() OVER (
           PARTITION BY f.player
-          ORDER BY f.game_date DESC, CAST(f.table_id AS STRING) DESC
+          ORDER BY f.game_ended_at DESC, CAST(f.table_id AS STRING) DESC
         ) AS player_rank
-      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      FROM `{PREPARED_PLAYERS_TABLE}` f
       WHERE {where_sql}
         AND COALESCE(f.table_conceded, 0) = 0
         AND f.player IN UNNEST(@players_players)
@@ -4741,6 +4981,7 @@ def _query_card_stats(
     players_player=None,
     players_players=None,
     last_x_games=None,
+    players_component="combined",
     hexes_expanded=False,
     combination_paged=False,
     combination_page=COMBINATION_PAGE_DEFAULT,
@@ -4902,7 +5143,7 @@ def _query_card_stats(
         query = (
             _build_players_comparison_query(where_sql)
             if players_view == PLAYERS_VIEW_COMPARISON
-            else _build_players_query(where_sql)
+            else _build_players_query(where_sql, players_component)
         )
     else:
         where_sql, query_parameters = _build_where_sql(
@@ -5608,6 +5849,268 @@ def _query_card_stats(
     return rows, timing
 
 
+def _players_component_cache_blob_name(
+    component,
+    data_version,
+    is_mw,
+    selected_maps,
+    opponent_elo_min,
+    opponent_elo_max,
+    date_from,
+    date_to,
+    player=None,
+    last_x_games=None,
+):
+    cache_key = {
+        "version": FILTER_CACHE_VERSION,
+        "data_version": data_version,
+        "component": component,
+        "is_mw": int(is_mw),
+        "maps": sorted(selected_maps),
+        "opponent_elo_min": opponent_elo_min,
+        "opponent_elo_max": opponent_elo_max,
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "player": player if component == "selected" else None,
+        "last_x_games": last_x_games if component == "selected" else None,
+    }
+    digest = hashlib.sha256(
+        json.dumps(cache_key, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:32]
+    return f"{CACHE_PREFIX}/filters/players-components/{digest}.json"
+
+
+def _is_default_players_filter_scope(
+    selected_maps,
+    opponent_elo_min,
+    opponent_elo_max,
+    date_from,
+    date_to,
+):
+    return (
+        set(selected_maps) == set(VALID_MAPS)
+        and opponent_elo_min == 0
+        and opponent_elo_max is None
+        and date_from is None
+        and date_to is None
+    )
+
+
+def _merge_players_component_rows(baseline_rows, selected_rows):
+    baseline_by_order = {int(row.get("sort_order") or 0): row for row in baseline_rows or []}
+    selected_by_order = {int(row.get("sort_order") or 0): row for row in selected_rows or []}
+    merged = []
+    for definition in _players_metric_definitions():
+        sort_order = definition[1]
+        base = baseline_by_order.get(sort_order, {})
+        selected = selected_by_order.get(sort_order, {})
+        row = {
+            "sort_order": sort_order,
+            "metric": base.get("metric", selected.get("metric", definition[2])),
+            "tooltip": base.get("tooltip", selected.get("tooltip", definition[3])),
+            "is_default": bool(base.get("is_default", selected.get("is_default", definition[4]))),
+            "format": base.get("format", selected.get("format", definition[5])),
+            "lower_is_better": bool(base.get("lower_is_better", selected.get("lower_is_better", definition[6]))),
+            "player": selected.get("player"),
+            "count_player": int(selected.get("count_player") or 0),
+            "tooltip_player": selected.get("tooltip_player"),
+        }
+        for population in ("all", "winners", "experts", "masters"):
+            row[population] = base.get(population)
+            row[f"count_{population}"] = int(base.get(f"count_{population}") or 0)
+            row[f"tooltip_{population}"] = base.get(f"tooltip_{population}")
+        merged.append(row)
+    return merged
+
+
+def _query_default_player_component(is_mw, player):
+    """Read one player's unfiltered daily aggregate instead of scanning games."""
+    started_at = time.perf_counter()
+    client_started = time.perf_counter()
+    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client_ms = _ms_since(client_started)
+    job = client.query(
+        f"SELECT * FROM `{PREPARED_PLAYERS_DEFAULT_TABLE}` "
+        "WHERE is_mw = @is_mw AND player = @player LIMIT 1",
+        job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("is_mw", "INT64", int(is_mw)),
+            bigquery.ScalarQueryParameter("player", "STRING", player),
+        ]),
+        location=BIGQUERY_LOCATION,
+    )
+    result = list(job.result())
+    aggregate = result[0] if result else None
+    money_fields = _players_money_fields()
+    rows = []
+    for key, sort_order, label, tooltip, is_default, value_format, lower_is_better in _players_metric_definitions():
+        tooltip_value = None
+        if aggregate is None:
+            value = None
+            count = 0
+        elif key in money_fields:
+            tooltip_value = getattr(aggregate, f"{key}_raw", None)
+            denominator = sum(
+                float(getattr(aggregate, f"{money_key}_raw", 0) or 0)
+                for money_key in money_fields
+            )
+            value = 100 * float(tooltip_value) / denominator if tooltip_value is not None and denominator else None
+            count = int(aggregate.game_count or 0)
+        else:
+            value = getattr(aggregate, key, None)
+            count = int(aggregate.game_count or 0)
+        rows.append({
+            "sort_order": sort_order, "metric": label, "tooltip": tooltip,
+            "is_default": bool(is_default), "format": value_format,
+            "lower_is_better": bool(lower_is_better), "player": value,
+            "count_player": count, "tooltip_player": tooltip_value,
+        })
+    timing = {
+        "client_ms": client_ms, "submit_ms": 0, "query_wait_ms": _ms_since(started_at),
+        "iteration_ms": 0, "job_id": job.job_id, "job_created": _dt_iso(job.created),
+        "job_started": _dt_iso(job.started), "job_ended": _dt_iso(job.ended),
+        "job_cache_hit": job.cache_hit, "job_total_bytes_processed": job.total_bytes_processed,
+        "job_total_slot_ms": job.slot_millis,
+    }
+    return rows, timing
+
+
+def _query_default_players_comparison(is_mw, players):
+    """Read up to five unfiltered player aggregates in one small lookup."""
+    started_at = time.perf_counter()
+    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    job = client.query(
+        f"SELECT * FROM `{PREPARED_PLAYERS_DEFAULT_TABLE}` "
+        "WHERE is_mw = @is_mw AND player IN UNNEST(@players)",
+        job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("is_mw", "INT64", int(is_mw)),
+            bigquery.ArrayQueryParameter("players", "STRING", players),
+        ]),
+        location=BIGQUERY_LOCATION,
+    )
+    aggregates = {row.player: row for row in job.result()}
+    money_fields = _players_money_fields()
+    rows = []
+    for key, sort_order, label, tooltip, is_default, value_format, lower_is_better in _players_metric_definitions():
+        values = []
+        for player in players:
+            aggregate = aggregates.get(player)
+            tooltip_value = None
+            value = None
+            count = int(aggregate.game_count or 0) if aggregate else 0
+            if aggregate and key in money_fields:
+                tooltip_value = getattr(aggregate, f"{key}_raw", None)
+                denominator = sum(float(getattr(aggregate, f"{money_key}_raw", 0) or 0) for money_key in money_fields)
+                value = 100 * float(tooltip_value) / denominator if tooltip_value is not None and denominator else None
+            elif aggregate:
+                value = getattr(aggregate, key, None)
+            values.append({"player": player, "value": value, "tooltip_value": tooltip_value, "game_count": count})
+        rows.append({
+            "sort_order": sort_order, "metric": label, "tooltip": tooltip,
+            "is_default": bool(is_default), "format": value_format,
+            "lower_is_better": bool(lower_is_better), "values": values,
+        })
+    timing = {
+        "client_ms": 0, "submit_ms": 0, "query_wait_ms": _ms_since(started_at),
+        "iteration_ms": 0, "job_id": job.job_id, "job_created": _dt_iso(job.created),
+        "job_started": _dt_iso(job.started), "job_ended": _dt_iso(job.ended),
+        "job_cache_hit": job.cache_hit, "job_total_bytes_processed": job.total_bytes_processed,
+        "job_total_slot_ms": job.slot_millis,
+    }
+    return rows, timing
+
+
+def _query_players_components(query_args, query_kwargs, data_version, use_component_cache=True):
+    """Resolve reusable baseline and selected-player components independently."""
+    is_mw = query_args[0]
+    selected_maps = query_args[1]
+    opponent_elo_min = query_args[8]
+    opponent_elo_max = query_args[9]
+    date_from = query_args[10]
+    date_to = query_args[11]
+    player = query_kwargs.get("players_player")
+    last_x_games = query_kwargs.get("last_x_games")
+    baseline_rows = None
+    selected_rows = None
+    component_timings = {}
+
+    default_scope = _is_default_players_filter_scope(
+        selected_maps, opponent_elo_min, opponent_elo_max, date_from, date_to
+    )
+    if default_scope:
+        snapshot = _read_cached_snapshot(
+            is_mw, STATS_PAGE_PLAYERS, players_view=PLAYERS_VIEW_GENERAL
+        )
+        if snapshot:
+            baseline_rows = snapshot.get("data") or []
+
+    baseline_blob = _players_component_cache_blob_name(
+        "baseline", data_version, is_mw, selected_maps,
+        opponent_elo_min, opponent_elo_max, date_from, date_to,
+    )
+    selected_blob = _players_component_cache_blob_name(
+        "selected", data_version, is_mw, selected_maps,
+        opponent_elo_min, opponent_elo_max, date_from, date_to,
+        player, last_x_games,
+    ) if player else None
+    if use_component_cache and baseline_rows is None:
+        cached = _read_cache_blob(baseline_blob, "players_baseline_hit")
+        if cached:
+            baseline_rows = cached.get("data") or []
+    if use_component_cache and selected_blob:
+        cached = _read_cache_blob(selected_blob, "players_selected_hit")
+        if cached:
+            selected_rows = cached.get("data") or []
+
+    missing = []
+    if baseline_rows is None:
+        missing.append("baseline")
+    if player and selected_rows is None:
+        missing.append("selected")
+
+    def run_component(component):
+        if component == "selected" and default_scope and not last_x_games:
+            return _query_default_player_component(is_mw, player)
+        kwargs = dict(query_kwargs)
+        kwargs["players_component"] = component
+        if component == "baseline":
+            kwargs["players_player"] = None
+            kwargs["last_x_games"] = None
+        return _query_card_stats(*query_args, **kwargs)
+
+    if missing:
+        with ThreadPoolExecutor(max_workers=len(missing)) as executor:
+            futures = {component: executor.submit(run_component, component) for component in missing}
+            for component, future in futures.items():
+                rows, timing = future.result()
+                component_timings[component] = timing
+                if component == "baseline":
+                    baseline_rows = rows
+                    if use_component_cache:
+                        _write_cache_blob(baseline_blob, {"status": "ok", "data": rows}, "players_baseline_refreshed")
+                else:
+                    selected_rows = rows
+                    if use_component_cache and selected_blob:
+                        _write_cache_blob(selected_blob, {"status": "ok", "data": rows}, "players_selected_refreshed")
+
+    rows = _merge_players_component_rows(baseline_rows or [], selected_rows or [])
+    timings = list(component_timings.values())
+    timing = {
+        "client_ms": sum(item.get("client_ms") or 0 for item in timings),
+        "submit_ms": sum(item.get("submit_ms") or 0 for item in timings),
+        "query_wait_ms": max([item.get("query_wait_ms") or 0 for item in timings] or [0]),
+        "iteration_ms": sum(item.get("iteration_ms") or 0 for item in timings),
+        "job_id": ",".join(str(item.get("job_id")) for item in timings if item.get("job_id")) or None,
+        "job_created": None,
+        "job_started": None,
+        "job_ended": None,
+        "job_cache_hit": all(item.get("job_cache_hit") for item in timings) if timings else True,
+        "job_total_bytes_processed": sum(item.get("job_total_bytes_processed") or 0 for item in timings),
+        "job_total_slot_ms": sum(item.get("job_total_slot_ms") or 0 for item in timings),
+        "players_components": component_timings,
+    }
+    return rows, timing
+
+
 def _query_hexes_both(*args, **kwargs):
     """Return collapsed and exact Hexes rows in one API request."""
     collapsed_kwargs = dict(kwargs)
@@ -5668,7 +6171,7 @@ def _refresh_default_snapshot_from_prepared(
 ):
     started_at = time.perf_counter()
     is_home = stats_page == STATS_PAGE_HOME
-    snapshot_date_from = None if is_home else (
+    snapshot_date_from = None if is_home or stats_page == STATS_PAGE_PLAYERS else (
         MAPS_METRICS_DEFAULT_DATE_FROM
         if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_METRICS
         else DEFAULT_DATE_FROM
@@ -6050,11 +6553,13 @@ def _run_daily_refresh():
          combinations_card_card_mw, combinations_card_card_base,
         combinations_card_round_mw, combinations_card_round_base,
         combinations_card_map_mw, combinations_card_map_base,
-        combinations_card_endgame_mw, combinations_card_endgame_base,
+         combinations_card_endgame_mw, combinations_card_endgame_base,
     ]
+    snapshots_ok = all(item["status"] == "ok" for item in snapshots)
+    default_pack = _write_default_snapshot_pack(data_version) if snapshots_ok else False
     status = (
         "ok"
-        if data_version and home_bootstrap and players_index_mw["status"] == "ok" and players_index_base["status"] == "ok" and all(item["status"] == "ok" for item in snapshots)
+        if data_version and home_bootstrap and default_pack and players_index_mw["status"] == "ok" and players_index_base["status"] == "ok" and snapshots_ok
         else "error"
     )
     return {
@@ -6071,6 +6576,7 @@ def _run_daily_refresh():
         "home_mw": home_mw,
         "home_base": home_base,
         "home_bootstrap": "ok" if home_bootstrap else "error",
+        "default_pack": "ok" if default_pack else "error",
         "mw": mw,
         "base": base,
         "opening_hand_mw": opening_hand_mw,
@@ -6175,6 +6681,7 @@ def get_card_stats(request):
         refresh_data
         or debug_timing
         or params.get("refresh_prepared") is True
+        or params.get("refresh_players_prepared") is True
         or params.get("daily_refresh") is True
     )
 
@@ -6189,6 +6696,16 @@ def get_card_stats(request):
             return _json_http_response(payload, status_code, headers, request)
         except Exception as exc:
             logging.exception("Failed to refresh prepared tables")
+            return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
+
+    if params.get("refresh_players_prepared") is True:
+        try:
+            # Physical Players tuning can be rebuilt independently because it
+            # does not change snapshot semantics or the shared data version.
+            payload = _refresh_prepared_players_table()
+            return _json_http_response(payload, 200, headers, request)
+        except Exception as exc:
+            logging.exception("Failed to refresh the prepared Players table")
             return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
 
     if params.get("daily_refresh") is True:
@@ -6363,7 +6880,7 @@ def get_card_stats(request):
         opponent_elo_max = _parse_int_param(params.get("opponent_elo_max"), "opponent_elo_max")
         default_date_from = (
             None
-            if stats_page == STATS_PAGE_HOME
+            if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS)
             else MAPS_METRICS_DEFAULT_DATE_FROM
             if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_METRICS
             else DEFAULT_DATE_FROM
@@ -6385,6 +6902,8 @@ def get_card_stats(request):
         last_x_games = _parse_int_param(params.get("last_x_games"), "last_x_games")
         if last_x_games is not None and last_x_games < 1:
             raise ValueError("last_x_games must be a positive integer")
+        if stats_page == STATS_PAGE_PLAYERS and last_x_games is not None and (date_from or date_to):
+            raise ValueError("Players date range and last_x_games are mutually exclusive")
         if stats_page != STATS_PAGE_PLAYERS:
             players_player = None
             players_players = []
@@ -6608,7 +7127,24 @@ def get_card_stats(request):
             "use_query_cache": (stats_page != STATS_PAGE_ENDGAMES and not debug_timing),
         }
         expanded_rows = None
-        if stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
+        if stats_page == STATS_PAGE_PLAYERS and players_view == PLAYERS_VIEW_GENERAL:
+            rows, timing = _query_players_components(
+                query_args,
+                query_kwargs,
+                data_version,
+                use_component_cache=not debug_timing,
+            )
+        elif (
+            stats_page == STATS_PAGE_PLAYERS
+            and players_view == PLAYERS_VIEW_COMPARISON
+            and players_players
+            and not last_x_games
+            and _is_default_players_filter_scope(
+                selected_maps, opponent_elo_min, opponent_elo_max, date_from, date_to
+            )
+        ):
+            rows, timing = _query_default_players_comparison(is_mw, players_players)
+        elif stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
             rows, expanded_rows, timing = _query_hexes_both(*query_args, **query_kwargs)
         else:
             rows, timing = _query_card_stats(*query_args, **query_kwargs)
