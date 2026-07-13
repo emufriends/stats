@@ -177,9 +177,30 @@ export function setTopbarDataset(value) {
   if (active) active.classList.add('active');
 }
 
+// Closed Arena Top 100 snapshots belong to one ruleset. While that view is
+// active the matching dataset remains selected and the incompatible button is
+// disabled; leaving the view restores the ordinary global switch.
+export function setTopbarDatasetLock(value = null) {
+  document.querySelectorAll('.tab-btn').forEach(button => {
+    const buttonValue = button.classList.contains('tab-mw') ? 1 : 0;
+    const lockedOut = value !== null && buttonValue !== Number(value);
+    button.disabled = lockedOut;
+    button.classList.toggle('dataset-locked-out', lockedOut);
+  });
+}
+
+export function setFilterButtonDisabled(disabled) {
+  const button = document.getElementById('filterToggleBtn');
+  if (!button) return;
+  button.disabled = Boolean(disabled);
+  button.classList.toggle('filter-button-disabled', Boolean(disabled));
+  if (disabled) closeSidebarIfOpen();
+}
+
 // Shared sidebar drawer behaviour. The sidebar contents themselves are owned
 // by the active page module, because filters differ slightly per page.
 export function toggleSidebar() {
+  if (document.getElementById('filterToggleBtn')?.disabled) return;
   const sidebar = document.getElementById('sidebar');
   const overlay = document.getElementById('sidebarOverlay');
   if (!sidebar || !overlay) return;

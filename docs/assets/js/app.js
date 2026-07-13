@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260713-1';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260713-2';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor } from './color-scales.js?v=20260710-3';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
@@ -6,7 +6,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260713-1';
+} from './snapshot-cache.js?v=20260713-2';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -16,7 +16,7 @@ import {
   setTopbarDataset,
   toggleNavCollapse,
   toggleSidebar,
-} from './layout.js?v=20260712-3';
+} from './layout.js?v=20260713-2';
 
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;
@@ -188,6 +188,14 @@ function setDataset(value, button) {
   setTopbarDataset(currentDataset);
   if (activePage && activePage.setDataset) activePage.setDataset(currentDataset);
 }
+
+// Static Arena seasons carry their own ruleset. The Players module requests a
+// global dataset change through this event so the topbar and app controller
+// stay authoritative without coupling the page module back to this file.
+window.addEventListener('arknova:set-dataset', event => {
+  if (event?.detail?.value === undefined) return;
+  setDataset(event.detail.value);
+});
 
 function setMinimumPlaysWarning(input, shouldWarn) {
   if (!input) return;

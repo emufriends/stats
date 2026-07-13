@@ -74,6 +74,8 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['workers', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/workers/two-cp-worker/default-base.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-mw.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-base.json'],
+  ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena/manifest.json'],
+  ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena-top-100/all-seasons.json'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-card/default-mw.json?v=20260629-13'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-card/default-base.json?v=20260629-13'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-map/default-mw.json?v=20260629-13'],
@@ -324,7 +326,10 @@ export function preloadDefaultSnapshots() {
 }
 
 export function prioritizeSnapshotGroup(group) {
-  if (currentPackReady) return;
+  // Players owns a deliberately separate Arena history bundle, so hovering or
+  // focusing that nav item must still warm its assets after the universal
+  // default pack is ready.
+  if (currentPackReady && group !== 'players') return;
   const urls = DEFAULT_SNAPSHOT_MANIFEST.filter(([itemGroup]) => itemGroup === group).map(([, url]) => url);
   urls.forEach(url => { void loadSnapshot(url).catch(() => {}); });
 }

@@ -172,6 +172,13 @@ Simple hash router:
 #/maps
 #/sponsor-endgames
 #/combos
+#/actions
+#/icons
+#/predictors
+#/build
+#/conservation
+#/workers
+#/players
 ```
 
 Unknown or empty hash falls back to `DEFAULT_PAGE_ID`.
@@ -253,7 +260,7 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, Build, Conservation, Workers, Players, and the Records placeholder. Home has no rail item; the topbar logo links to it. Build routes to `#/build`; Conservation routes to `#/conservation`; Workers routes to `#/workers`; Players routes to `#/players`. Scoring occupies a non-clickable placeholder position between Conservation and Workers. Scoring, Arena, and Records are placeholders; Players General and Comparison are active views.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, Build, Conservation, Workers, Players, and the Records placeholder. Home has no rail item; the topbar logo links to it. Build routes to `#/build`; Conservation routes to `#/conservation`; Workers routes to `#/workers`; Players routes to `#/players`. Scoring occupies a non-clickable placeholder position between Conservation and Workers. Scoring and Records are placeholders; all three Players views are active.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Rail icons are either complete inline `<svg>...</svg>` elements or the Build PNG mask span. Keep every inline SVG wrapper balanced when reordering nav items; paths/circles outside an opening SVG are silently discarded by the browser.
 - Header topbar includes:
@@ -952,9 +959,12 @@ data.
 ### Players Page
 
 Players is routed at `#/players` and uses `stats_page: "players"` with
-`players_view: "general" | "comparison" | "arena"`. Tabs are ordered General,
-Comparison, Arena and are equal width. General and Comparison are active;
-Arena remains a visual placeholder.
+`players_view: "general" | "comparison" | "arena_top_100"`. Tabs are ordered
+General, Comparison, Arena Top 100 and are equal width. General and Comparison
+are interactive player analysis; Arena Top 100 is a closed, static seasonal
+ranking analysis. The Players main header reserves the shared `24.6667px`
+control slot used by other pages; the Arena season selector is constrained to
+that slot so switching tabs does not move the tab bar or table.
 
 General displays six equal-width columns: Metric, Player, All, Winners, Experts,
 and Masters. Its 64 rows are the Maps/Metrics rows from Turns through Science
@@ -972,7 +982,8 @@ does not enter Winners, although it remains eligible for All, Experts, or
 Masters. Experts use player `elo >= 500`; Masters use player `elo >= 700`.
 Malformed result combinations do not qualify as wins.
 
-Players filters are opponent Elo, maps, date range, and Last X games. The
+Players filters are opponent Elo, maps, date range, Last X games, and Arena
+season. The
 opponent Elo minimum is visually empty and means `0`; this is a Players-specific
 default. There is no player Elo filter and no completion toggle because
 concession is always excluded. Last X selects the selected player's newest
@@ -984,6 +995,23 @@ field re-enables the other control immediately. Disabled fields serialize as
 `null`, and the backend rejects any manually constructed request that contains
 both a date boundary and Last X. Reset clears both mechanisms, changes only
 filters, and preserves selected players.
+
+Arena Seasons are always visible below Last X; selecting one or more seasons
+activates the Arena restriction, while an empty selection means no Arena
+restriction. A game belongs to an Arena season only when `arena_rating_delta` is non-null and its UTC
+`game_ended_at` lies in a configured interval whose `Mode` matches the row's
+Base/MW dataset. The interval is half-open: `Start <= game_ended_at < End`.
+Arena-marked rows outside every interval, or in an interval for the other
+ruleset, receive no `arena_season` and are treated as non-Arena. Started
+seasons appear newest-first. Other-mode chips remain visible but disabled and
+darkened; `all` selects every compatible season and `none` clears the Arena
+restriction. Dataset changes remove incompatible choices without selecting a
+replacement. Arena filtering intersects maps, opponent Elo, dates, and Last X
+normally. Requests use `players_arena_only` (derived from whether the selected
+season list is non-empty) and `players_arena_seasons`; both
+fields participate in response and component-cache keys. Selected-season date
+bounds are also added to SQL for partition pruning, while `arena_season`
+remains the exact semantic predicate.
 
 The General API accepts `players_player` and `last_x_games`; its payload includes
 `player_game_count` and absolute tooltip fields for the four spending-share rows.
@@ -1003,6 +1031,97 @@ the player to the leftmost available column; clearing a selection compacts the
 remaining players. Comparison prevents duplicate selections and begins color
 coding only after at least two players are selected. Its status text is
 `Number of games considered: p1 (x1), p2 (x2), ...`.
+
+#### Arena metadata and Arena Top 100
+
+Board Game Arena's Arena mode changes only the ranking ladder; Ark Nova play is
+otherwise ordinary. Arena is divided into roughly three-month seasons named
+S1, S2, and so on. `arena/arena_settings.csv` is canonical and contains
+`Season`, `Start (UTC)`, `End (UTC)`, and `Mode`. Refresh rejects duplicate
+names, overlapping or reversed intervals, invalid UTC values, and modes other
+than `Base`/`MW`. The frontend reads a normalized manifest rather than parsing
+CSV, so season chips are local and immediate.
+
+Top 100 availability is intentionally different from the interactive filter:
+a season appears in Arena Top 100 exactly when a lowercase ranking file such as
+`s12.csv` exists, not when its configured end time passes. Each file must have
+exactly ranks 1-100, 100 unique non-empty `BGA Name` values, and numeric
+`Rating` values. Daily refresh checks every configured season. Adding `s13.csv`
+therefore adds S13 at the next successful refresh without a code change. The
+Function checks the dashboard's canonical remote Arena directory first and
+ships a packaged last-known copy as an outage fallback.
+
+Arena Top 100 has one season selector above the tab bar, newest first, and
+defaults to the newest ranking-file season. Selecting a season forces the
+global dataset to that season's Mode, disables the incompatible Base/MW button,
+and disables the Filter button. Those controls are restored on leaving the
+tab. The fixed, non-sortable table is:
+
+```text
+# | Player | End | Peak | Games | Winrate | Opp. Elo | PR | Turns | PPT
+```
+
+`#` is 5%, Player is 20%, and each remaining column is 9.375%. Rank, Player,
+and End come directly from the ranking CSV. Peak is maximum non-null
+`post_match_arena_rating`; Games counts every matched Arena player-game;
+Winrate is average valid score times 100, where win=1, draw=0.5, loss=0; Opp.
+Elo averages non-null `opponent_elo`. Games, Peak, Winrate, Opp. Elo, PR, and
+graph history include conceded games. Turns and PPT average `Number_of_turns`
+and `points_per_turn` only from non-conceded rows. A malformed result still
+counts as a game but cannot enter Winrate or PR. A ranked player with no matched
+rows displays Games 0 and `-` for unavailable metrics.
+
+PR is a tournament performance rating based on ordinary Elo, never Arena
+rating. It uses valid scored games only, rounds score rate to the nearest whole
+percentage, adds the official FIDE table 8.1.1 `dp` value to those games'
+average opponent Elo, uses -800/+800 at 0%/100%, and rounds the result to a
+whole number. The integer lookup is deliberate; do not replace it with the
+continuous logistic approximation.
+
+The graph toggle belongs to the Arena Top 100 tab. It plots UTC
+`game_ended_at` against `post_match_arena_rating`, ordered by timestamp and
+then table ID. Conceded observations remain and null ratings are skipped. All
+100 ranked players remain in a searchable, scrolling legend; players without
+rating points are disabled. Ranks 1-5 start selected. At most five lines may be
+active, a sixth choice is blocked, and `Maximum 5 players` is permanently
+shown. `Top 5`, `None`, and `Random` are local shortcuts; Random selects five
+eligible players without contacting the backend.
+
+The graph has a fixed viewport-sized shell and a vertically scrolling legend.
+Hovering a selected line shows only that line's rating, directly above the
+cursor; no player name or date is shown. The x-axis has no separate `Date (UTC)`
+title. While graph mode is active, local `Day X to Day Y` inputs appear in the
+shared Players header slot rather than below the graph. They zoom the existing
+chart without changing its physical size or requesting data. The season length
+is `ceil((End - Start) / 24 hours)`, so the default is Day 1 to the final season
+day. Inputs accept digits only: X below 1 becomes 1; X at or above the season
+length resets to 1; Y is capped at the season length; and Y at or below X is
+corrected to the season maximum. Changing season resets the full range. These
+controls, hover values, and zooming are frontend-only.
+
+The Arena Top 100 table keeps the permanent season rank in `#` while allowing
+End, Peak, Games, Winrate, Opp. Elo, PR, Turns, and PPT to sort. End descending
+is the default. Clicking the active header reverses its direction; selecting a
+different header starts descending. Missing values sort after valid values and
+rank is the stable tie-breaker. Sortable headers use the shared highlighted
+header and arrow indicator.
+
+Every daily job rebuilds every available Top 100 season because late game
+indexes can arrive. Publication occurs only after all seasons succeed, leaving
+the previous object intact on any failure:
+
+```text
+card-stats/players/arena/manifest.json
+card-stats/players/arena-top-100/all-seasons.json
+```
+
+The gzip-compressed all-season bundle contains season metadata, all 100-row
+tables, and compact parallel timestamp/rating arrays. It is not part of the
+universal default pack. Hovering, focusing, or choosing Players in the nav and
+mounting Players both start the same versioned Cache Storage download. The
+previous successful cache remains usable across a daily version transition.
+Once cached, season switching, table/graph switching, legend search, and line
+selection make no Cloud Function or BigQuery request.
 
 Default snapshots are:
 
@@ -1031,7 +1150,8 @@ Interactive statistics read the backend-owned
 `dashboard_cache.players_stats_prepared` table, not Full Sample directly. The
 daily refresh derives one narrow player-game row per source observation,
 including table-level concession, winner status, all 64 metric values, the four
-raw spending amounts, timestamp, and table ID. It is partitioned by game date and
+raw spending amounts, timestamp, table ID, validated Arena score,
+`arena_rating_delta`, `post_match_arena_rating`, and derived `arena_season`. It is partitioned by game date and
 clustered by player, dataset, map, and opponent Elo. Player leads because exact
 player lookup is the latency-sensitive path. General uses one aggregate
 for All/Winners/Experts/Masters and a separate exact-player aggregate. The player
@@ -1040,8 +1160,8 @@ When both components are missing they are submitted concurrently and merged into
 the established payload shape.
 
 Players component caches are data-versioned. A baseline key contains dataset,
-maps, opponent-Elo bounds, and date bounds. A selected-player key adds the exact
-player and Last X. The ordinary full-response filter cache remains the first
+maps, opponent-Elo bounds, date bounds, Arena-only state, and selected seasons.
+A selected-player key adds the exact player and Last X. The ordinary full-response filter cache remains the first
 repeat-request layer; Comparison includes its normalized selected-player set and
 Last X in its response cache key. With default filters, General takes its
 comparison columns from the daily Players snapshot and queries only the selected
@@ -1192,6 +1312,16 @@ Notes:
 - The Attributes bar is client-side only and never triggers a backend query.
 - Missing metadata should fail open so table rows are not accidentally hidden.
 - For Sponsor rows with no Species or Continent/Habitat, the CSV stores `0` as an explicit no-tag value. Zooplankton also has `0` in Continent/Habitat. The UI does not show a `None` chip; clicking `none` in the Species/Habitat popup means an empty selected set, which filters for this explicit `0` no-tag value.
+
+### arena/
+
+`arena/arena_settings.csv` defines every Arena season and each optional
+lowercase `sN.csv` defines that season's final Top 100. The Function packages a
+copy of this directory but checks the canonical dashboard-hosted directory
+first on every refresh, allowing a newly committed season/ranking file to be
+discovered without a backend code change. Never infer Top 100 availability from
+the current date: ranking-file existence is the explicit publication signal.
+See the Players section for schemas, validation, populations, and formulas.
 
 ## Backend Overview
 
@@ -1713,7 +1843,7 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-Expected result: JSON with `status: ok`, `home_bootstrap: ok`, `default_pack: ok`, a successful `players` prepared-table entry, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build views, all four Combinations views, all Predictors and Actions views, all Conservation views, Workers General/2 CP Worker, Players General, and both Players indexes for MW/Base. Do not paste the token or command output if it includes secrets.
+Expected result: JSON with `status: ok`, `home_bootstrap: ok`, `default_pack: ok`, a successful `players` prepared-table entry, a successful `arena.top_100` bundle entry, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build views, all four Combinations views, all Predictors and Actions views, all Conservation views, Workers General/2 CP Worker, Players General, and both Players indexes for MW/Base. Do not paste the token or command output if it includes secrets.
 ## Maintenance Token Rotation
 
 If the maintenance token is exposed, rotate it immediately.
