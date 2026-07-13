@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
@@ -65,7 +66,17 @@ CARD_ATTRIBUTES_URL = os.environ.get(
 )
 CARD_ATTRIBUTES_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "cards_attributes.csv")
 CARD_ATTRIBUTES_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/cards-attributes.json"
-FILTER_CACHE_VERSION = "v11"
+ARENA_SOURCE_BASE_URL = os.environ.get(
+    "ARENA_SOURCE_BASE_URL",
+    "https://raw.githubusercontent.com/emufriends/arknova-stats/main/docs/arena",
+).rstrip("/")
+ARENA_LOCAL_DIR = os.environ.get(
+    "ARENA_LOCAL_DIR", os.path.join(os.path.dirname(__file__), "arena")
+)
+ARENA_METADATA_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/arena-source.json"
+ARENA_MANIFEST_BLOB = f"{CACHE_PREFIX}/players/arena/manifest.json"
+ARENA_TOP100_BUNDLE_BLOB = f"{CACHE_PREFIX}/players/arena-top-100/all-seasons.json"
+FILTER_CACHE_VERSION = "v12"
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -143,9 +154,28 @@ WORKERS_VIEW_GENERAL = "general"
 WORKERS_VIEW_TWO_CP_WORKER = "two_cp_worker"
 VALID_WORKERS_VIEWS = {WORKERS_VIEW_GENERAL, WORKERS_VIEW_TWO_CP_WORKER}
 PLAYERS_VIEW_GENERAL = "general"
-PLAYERS_VIEW_ARENA = "arena"
+PLAYERS_VIEW_ARENA_TOP_100 = "arena_top_100"
 PLAYERS_VIEW_COMPARISON = "comparison"
-VALID_PLAYERS_VIEWS = {PLAYERS_VIEW_GENERAL, PLAYERS_VIEW_ARENA, PLAYERS_VIEW_COMPARISON}
+VALID_PLAYERS_VIEWS = {
+    PLAYERS_VIEW_GENERAL,
+    PLAYERS_VIEW_ARENA_TOP_100,
+    PLAYERS_VIEW_COMPARISON,
+}
+
+# FIDE Rating Regulations table 8.1.1. Index is score percentage 0..100;
+# Top 100 performance rating is average opponent Elo plus this difference.
+FIDE_PERFORMANCE_DP = (
+    -800, -677, -589, -538, -501, -470, -444, -422, -401, -383,
+    -366, -351, -336, -322, -309, -296, -284, -273, -262, -251,
+    -240, -230, -220, -211, -202, -193, -184, -175, -166, -158,
+    -149, -141, -133, -125, -117, -110, -102, -95, -87, -80,
+    -72, -65, -57, -50, -43, -36, -29, -21, -14, -7, 0,
+    7, 14, 21, 29, 36, 43, 50, 57, 65, 72,
+    80, 87, 95, 102, 110, 117, 125, 133, 141, 149,
+    158, 166, 175, 184, 193, 202, 211, 220, 230, 240,
+    251, 262, 273, 284, 296, 309, 322, 336, 351, 366,
+    383, 401, 422, 444, 470, 501, 538, 589, 677, 800,
+)
 
 # Fixed reward catalogs make unavailable choices explicit instead of silently
 # dropping rows. The first six project rewards are generic; each remaining
@@ -623,7 +653,7 @@ def _parse_players_view(raw_value):
         return PLAYERS_VIEW_GENERAL
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_PLAYERS_VIEWS:
-        raise ValueError("players_view must be general, arena, or comparison")
+        raise ValueError("players_view must be general, comparison, or arena_top_100")
     return value
 
 
@@ -874,6 +904,176 @@ def _load_card_attribute_groups(force_refresh=False):
         _CARD_ATTRIBUTE_GROUPS = cached
         return cached
     raise RuntimeError("Card attribute metadata is unavailable")
+
+
+_ARENA_METADATA = None
+
+
+def _arena_season_number(value):
+    token = str(value or "").strip().upper()
+    if len(token) < 2 or token[0] != "S" or not token[1:].isdigit():
+        raise ValueError(f"Invalid Arena season name: {value}")
+    return int(token[1:])
+
+
+def _read_arena_source(filename, missing_ok=False):
+    local_path = os.path.join(ARENA_LOCAL_DIR, filename)
+    request = urllib.request.Request(
+        f"{ARENA_SOURCE_BASE_URL}/{filename}",
+        headers={"User-Agent": "ark-nova-dashboard-refresh"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.read().decode("utf-8-sig")
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+    except (urllib.error.URLError, TimeoutError):
+        # The packaged copy makes a daily refresh deterministic during a
+        # temporary GitHub outage. Remote-first lookup means manually adding a
+        # new season/ranking file to the dashboard is still discovered on the
+        # next refresh without redeploying the Function.
+        pass
+    if os.path.exists(local_path):
+        with open(local_path, "r", encoding="utf-8-sig", newline="") as source:
+            return source.read()
+    if missing_ok:
+        return None
+    raise FileNotFoundError(f"Arena source file is unavailable: {filename}")
+
+
+def _parse_arena_settings(source_text):
+    reader = csv.DictReader(io.StringIO(source_text))
+    required = {"Season", "Start (UTC)", "End (UTC)", "Mode"}
+    if not required.issubset(set(reader.fieldnames or [])):
+        raise ValueError("arena_settings.csv is missing Season, Start (UTC), End (UTC), or Mode")
+    seasons = []
+    seen = set()
+    for raw in reader:
+        season = str(raw.get("Season") or "").strip().upper()
+        number = _arena_season_number(season)
+        if season in seen:
+            raise ValueError(f"Duplicate Arena season: {season}")
+        seen.add(season)
+        mode = str(raw.get("Mode") or "").strip()
+        if mode not in {"MW", "Base"}:
+            raise ValueError(f"Arena season {season} has invalid Mode {mode!r}")
+        try:
+            start = datetime.strptime(str(raw.get("Start (UTC)") or "").strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            end = datetime.strptime(str(raw.get("End (UTC)") or "").strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            raise ValueError(f"Arena season {season} has an invalid UTC timestamp") from exc
+        if start >= end:
+            raise ValueError(f"Arena season {season} must start before it ends")
+        seasons.append({
+            "season": season,
+            "number": number,
+            "start_utc": start.isoformat().replace("+00:00", "Z"),
+            "end_utc": end.isoformat().replace("+00:00", "Z"),
+            "mode": mode,
+            "is_mw": 1 if mode == "MW" else 0,
+        })
+    if not seasons:
+        raise ValueError("arena_settings.csv contains no seasons")
+    by_start = sorted(seasons, key=lambda item: item["start_utc"])
+    for previous, current in zip(by_start, by_start[1:]):
+        if current["start_utc"] < previous["end_utc"]:
+            raise ValueError(f"Arena seasons {previous['season']} and {current['season']} overlap")
+    return sorted(seasons, key=lambda item: item["number"])
+
+
+def _parse_arena_ranking(source_text, season):
+    reader = csv.DictReader(io.StringIO(source_text))
+    required = {"#", "BGA Name", "Rating"}
+    if not required.issubset(set(reader.fieldnames or [])):
+        raise ValueError(f"{season.lower()}.csv is missing #, BGA Name, or Rating")
+    rows = []
+    names = set()
+    for raw in reader:
+        try:
+            rank = int(str(raw.get("#") or "").strip())
+            rating = int(round(float(str(raw.get("Rating") or "").strip())))
+        except ValueError as exc:
+            raise ValueError(f"{season.lower()}.csv contains a non-numeric rank or rating") from exc
+        player = str(raw.get("BGA Name") or "").strip()
+        if not player or player in names:
+            raise ValueError(f"{season.lower()}.csv contains a blank or duplicate player")
+        names.add(player)
+        rows.append({"rank": rank, "player": player, "end": rating})
+    rows.sort(key=lambda item: item["rank"])
+    if len(rows) != 100 or [item["rank"] for item in rows] != list(range(1, 101)):
+        raise ValueError(f"{season.lower()}.csv must contain ranks 1 through 100 exactly once")
+    return rows
+
+
+def _arena_manifest(metadata, data_version=None):
+    payload = {
+        "status": "ok",
+        "generated_at": metadata["generated_at"],
+        "seasons": [dict(item) for item in metadata["seasons"]],
+        "latest_by_mode": dict(metadata["latest_by_mode"]),
+        "latest_top_100": metadata.get("latest_top_100"),
+    }
+    if data_version:
+        payload["data_version"] = data_version
+    return payload
+
+
+def _load_arena_metadata(force_refresh=False, publish_manifest=True):
+    """Load validated season/ranking CSVs and retain a last-known-good copy."""
+    global _ARENA_METADATA
+    if _ARENA_METADATA is not None and not force_refresh:
+        return _ARENA_METADATA
+    if not force_refresh:
+        cached = _read_cache_blob(ARENA_METADATA_CACHE_BLOB, "hit")
+        if cached:
+            cached.pop("cache_status", None)
+            cached.pop("cache_updated_at", None)
+            _ARENA_METADATA = cached
+            return cached
+    try:
+        settings_text = _read_arena_source("arena_settings.csv")
+        seasons = _parse_arena_settings(settings_text)
+        rankings = {}
+        now = datetime.now(timezone.utc)
+        for season in seasons:
+            source = _read_arena_source(f"{season['season'].lower()}.csv", missing_ok=True)
+            if source is not None:
+                rankings[season["season"]] = _parse_arena_ranking(source, season["season"])
+            start = datetime.fromisoformat(season["start_utc"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(season["end_utc"].replace("Z", "+00:00"))
+            season["started"] = now >= start
+            season["completed"] = now >= end
+            season["top_100_available"] = season["season"] in rankings
+        latest_by_mode = {}
+        for mode in ("MW", "Base"):
+            eligible = [item for item in seasons if item["mode"] == mode and item["started"]]
+            latest_by_mode[mode.lower()] = max(eligible, key=lambda item: item["number"])["season"] if eligible else None
+        available = [item for item in seasons if item["top_100_available"]]
+        metadata = {
+            "status": "ok",
+            "generated_at": now.isoformat(),
+            "source_sha256": hashlib.sha256(settings_text.encode("utf-8")).hexdigest(),
+            "seasons": seasons,
+            "rankings": rankings,
+            "latest_by_mode": latest_by_mode,
+            "latest_top_100": max(available, key=lambda item: item["number"])["season"] if available else None,
+        }
+        if not _write_cache_blob(ARENA_METADATA_CACHE_BLOB, metadata, "refreshed"):
+            raise RuntimeError("Could not persist Arena metadata")
+        if publish_manifest and not _write_cache_blob(ARENA_MANIFEST_BLOB, _arena_manifest(metadata), "refreshed"):
+            raise RuntimeError("Could not publish Arena manifest")
+        _ARENA_METADATA = metadata
+        return metadata
+    except Exception:
+        logging.exception("Failed to refresh Arena metadata from %s", ARENA_SOURCE_BASE_URL)
+        cached = _read_cache_blob(ARENA_METADATA_CACHE_BLOB, "hit")
+        if cached:
+            cached.pop("cache_status", None)
+            cached.pop("cache_updated_at", None)
+            _ARENA_METADATA = cached
+            return cached
+        raise RuntimeError("Arena metadata is unavailable")
 
 
 def _sql_string_list(values):
@@ -1312,13 +1512,34 @@ def _refresh_prepared_full_stats_table():
     }
 
 
-def _refresh_prepared_players_table():
+def _arena_season_case_sql(metadata, alias="f"):
+    branches = []
+    for season in metadata.get("seasons", []):
+        branches.append(
+            "WHEN SAFE_CAST({a}.arena_rating_delta AS FLOAT64) IS NOT NULL "
+            "AND CAST({a}.is_mw AS INT64) = {is_mw} "
+            "AND SAFE_CAST({a}.game_ended_at AS TIMESTAMP) >= TIMESTAMP({start}) "
+            "AND SAFE_CAST({a}.game_ended_at AS TIMESTAMP) < TIMESTAMP({end}) "
+            "THEN {season}".format(
+                a=alias,
+                is_mw=int(season["is_mw"]),
+                start=_sql_string(season["start_utc"]),
+                end=_sql_string(season["end_utc"]),
+                season=_sql_string(season["season"]),
+            )
+        )
+    return "CASE\n        " + "\n        ".join(branches) + "\n        ELSE NULL END"
+
+
+def _refresh_prepared_players_table(arena_metadata=None):
     """Build the narrow player-game table used by Players aggregations.
 
     Full Sample remains read-only. Expensive per-game formulas and winner
     pairing are materialized here once per daily refresh so interactive queries
     scan only the columns they actually need.
     """
+    arena_metadata = arena_metadata or _load_arena_metadata()
+    arena_season_case = _arena_season_case_sql(arena_metadata)
     definitions = _players_metric_definitions()
     expressions = _players_metric_expressions()
     money_fields = _players_money_fields()
@@ -1341,8 +1562,11 @@ def _refresh_prepared_players_table():
     WITH tagged AS (
       SELECT
         f.*,
-        MAX(IF(SAFE_CAST(f.Game_result AS INT64) = 2, 1, 0))
-          OVER (PARTITION BY f.table_id) AS has_result_two
+        COUNTIF(SAFE_CAST(f.Game_result AS INT64) = 1)
+          OVER (PARTITION BY f.table_id) AS result_one_count,
+        COUNTIF(SAFE_CAST(f.Game_result AS INT64) = 2)
+          OVER (PARTITION BY f.table_id) AS result_two_count,
+        COUNT(*) OVER (PARTITION BY f.table_id) AS result_row_count
       FROM `{PREPARED_FULL_STATS_TABLE}` f
     )
     SELECT
@@ -1358,10 +1582,19 @@ def _refresh_prepared_players_table():
       -- filter-only field as INT64 without changing the read-only source.
       SAFE_CAST(opponent_elo AS INT64) AS opponent_elo,
       CAST(COALESCE(table_conceded, 0) AS INT64) AS table_conceded,
-      SAFE_CAST(Game_result AS INT64) = 1 AND has_result_two = 1 AS is_winner,
+      result_row_count = 2 AND SAFE_CAST(Game_result AS INT64) = 1 AND result_two_count = 1 AS is_winner,
+      CASE
+        WHEN result_row_count = 2 AND SAFE_CAST(Game_result AS INT64) = 1 AND result_two_count = 1 THEN 1.0
+        WHEN result_row_count = 2 AND SAFE_CAST(Game_result AS INT64) = 2 AND result_one_count = 1 THEN 0.0
+        WHEN result_row_count = 2 AND SAFE_CAST(Game_result AS INT64) = 1 AND result_one_count = 2 THEN 0.5
+        ELSE CAST(NULL AS FLOAT64)
+      END AS arena_game_score,
+      SAFE_CAST(arena_rating_delta AS FLOAT64) AS arena_rating_delta,
+      SAFE_CAST(post_match_arena_rating AS FLOAT64) AS post_match_arena_rating,
+      {arena_season_case} AS arena_season,
       {metric_selects},
       {money_selects}
-    FROM tagged
+    FROM tagged f
     """
 
     started_at = time.perf_counter()
@@ -1535,10 +1768,10 @@ def _refresh_prepared_card_pairs_table():
     }
 
 
-def _refresh_prepared_tables():
+def _refresh_prepared_tables(arena_metadata=None):
     logs = _refresh_prepared_logs_table()
     full_stats = _refresh_prepared_full_stats_table()
-    players = _refresh_prepared_players_table()
+    players = _refresh_prepared_players_table(arena_metadata)
     card_plays = _refresh_prepared_card_plays_table()
     card_pairs = _refresh_prepared_card_pairs_table()
     return {
@@ -1592,6 +1825,178 @@ def _refresh_player_index_snapshot(is_mw):
         "job_id": job.job_id,
         "job_total_bytes_processed": job.total_bytes_processed,
         "job_total_slot_ms": job.slot_millis,
+    }
+
+
+def _fide_performance_rating(score_rate, average_opponent_elo):
+    """Return FIDE table 8.1.1 tournament performance for a score rate.
+
+    Arena uses the official integer score-percentage lookup rather than the
+    continuous logistic approximation. Draws count as half a point; malformed
+    results never enter either the score rate or this opponent-Elo average.
+    """
+    if score_rate is None or average_opponent_elo is None:
+        return None
+    score_rate = max(0.0, min(1.0, float(score_rate)))
+    percentage = max(0, min(100, int(math.floor(score_rate * 100.0 + 0.5))))
+    return int(round(float(average_opponent_elo) + FIDE_PERFORMANCE_DP[percentage]))
+
+
+def _arena_top100_season_payload(season):
+    """Rebuild one closed Arena ranking table and its compact rating history."""
+    ranking = season.get("ranking") or []
+    players = [item["player"] for item in ranking]
+    query = f"""
+      SELECT
+        player,
+        COUNT(*) AS games,
+        MAX(post_match_arena_rating) AS peak,
+        AVG(arena_game_score) AS score_rate,
+        AVG(opponent_elo) AS opponent_elo,
+        AVG(IF(arena_game_score IS NOT NULL, opponent_elo, NULL)) AS pr_opponent_elo,
+        AVG(IF(table_conceded = 0, turns, NULL)) AS turns,
+        AVG(IF(table_conceded = 0, points_per_turn, NULL)) AS ppt,
+        ARRAY_AGG(
+          IF(
+            post_match_arena_rating IS NULL,
+            NULL,
+            STRUCT(
+              FORMAT_TIMESTAMP('%Y-%m-%dT%H:%M:%SZ', game_ended_at) AS ended_at,
+              CAST(table_id AS STRING) AS table_id,
+              post_match_arena_rating AS rating
+            )
+          ) IGNORE NULLS
+          ORDER BY game_ended_at, CAST(table_id AS STRING)
+        ) AS history
+      FROM `{PREPARED_PLAYERS_TABLE}`
+      WHERE arena_season = @arena_season
+        AND is_mw = @is_mw
+        AND game_date BETWEEN @start_date AND @end_date
+        AND game_ended_at >= @start_utc
+        AND game_ended_at < @end_utc
+        AND player IN UNNEST(@players)
+      GROUP BY player
+    """
+    started_at = time.perf_counter()
+    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    start = datetime.fromisoformat(season["start_utc"].replace("Z", "+00:00"))
+    end = datetime.fromisoformat(season["end_utc"].replace("Z", "+00:00"))
+    job = client.query(
+        query,
+        job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("arena_season", "STRING", season["season"]),
+            bigquery.ScalarQueryParameter("is_mw", "INT64", int(season["is_mw"])),
+            bigquery.ScalarQueryParameter("start_date", "DATE", start.date()),
+            bigquery.ScalarQueryParameter("end_date", "DATE", end.date()),
+            bigquery.ScalarQueryParameter("start_utc", "TIMESTAMP", start),
+            bigquery.ScalarQueryParameter("end_utc", "TIMESTAMP", end),
+            bigquery.ArrayQueryParameter("players", "STRING", players),
+        ]),
+        location=BIGQUERY_LOCATION,
+    )
+    by_player = {str(row.player): row for row in job.result()}
+    rows = []
+    series = []
+    for ranked in ranking:
+        player = ranked["player"]
+        aggregate = by_player.get(player)
+        games = int(getattr(aggregate, "games", 0) or 0) if aggregate else 0
+        score_rate = getattr(aggregate, "score_rate", None) if aggregate else None
+        average_opponent = getattr(aggregate, "opponent_elo", None) if aggregate else None
+        pr_opponent = getattr(aggregate, "pr_opponent_elo", None) if aggregate else None
+        rows.append({
+            "rank": int(ranked["rank"]),
+            "player": player,
+            "end": int(round(float(ranked["end"]))),
+            "peak": getattr(aggregate, "peak", None) if aggregate else None,
+            "games": games,
+            "winrate": float(score_rate) * 100.0 if score_rate is not None else None,
+            "opponent_elo": average_opponent,
+            "pr": _fide_performance_rating(score_rate, pr_opponent),
+            "turns": getattr(aggregate, "turns", None) if aggregate else None,
+            "ppt": getattr(aggregate, "ppt", None) if aggregate else None,
+        })
+        history = list(getattr(aggregate, "history", None) or []) if aggregate else []
+        def history_value(item, key):
+            return item.get(key) if isinstance(item, dict) else getattr(item, key)
+        series.append({
+            "rank": int(ranked["rank"]),
+            "player": player,
+            # Parallel arrays avoid repeating player names and object keys for
+            # every graph point in the static all-season bundle.
+            "timestamps": [str(history_value(item, "ended_at")) for item in history],
+            "ratings": [float(history_value(item, "rating")) for item in history],
+        })
+    return {
+        "season": season["season"],
+        "mode": season["mode"],
+        "start_utc": season["start_utc"],
+        "end_utc": season["end_utc"],
+        "rows": rows,
+        "series": series,
+        "total_ms": _ms_since(started_at),
+        "job_id": job.job_id,
+        "job_total_bytes_processed": job.total_bytes_processed,
+        "job_total_slot_ms": job.slot_millis,
+    }
+
+
+def _refresh_arena_top100_bundle(arena_metadata, data_version):
+    """Publish all completed ranking-file seasons as one atomic static bundle."""
+    rankings = arena_metadata.get("rankings") or {}
+    available = []
+    for season in arena_metadata.get("seasons", []):
+        ranking = rankings.get(season.get("season"))
+        if season.get("top_100_available") and ranking:
+            available.append({**season, "ranking": ranking})
+    available.sort(key=lambda item: item["number"], reverse=True)
+    started_at = time.perf_counter()
+    results = {}
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(available)))) as executor:
+        futures = {
+            executor.submit(_arena_top100_season_payload, season): season["season"]
+            for season in available
+        }
+        for future, season_name in [(future, futures[future]) for future in futures]:
+            results[season_name] = future.result()
+
+    public_seasons = [{
+        "season": item["season"],
+        "number": int(item["number"]),
+        "mode": item["mode"],
+        "is_mw": int(item["is_mw"]),
+        "start_utc": item["start_utc"],
+        "end_utc": item["end_utc"],
+    } for item in available]
+    payload = {
+        "status": "ok",
+        "data_version": data_version,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "latest_season": public_seasons[0]["season"] if public_seasons else None,
+        "seasons": public_seasons,
+        "data": {item["season"]: results[item["season"]] for item in available},
+    }
+    cache_ok = _write_cache_blob(ARENA_TOP100_BUNDLE_BLOB, payload, "refreshed")
+    manifest_ok = cache_ok and _write_cache_blob(
+        ARENA_MANIFEST_BLOB,
+        _arena_manifest(arena_metadata, data_version),
+        "refreshed",
+    )
+    return {
+        "status": "ok" if cache_ok and manifest_ok else "error",
+        "cache_status": "refreshed" if cache_ok and manifest_ok else "cache_write_failed",
+        "seasons": len(available),
+        "rows": sum(len(item.get("rows") or []) for item in results.values()),
+        "total_ms": _ms_since(started_at),
+        "season_jobs": {
+            name: {
+                "total_ms": item.get("total_ms"),
+                "job_id": item.get("job_id"),
+                "job_total_bytes_processed": item.get("job_total_bytes_processed"),
+                "job_total_slot_ms": item.get("job_total_slot_ms"),
+            }
+            for name, item in results.items()
+        },
     }
 
 
@@ -4981,6 +5386,8 @@ def _query_card_stats(
     players_player=None,
     players_players=None,
     last_x_games=None,
+    players_arena_only=False,
+    players_arena_seasons=None,
     players_component="combined",
     hexes_expanded=False,
     combination_paged=False,
@@ -5135,6 +5542,35 @@ def _query_card_stats(
             date_to,
             True,
         )
+        if players_arena_only:
+            where_sql += " AND f.arena_season IN UNNEST(@players_arena_seasons)"
+            query_parameters.append(bigquery.ArrayQueryParameter(
+                "players_arena_seasons", "STRING", players_arena_seasons or []
+            ))
+            if players_arena_seasons:
+                metadata_by_season = {
+                    item["season"]: item for item in _load_arena_metadata().get("seasons", [])
+                }
+                selected_metadata = [
+                    metadata_by_season[item] for item in players_arena_seasons
+                    if item in metadata_by_season
+                ]
+                arena_start = min(
+                    datetime.fromisoformat(item["start_utc"].replace("Z", "+00:00")).date()
+                    for item in selected_metadata
+                )
+                arena_end = max(
+                    datetime.fromisoformat(item["end_utc"].replace("Z", "+00:00")).date()
+                    for item in selected_metadata
+                )
+                # arena_season remains the exact semantic predicate; these
+                # bounds exist solely to prune the prepared table's date
+                # partitions before the selected seasons are aggregated.
+                where_sql += " AND f.game_date BETWEEN @arena_start_date AND @arena_end_date"
+                query_parameters.extend([
+                    bigquery.ScalarQueryParameter("arena_start_date", "DATE", arena_start),
+                    bigquery.ScalarQueryParameter("arena_end_date", "DATE", arena_end),
+                ])
         query_parameters.extend([
             bigquery.ScalarQueryParameter("players_player", "STRING", players_player or ""),
             bigquery.ArrayQueryParameter("players_players", "STRING", players_players or []),
@@ -5860,6 +6296,8 @@ def _players_component_cache_blob_name(
     date_to,
     player=None,
     last_x_games=None,
+    arena_only=False,
+    arena_seasons=None,
 ):
     cache_key = {
         "version": FILTER_CACHE_VERSION,
@@ -5873,6 +6311,8 @@ def _players_component_cache_blob_name(
         "date_to": date_to.isoformat() if date_to else None,
         "player": player if component == "selected" else None,
         "last_x_games": last_x_games if component == "selected" else None,
+        "arena_only": bool(arena_only),
+        "arena_seasons": sorted(arena_seasons or []) if arena_only else [],
     }
     digest = hashlib.sha256(
         json.dumps(cache_key, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -5886,6 +6326,7 @@ def _is_default_players_filter_scope(
     opponent_elo_max,
     date_from,
     date_to,
+    arena_only=False,
 ):
     return (
         set(selected_maps) == set(VALID_MAPS)
@@ -5893,6 +6334,7 @@ def _is_default_players_filter_scope(
         and opponent_elo_max is None
         and date_from is None
         and date_to is None
+        and not arena_only
     )
 
 
@@ -6029,12 +6471,14 @@ def _query_players_components(query_args, query_kwargs, data_version, use_compon
     date_to = query_args[11]
     player = query_kwargs.get("players_player")
     last_x_games = query_kwargs.get("last_x_games")
+    arena_only = bool(query_kwargs.get("players_arena_only"))
+    arena_seasons = query_kwargs.get("players_arena_seasons") or []
     baseline_rows = None
     selected_rows = None
     component_timings = {}
 
     default_scope = _is_default_players_filter_scope(
-        selected_maps, opponent_elo_min, opponent_elo_max, date_from, date_to
+        selected_maps, opponent_elo_min, opponent_elo_max, date_from, date_to, arena_only
     )
     if default_scope:
         snapshot = _read_cached_snapshot(
@@ -6046,11 +6490,12 @@ def _query_players_components(query_args, query_kwargs, data_version, use_compon
     baseline_blob = _players_component_cache_blob_name(
         "baseline", data_version, is_mw, selected_maps,
         opponent_elo_min, opponent_elo_max, date_from, date_to,
+        arena_only=arena_only, arena_seasons=arena_seasons,
     )
     selected_blob = _players_component_cache_blob_name(
         "selected", data_version, is_mw, selected_maps,
         opponent_elo_min, opponent_elo_max, date_from, date_to,
-        player, last_x_games,
+        player, last_x_games, arena_only, arena_seasons,
     ) if player else None
     if use_component_cache and baseline_rows is None:
         cached = _read_cache_blob(baseline_blob, "players_baseline_hit")
@@ -6068,7 +6513,7 @@ def _query_players_components(query_args, query_kwargs, data_version, use_compon
         missing.append("selected")
 
     def run_component(component):
-        if component == "selected" and default_scope and not last_x_games:
+        if component == "selected" and default_scope and not last_x_games and not arena_only:
             return _query_default_player_component(is_mw, player)
         kwargs = dict(query_kwargs)
         kwargs["players_component"] = component
@@ -6321,8 +6766,13 @@ def _refresh_default_snapshot_from_prepared(
 def _run_daily_refresh():
     started_at = time.perf_counter()
     card_attributes = _load_card_attribute_groups(force_refresh=True)
-    prepared = _refresh_prepared_tables()
+    # Arena CSV metadata is validated before the prepared table is rebuilt so
+    # season assignment and every static Top 100 artifact use one coherent
+    # definition during the entire daily publication.
+    arena_metadata = _load_arena_metadata(force_refresh=True, publish_manifest=False)
+    prepared = _refresh_prepared_tables(arena_metadata)
     data_version = _write_data_version(prepared)
+    arena_top100 = _refresh_arena_top100_bundle(arena_metadata, data_version)
     players_index_mw = _refresh_player_index_snapshot(1)
     players_index_base = _refresh_player_index_snapshot(0)
     # Conservation adds six substantial aggregations. Start three workers now
@@ -6559,7 +7009,9 @@ def _run_daily_refresh():
     default_pack = _write_default_snapshot_pack(data_version) if snapshots_ok else False
     status = (
         "ok"
-        if data_version and home_bootstrap and default_pack and players_index_mw["status"] == "ok" and players_index_base["status"] == "ok" and snapshots_ok
+        if data_version and home_bootstrap and default_pack
+        and arena_top100["status"] == "ok"
+        and players_index_mw["status"] == "ok" and players_index_base["status"] == "ok" and snapshots_ok
         else "error"
     )
     return {
@@ -6573,6 +7025,12 @@ def _run_daily_refresh():
             "sponsor_cards": len(card_attributes.get("sponsor_cards", [])),
         },
         "prepared": prepared,
+        "arena": {
+            "configured_seasons": len(arena_metadata.get("seasons", [])),
+            "latest_by_mode": arena_metadata.get("latest_by_mode", {}),
+            "latest_top_100": arena_metadata.get("latest_top_100"),
+            "top_100": arena_top100,
+        },
         "home_mw": home_mw,
         "home_base": home_base,
         "home_bootstrap": "ok" if home_bootstrap else "error",
@@ -6690,7 +7148,8 @@ def get_card_stats(request):
 
     if params.get("refresh_prepared") is True:
         try:
-            payload = _refresh_prepared_tables()
+            arena_metadata = _load_arena_metadata(force_refresh=True)
+            payload = _refresh_prepared_tables(arena_metadata)
             payload["data_version"] = _write_data_version(payload)
             status_code = 200 if payload["data_version"] else 500
             return _json_http_response(payload, status_code, headers, request)
@@ -6702,7 +7161,7 @@ def get_card_stats(request):
         try:
             # Physical Players tuning can be rebuilt independently because it
             # does not change snapshot semantics or the shared data version.
-            payload = _refresh_prepared_players_table()
+            payload = _refresh_prepared_players_table(_load_arena_metadata(force_refresh=True))
             return _json_http_response(payload, 200, headers, request)
         except Exception as exc:
             logging.exception("Failed to refresh the prepared Players table")
@@ -6844,6 +7303,38 @@ def get_card_stats(request):
             if len(set(players_players)) != len(players_players):
                 raise ValueError("players_players must not contain duplicate players")
         is_mw = _parse_is_mw(params.get("is_mw", 1))
+        players_arena_only = False
+        players_arena_seasons = []
+        if stats_page == STATS_PAGE_PLAYERS and players_view in (
+            PLAYERS_VIEW_GENERAL, PLAYERS_VIEW_COMPARISON
+        ):
+            players_arena_only = bool(_parse_optional_bool(
+                params.get("players_arena_only"), "players_arena_only"
+            ))
+            raw_arena_seasons = params.get("players_arena_seasons", [])
+            if raw_arena_seasons is None:
+                raw_arena_seasons = []
+            if not isinstance(raw_arena_seasons, list):
+                raise ValueError("players_arena_seasons must be an array")
+            players_arena_seasons = []
+            for item in raw_arena_seasons:
+                token = str(item or "").strip().upper()
+                if token and token not in players_arena_seasons:
+                    players_arena_seasons.append(token)
+            if players_arena_only:
+                arena_metadata = _load_arena_metadata()
+                valid_seasons = {item["season"]: item for item in arena_metadata.get("seasons", [])}
+                unknown = [item for item in players_arena_seasons if item not in valid_seasons]
+                if unknown:
+                    raise ValueError(f"Unknown Arena season: {unknown[0]}")
+                incompatible = [
+                    item for item in players_arena_seasons
+                    if int(valid_seasons[item]["is_mw"]) != int(is_mw)
+                ]
+                if incompatible:
+                    raise ValueError(f"Arena season {incompatible[0]} is incompatible with the selected dataset")
+            else:
+                players_arena_seasons = []
         if params.get("players_index") is True:
             if stats_page != STATS_PAGE_PLAYERS:
                 raise ValueError("players_index is only valid for the Players page")
@@ -6864,6 +7355,19 @@ def get_card_stats(request):
                 )
             index_payload["source"] = "players_index_snapshot"
             return _json_http_response(index_payload, 200, headers, request)
+        if stats_page == STATS_PAGE_PLAYERS and players_view == PLAYERS_VIEW_ARENA_TOP_100:
+            # The page normally reads this public object directly. This proxy
+            # is only a CORS-safe fallback and never runs a database query.
+            arena_payload = _read_cache_blob(ARENA_TOP100_BUNDLE_BLOB, "arena_top100_proxy")
+            if arena_payload is None:
+                return _json_http_response(
+                    {"status": "error", "message": "Arena Top 100 snapshot is unavailable"},
+                    503,
+                    headers,
+                    request,
+                )
+            arena_payload["source"] = "arena_top100_snapshot"
+            return _json_http_response(arena_payload, 200, headers, request)
         default_player_elo_min = None if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS) else 300
         default_opponent_elo_min = (
             0 if stats_page == STATS_PAGE_PLAYERS
@@ -7006,6 +7510,8 @@ def get_card_stats(request):
         players_players,
         last_x_games,
     )
+    if stats_page == STATS_PAGE_PLAYERS and players_arena_only:
+        cacheable_default_request = False
     if stats_page == STATS_PAGE_COMBINATIONS and (
         combination_paged or combination_min_plays != COMBINATION_DEFAULT_MIN_PLAYS
     ):
@@ -7049,6 +7555,8 @@ def get_card_stats(request):
             "player": players_player,
             "players": players_players,
             "last_x_games": last_x_games,
+            "arena_only": players_arena_only,
+            "arena_seasons": players_arena_seasons,
         } if stats_page == STATS_PAGE_PLAYERS else
         None
     )
@@ -7124,6 +7632,8 @@ def get_card_stats(request):
             "players_player": players_player,
             "players_players": players_players,
             "last_x_games": last_x_games,
+            "players_arena_only": players_arena_only,
+            "players_arena_seasons": players_arena_seasons,
             "use_query_cache": (stats_page != STATS_PAGE_ENDGAMES and not debug_timing),
         }
         expanded_rows = None
@@ -7139,8 +7649,9 @@ def get_card_stats(request):
             and players_view == PLAYERS_VIEW_COMPARISON
             and players_players
             and not last_x_games
+            and not players_arena_only
             and _is_default_players_filter_scope(
-                selected_maps, opponent_elo_min, opponent_elo_max, date_from, date_to
+                selected_maps, opponent_elo_min, opponent_elo_max, date_from, date_to, players_arena_only
             )
         ):
             rows, timing = _query_default_players_comparison(is_mw, players_players)
@@ -7179,6 +7690,8 @@ def get_card_stats(request):
             "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
             "players_player": players_player if stats_page == STATS_PAGE_PLAYERS else None,
             "last_x_games": last_x_games if stats_page == STATS_PAGE_PLAYERS else None,
+            "players_arena_only": players_arena_only if stats_page == STATS_PAGE_PLAYERS else None,
+            "players_arena_seasons": players_arena_seasons if stats_page == STATS_PAGE_PLAYERS else None,
             "maps": (
                 ALL_MAPS_FOR_METRICS
                 if stats_page in (STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS, STATS_PAGE_CONSERVATION)
