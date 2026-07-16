@@ -76,7 +76,17 @@ ARENA_LOCAL_DIR = os.environ.get(
 ARENA_METADATA_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/arena-source.json"
 ARENA_MANIFEST_BLOB = f"{CACHE_PREFIX}/players/arena/manifest.json"
 ARENA_TOP100_BUNDLE_BLOB = f"{CACHE_PREFIX}/players/arena-top-100/all-seasons.json"
-FILTER_CACHE_VERSION = "v12"
+RECORDS_FASTEST_SHEET_URL = os.environ.get(
+    "RECORDS_FASTEST_SHEET_URL",
+    "https://docs.google.com/spreadsheets/d/1RSOjQdZcGmOY7PBsDY7erGz--dtPJLc3ydNArr9bV48/export?format=csv",
+)
+RECORDS_BIGGEST_TURNS_SHEET_URL = os.environ.get(
+    "RECORDS_BIGGEST_TURNS_SHEET_URL",
+    "https://docs.google.com/spreadsheets/d/1SfWmRUo3c2jHbezJDVwXxi3zqEm5RdiZxp4hbHfEl0Q/export?format=csv",
+)
+RECORDS_MANUAL_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-manual-source.json"
+FILTER_CACHE_VERSION = "v15"
+DEFAULT_PACK_SCHEMA_VERSION = 3
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -91,6 +101,7 @@ STATS_PAGE_ACTIONS = "actions"
 STATS_PAGE_CONSERVATION = "conservation"
 STATS_PAGE_WORKERS = "workers"
 STATS_PAGE_PLAYERS = "players"
+STATS_PAGE_RECORDS = "records"
 VALID_STATS_PAGES = {
     STATS_PAGE_CARDS,
     STATS_PAGE_HOME,
@@ -106,6 +117,7 @@ VALID_STATS_PAGES = {
     STATS_PAGE_CONSERVATION,
     STATS_PAGE_WORKERS,
     STATS_PAGE_PLAYERS,
+    STATS_PAGE_RECORDS,
 }
 ENDGAMES_VIEW_GENERAL = "general"
 ENDGAMES_VIEW_CP_DISTRIBUTION = "cp_distribution"
@@ -160,6 +172,18 @@ VALID_PLAYERS_VIEWS = {
     PLAYERS_VIEW_GENERAL,
     PLAYERS_VIEW_ARENA_TOP_100,
     PLAYERS_VIEW_COMPARISON,
+}
+RECORDS_VIEW_ELO_LEADERBOARD = "elo_leaderboard"
+RECORDS_VIEW_FASTEST_GAMES = "fastest_games"
+RECORDS_VIEW_HIGHEST_SCORES = "highest_scores"
+RECORDS_VIEW_BIGGEST_TURNS = "biggest_turns"
+RECORDS_VIEW_MOST_ICONS = "most_icons"
+VALID_RECORDS_VIEWS = {
+    RECORDS_VIEW_ELO_LEADERBOARD,
+    RECORDS_VIEW_FASTEST_GAMES,
+    RECORDS_VIEW_HIGHEST_SCORES,
+    RECORDS_VIEW_BIGGEST_TURNS,
+    RECORDS_VIEW_MOST_ICONS,
 }
 
 # FIDE Rating Regulations table 8.1.1. Index is score percentage 0..100;
@@ -284,6 +308,14 @@ ALL_MAPS_FOR_METRICS = [
     {"code": "0", "key": "map_0", "full": "Map 0", "visible_default": False},
 ]
 ALL_KNOWN_MAPS = [item["full"] for item in ALL_MAPS_FOR_METRICS]
+LEGACY_MAPS = [
+    item["full"] for item in ALL_MAPS_FOR_METRICS
+    if item["code"] in {"1", "2", "3", "4", "5", "6", "7", "8"}
+]
+# Records displays the original eight maps by default, but its complete daily
+# snapshots include every known map so browser-side filters can reveal beginner
+# maps without querying BigQuery.
+RECORDS_DEFAULT_MAPS = VALID_MAPS + LEGACY_MAPS
 
 SPONSOR_CP_CARDS = [
     "Science Lab", "Federal Grants", "Talented Communicator", "Native Farm Animals",
@@ -322,6 +354,10 @@ PREPARED_LOGS_TABLE = os.environ.get(
 PREPARED_FULL_STATS_TABLE = os.environ.get(
     "PREPARED_FULL_STATS_TABLE",
     "ark-nova-stats-dashboard.dashboard_cache.full_stats_prepared",
+)
+PREPARED_RECORDS_MANUAL_TABLE = os.environ.get(
+    "PREPARED_RECORDS_MANUAL_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.records_manual_prepared",
 )
 PREPARED_PLAYERS_TABLE = os.environ.get(
     "PREPARED_PLAYERS_TABLE",
@@ -562,7 +598,7 @@ def _parse_stats_page(raw_value):
     if value not in VALID_STATS_PAGES:
         raise ValueError(
             "stats_page must be cards, home, opening_hand, endgames, maps, "
-            "sponsor_endgames, combinations, icons, build, predictors, actions, conservation, workers, or players"
+            "sponsor_endgames, combinations, icons, build, predictors, actions, conservation, workers, players, or records"
         )
     return value
 
@@ -657,6 +693,18 @@ def _parse_players_view(raw_value):
     return value
 
 
+def _parse_records_view(raw_value):
+    if raw_value in (None, ""):
+        return RECORDS_VIEW_FASTEST_GAMES
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_RECORDS_VIEWS:
+        raise ValueError(
+            "records_view must be elo_leaderboard, fastest_games, highest_scores, "
+            "biggest_turns, or most_icons"
+        )
+    return value
+
+
 def _parse_round_filter(raw_rounds):
     if not isinstance(raw_rounds, list):
         return [], False
@@ -727,6 +775,7 @@ def _cache_blob_name(
     conservation_view=CONSERVATION_VIEW_PROJECTS,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
+    records_view=RECORDS_VIEW_FASTEST_GAMES,
 ):
     dataset = "mw" if int(is_mw) == 1 else "base"
     if stats_page == STATS_PAGE_HOME:
@@ -754,6 +803,9 @@ def _cache_blob_name(
     if stats_page == STATS_PAGE_PLAYERS:
         view_slug = players_view.replace("_", "-")
         return f"{CACHE_PREFIX}/players/{view_slug}/default-{dataset}.json"
+    if stats_page == STATS_PAGE_RECORDS:
+        view_slug = records_view.replace("_", "-")
+        return f"{CACHE_PREFIX}/records/{view_slug}/default-{dataset}.json"
     if stats_page == STATS_PAGE_COMBINATIONS:
         view_slug = combinations_view.replace("_", "-")
         return f"{CACHE_PREFIX}/combinations/{view_slug}/default-{dataset}.json"
@@ -1076,6 +1128,170 @@ def _load_arena_metadata(force_refresh=False, publish_manifest=True):
         raise RuntimeError("Arena metadata is unavailable")
 
 
+_RECORDS_MANUAL_SOURCE = None
+
+
+def _download_public_csv(url):
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "ark-nova-dashboard-refresh"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return response.read().decode("utf-8-sig")
+
+
+def _records_sheet_int(raw_value, field_name, row_number):
+    token = str(raw_value or "").strip()
+    try:
+        value = int(token)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Records sheet row {row_number} has invalid {field_name}: {token!r}"
+        ) from exc
+    return value
+
+
+def _records_sheet_common(raw, row_number, view):
+    player = str(raw.get("Player") or "").strip()
+    table_id = str(raw.get("ID") or "").strip()
+    map_code = str(raw.get("Map") or "").strip()
+    mode_token = str(raw.get("Mode") or "").strip().lower()
+    mode_map = {"mw": ("MW", 1), "base": ("Base", 0)}
+    map_by_code = {item["code"].lower(): item for item in ALL_MAPS_FOR_METRICS}
+    map_item = map_by_code.get(map_code.lower())
+    if not player:
+        raise ValueError(f"Records sheet row {row_number} has a blank Player")
+    if not table_id.isdigit():
+        raise ValueError(f"Records sheet row {row_number} has invalid ID: {table_id!r}")
+    if mode_token not in mode_map:
+        raise ValueError(f"Records sheet row {row_number} has invalid Mode: {raw.get('Mode')!r}")
+    if not map_item:
+        raise ValueError(f"Records sheet row {row_number} has unknown Map code: {map_code!r}")
+    date_token = str(raw.get("Date") or "").strip()
+    try:
+        parsed_date = datetime.strptime(date_token, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(
+            f"Records sheet row {row_number} has invalid Date: {date_token!r}"
+        ) from exc
+    mode, is_mw = mode_map[mode_token]
+    return {
+        "record_view": view,
+        "source_row": row_number,
+        "is_mw": is_mw,
+        "mode": mode,
+        "player": player,
+        "table_id": table_id,
+        "map_code": map_item["code"],
+        "map_name": map_item["full"],
+        "game_date": parsed_date.isoformat(),
+    }
+
+
+def _parse_records_fastest_sheet(source_text):
+    reader = csv.DictReader(io.StringIO(source_text))
+    required = {"Turns", "Player", "Score", "Map", "ID", "Date", "EPT", "Mode"}
+    if not required.issubset(set(reader.fieldnames or [])):
+        missing = sorted(required - set(reader.fieldnames or []))
+        raise ValueError(f"Fastest Games sheet is missing columns: {', '.join(missing)}")
+    rows = []
+    seen = set()
+    for row_number, raw in enumerate(reader, start=2):
+        if not any(str(value or "").strip() for value in raw.values()):
+            continue
+        item = _records_sheet_common(raw, row_number, RECORDS_VIEW_FASTEST_GAMES)
+        item.update({
+            "turns": _records_sheet_int(raw.get("Turns"), "Turns", row_number),
+            "score": _records_sheet_int(raw.get("Score"), "Score", row_number),
+            "ept": _records_sheet_int(raw.get("EPT"), "EPT", row_number),
+            "flat": None,
+            "end": None,
+            "total": None,
+            "move": None,
+            "actions": None,
+            "result_code": None,
+        })
+        if item["turns"] < 1 or item["turns"] > 23:
+            raise ValueError(f"Fastest Games row {row_number} must have Turns between 1 and 23")
+        key = (item["is_mw"], item["table_id"], item["player"])
+        if key in seen:
+            raise ValueError(f"Fastest Games sheet has duplicate Mode/ID/Player at row {row_number}")
+        seen.add(key)
+        rows.append(item)
+    if not rows:
+        raise ValueError("Fastest Games sheet contains no data rows")
+    return rows
+
+
+def _parse_records_biggest_turns_sheet(source_text):
+    reader = csv.DictReader(io.StringIO(source_text))
+    required = {
+        "Flat", "End", "Total", "Player", "Score", "Turns", "Map", "Move",
+        "# Actions", "ID", "Result", "Date", "Mode",
+    }
+    if not required.issubset(set(reader.fieldnames or [])):
+        missing = sorted(required - set(reader.fieldnames or []))
+        raise ValueError(f"Biggest Turns sheet is missing columns: {', '.join(missing)}")
+    rows = []
+    seen = set()
+    for row_number, raw in enumerate(reader, start=2):
+        if not any(str(value or "").strip() for value in raw.values()):
+            continue
+        item = _records_sheet_common(raw, row_number, RECORDS_VIEW_BIGGEST_TURNS)
+        result_code = str(raw.get("Result") or "").strip().upper()
+        if result_code not in {"W", "D", "L"}:
+            raise ValueError(f"Biggest Turns row {row_number} has invalid Result: {result_code!r}")
+        item.update({
+            "flat": _records_sheet_int(raw.get("Flat"), "Flat", row_number),
+            "end": _records_sheet_int(raw.get("End"), "End", row_number),
+            "total": _records_sheet_int(raw.get("Total"), "Total", row_number),
+            "score": _records_sheet_int(raw.get("Score"), "Score", row_number),
+            "turns": _records_sheet_int(raw.get("Turns"), "Turns", row_number),
+            "move": _records_sheet_int(raw.get("Move"), "Move", row_number),
+            "actions": _records_sheet_int(raw.get("# Actions"), "# Actions", row_number),
+            "ept": 0,
+            "result_code": result_code,
+        })
+        if item["flat"] + item["end"] != item["total"]:
+            raise ValueError(
+                f"Biggest Turns row {row_number} has Total {item['total']}, "
+                f"but Flat + End is {item['flat'] + item['end']}"
+            )
+        key = (item["is_mw"], item["table_id"], item["player"])
+        if key in seen:
+            raise ValueError(f"Biggest Turns sheet has duplicate Mode/ID/Player at row {row_number}")
+        seen.add(key)
+        rows.append(item)
+    if not rows:
+        raise ValueError("Biggest Turns sheet contains no data rows")
+    return rows
+
+
+def _fetch_records_manual_source():
+    fastest_text = _download_public_csv(RECORDS_FASTEST_SHEET_URL)
+    biggest_text = _download_public_csv(RECORDS_BIGGEST_TURNS_SHEET_URL)
+    fastest = _parse_records_fastest_sheet(fastest_text)
+    biggest = _parse_records_biggest_turns_sheet(biggest_text)
+    return {
+        "status": "ok",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source_sha256": hashlib.sha256(
+            (fastest_text + "\n---biggest-turns---\n" + biggest_text).encode("utf-8")
+        ).hexdigest(),
+        "fastest_games": fastest,
+        "biggest_turns": biggest,
+    }
+
+
+def _cached_records_manual_source():
+    cached = _read_cache_blob(RECORDS_MANUAL_CACHE_BLOB, "hit")
+    if not cached:
+        return None
+    cached.pop("cache_status", None)
+    cached.pop("cache_updated_at", None)
+    return cached
+
+
 def _sql_string_list(values):
     def bigquery_string(value):
         escaped = str(value).replace("\\", "\\\\").replace("'", "\\'")
@@ -1135,12 +1351,13 @@ def _read_cached_snapshot(
     conservation_view=CONSERVATION_VIEW_PROJECTS,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
+    records_view=RECORDS_VIEW_FASTEST_GAMES,
 ):
     return _read_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view
+            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view, records_view
         ),
         "hit",
     )
@@ -1160,12 +1377,13 @@ def _write_cached_snapshot(
     conservation_view=CONSERVATION_VIEW_PROJECTS,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
+    records_view=RECORDS_VIEW_FASTEST_GAMES,
 ):
     return _write_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view
+            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view, records_view
         ),
         payload,
         "refreshed",
@@ -1231,6 +1449,10 @@ def _default_snapshot_pack_blob_names():
             f"{CACHE_PREFIX}/workers/general/default-{dataset}.json",
             f"{CACHE_PREFIX}/workers/two-cp-worker/default-{dataset}.json",
             f"{CACHE_PREFIX}/players/general/default-{dataset}.json",
+            f"{CACHE_PREFIX}/records/fastest-games/default-{dataset}.json",
+            f"{CACHE_PREFIX}/records/highest-scores/default-{dataset}.json",
+            f"{CACHE_PREFIX}/records/biggest-turns/default-{dataset}.json",
+            f"{CACHE_PREFIX}/records/most-icons/default-{dataset}.json",
             f"{CACHE_PREFIX}/combinations/card-card/default-{dataset}.json",
             f"{CACHE_PREFIX}/combinations/card-map/default-{dataset}.json",
             f"{CACHE_PREFIX}/combinations/card-round/default-{dataset}.json",
@@ -1256,6 +1478,7 @@ def _write_default_snapshot_pack(data_version):
             snapshots[blob_name] = json.loads(raw.decode("utf-8"))
         payload = {
             "status": "ok",
+            "schema_version": DEFAULT_PACK_SCHEMA_VERSION,
             "data_version": data_version,
             "snapshots": snapshots,
         }
@@ -1287,6 +1510,9 @@ def _filter_cache_blob_name(
     completed_only,
     data_version,
     subview=None,
+    records_player=None,
+    records_arena_only=False,
+    records_tournament_only=False,
 ):
     cache_key = {
         "version": FILTER_CACHE_VERSION,
@@ -1304,6 +1530,9 @@ def _filter_cache_blob_name(
         "date_from": date_from.isoformat() if date_from else None,
         "date_to": date_to.isoformat() if date_to else None,
         "completed_only": completed_only,
+        "records_player": records_player,
+        "records_arena_only": bool(records_arena_only),
+        "records_tournament_only": bool(records_tournament_only),
     }
     key_json = json.dumps(cache_key, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(key_json.encode("utf-8")).hexdigest()[:32]
@@ -1330,6 +1559,10 @@ def _is_default_cache_request(
     players_view=PLAYERS_VIEW_GENERAL,
     players_players=None,
     last_x_games=None,
+    records_view=RECORDS_VIEW_FASTEST_GAMES,
+    records_player=None,
+    records_arena_only=False,
+    records_tournament_only=False,
 ):
     if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_TOURNAMENT_H2H:
         return int(is_mw) in (0, 1)
@@ -1337,9 +1570,9 @@ def _is_default_cache_request(
         return (
             int(is_mw) in (0, 1)
             and set(selected_maps) == set(ALL_KNOWN_MAPS)
-            and player_elo_min is None
+            and player_elo_min == 0
             and player_elo_max is None
-            and opponent_elo_min is None
+            and opponent_elo_min == 0
             and opponent_elo_max is None
             and date_from is None
             and date_to is None
@@ -1362,6 +1595,22 @@ def _is_default_cache_request(
             and not players_player
             and not players_players
             and not last_x_games
+        )
+    if stats_page == STATS_PAGE_RECORDS:
+        return (
+            records_view in VALID_RECORDS_VIEWS
+            and int(is_mw) in (0, 1)
+            and set(selected_maps) == set(ALL_KNOWN_MAPS)
+            and player_elo_min is None
+            and player_elo_max is None
+            and opponent_elo_min is None
+            and opponent_elo_max is None
+            and date_from is None
+            and date_to is None
+            and completed_only is None
+            and not records_player
+            and not records_arena_only
+            and not records_tournament_only
         )
     default_date_from = (
         MAPS_METRICS_DEFAULT_DATE_FROM
@@ -1510,6 +1759,177 @@ def _refresh_prepared_full_stats_table():
         "job_total_bytes_processed": job.total_bytes_processed,
         "job_total_slot_ms": job.slot_millis,
     }
+
+
+def _enrich_and_write_records_manual_table(source_payload):
+    """Validate sheet identities against Full Sample, then atomically replace derived rows."""
+    source_rows = [
+        dict(item)
+        for key in ("fastest_games", "biggest_turns")
+        for item in (source_payload.get(key) or [])
+    ]
+    if not source_rows:
+        raise ValueError("Manual Records source contains no rows")
+    table_ids = sorted({item["table_id"] for item in source_rows})
+    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    metadata_query = f"""
+      SELECT
+        CAST(table_id AS STRING) AS table_id,
+        CAST(player AS STRING) AS player,
+        CAST(Map AS STRING) AS map_name,
+        CAST(is_mw AS INT64) AS is_mw,
+        SAFE_CAST(game_ended_at AS TIMESTAMP) AS game_ended_at,
+        SAFE_CAST(arena_rating_delta AS FLOAT64) AS arena_rating_delta,
+        SAFE_CAST(opponent_elo AS FLOAT64) AS opponent_elo,
+        SAFE_CAST(elo AS FLOAT64) AS elo
+      FROM `{PREPARED_FULL_STATS_TABLE}`
+      WHERE CAST(table_id AS STRING) IN UNNEST(@table_ids)
+    """
+    metadata_job = client.query(
+        metadata_query,
+        job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ArrayQueryParameter("table_ids", "STRING", table_ids),
+        ]),
+        location=BIGQUERY_LOCATION,
+    )
+    metadata = {}
+    for row in metadata_job.result():
+        key = (str(row.table_id), str(row.player))
+        if key in metadata:
+            raise ValueError(f"Full Sample contains duplicate Records identity {key[0]}/{key[1]}")
+        metadata[key] = row
+
+    enriched = []
+    for item in source_rows:
+        key = (item["table_id"], item["player"])
+        match = metadata.get(key)
+        # The Fastest sheet exists specifically for early concessions that the
+        # source scraper can omit entirely.  Validate every upstream match, but
+        # retain genuinely source-absent rows with null enrichment metadata so
+        # their sheet-native player/map/date/dataset filters still work.
+        if match is not None and int(match.is_mw) != int(item["is_mw"]):
+            raise ValueError(
+                f"Records sheet row {item['source_row']} Mode {item['mode']} "
+                f"does not match Full Sample for ID {item['table_id']}"
+            )
+        if match is not None and str(match.map_name) != item["map_name"]:
+            raise ValueError(
+                f"Records sheet row {item['source_row']} Map {item['map_code']} "
+                f"does not match Full Sample map {match.map_name!r}"
+            )
+        # Date is a manually maintained Records value and is displayed exactly
+        # as entered in the sheet.  It is not an identity field: UTC/local date
+        # boundaries and historical hand-entered dates can differ from the
+        # source timestamp.  The exact timestamp is still retained when present
+        # for backend metadata filters.
+        source_timestamp = match.game_ended_at if match is not None else None
+        enriched.append({
+            "record_view": item["record_view"],
+            "source_row": int(item["source_row"]),
+            "is_mw": int(item["is_mw"]),
+            "mode": item["mode"],
+            "player": item["player"],
+            "table_id": item["table_id"],
+            "Map": item["map_name"],
+            "map_code": item["map_code"],
+            "game_date": item["game_date"],
+            "game_ended_at": (
+                source_timestamp.isoformat()
+                if source_timestamp is not None
+                else f"{item['game_date']}T00:00:00+00:00"
+            ),
+            "turns": item.get("turns"),
+            "score": item.get("score"),
+            "ept": item.get("ept"),
+            "flat": item.get("flat"),
+            "end": item.get("end"),
+            "total": item.get("total"),
+            "move": item.get("move"),
+            "actions": item.get("actions"),
+            "result_code": item.get("result_code"),
+            "opponent_elo": match.opponent_elo if match is not None else None,
+            "elo": match.elo if match is not None else None,
+            "arena_rating_delta": match.arena_rating_delta if match is not None else None,
+            "source_enriched": match is not None,
+        })
+
+    schema = [
+        bigquery.SchemaField("record_view", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("source_row", "INT64", mode="REQUIRED"),
+        bigquery.SchemaField("is_mw", "INT64", mode="REQUIRED"),
+        bigquery.SchemaField("mode", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("player", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("table_id", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("Map", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("map_code", "STRING", mode="REQUIRED"),
+        bigquery.SchemaField("game_date", "DATE", mode="REQUIRED"),
+        bigquery.SchemaField("game_ended_at", "TIMESTAMP", mode="REQUIRED"),
+        bigquery.SchemaField("turns", "INT64"),
+        bigquery.SchemaField("score", "INT64"),
+        bigquery.SchemaField("ept", "INT64"),
+        bigquery.SchemaField("flat", "INT64"),
+        bigquery.SchemaField("end", "INT64"),
+        bigquery.SchemaField("total", "INT64"),
+        bigquery.SchemaField("move", "INT64"),
+        bigquery.SchemaField("actions", "INT64"),
+        bigquery.SchemaField("result_code", "STRING"),
+        bigquery.SchemaField("opponent_elo", "FLOAT64"),
+        bigquery.SchemaField("elo", "FLOAT64"),
+        bigquery.SchemaField("arena_rating_delta", "FLOAT64"),
+        bigquery.SchemaField("source_enriched", "BOOLEAN", mode="REQUIRED"),
+    ]
+    load_config = bigquery.LoadJobConfig(
+        schema=schema,
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        time_partitioning=bigquery.TimePartitioning(field="game_date"),
+        clustering_fields=["record_view", "is_mw", "Map"],
+    )
+    load_job = client.load_table_from_json(
+        enriched,
+        PREPARED_RECORDS_MANUAL_TABLE,
+        job_config=load_config,
+        location=BIGQUERY_LOCATION,
+    )
+    load_job.result()
+    return {
+        "status": "ok",
+        "prepared_table": PREPARED_RECORDS_MANUAL_TABLE,
+        "rows": len(enriched),
+        "fastest_games": sum(item["record_view"] == RECORDS_VIEW_FASTEST_GAMES for item in enriched),
+        "biggest_turns": sum(item["record_view"] == RECORDS_VIEW_BIGGEST_TURNS for item in enriched),
+        "source_enriched": sum(bool(item["source_enriched"]) for item in enriched),
+        "source_absent": sum(not bool(item["source_enriched"]) for item in enriched),
+        "metadata_job_id": metadata_job.job_id,
+        "job_id": load_job.job_id,
+    }
+
+
+def _refresh_prepared_records_manual_table():
+    """Refresh Google-Sheet Records data, falling back only to fully validated cached rows."""
+    global _RECORDS_MANUAL_SOURCE
+    live_error = None
+    try:
+        candidate = _fetch_records_manual_source()
+        result = _enrich_and_write_records_manual_table(candidate)
+        if not _write_cache_blob(RECORDS_MANUAL_CACHE_BLOB, candidate, "refreshed"):
+            raise RuntimeError("Could not persist validated manual Records source")
+        _RECORDS_MANUAL_SOURCE = candidate
+        result["source_status"] = "live"
+        result["source_sha256"] = candidate.get("source_sha256")
+        return result
+    except Exception as exc:
+        live_error = exc
+        logging.exception("Failed to refresh manual Records data from Google Sheets")
+
+    cached = _cached_records_manual_source()
+    if not cached:
+        raise RuntimeError("Manual Records data is unavailable and no validated cache exists") from live_error
+    result = _enrich_and_write_records_manual_table(cached)
+    _RECORDS_MANUAL_SOURCE = cached
+    result["source_status"] = "cached"
+    result["source_sha256"] = cached.get("source_sha256")
+    result["live_error"] = str(live_error)
+    return result
 
 
 def _arena_season_case_sql(metadata, alias="f"):
@@ -1771,6 +2191,7 @@ def _refresh_prepared_card_pairs_table():
 def _refresh_prepared_tables(arena_metadata=None):
     logs = _refresh_prepared_logs_table()
     full_stats = _refresh_prepared_full_stats_table()
+    records_manual = _refresh_prepared_records_manual_table()
     players = _refresh_prepared_players_table(arena_metadata)
     card_plays = _refresh_prepared_card_plays_table()
     card_pairs = _refresh_prepared_card_pairs_table()
@@ -1780,6 +2201,7 @@ def _refresh_prepared_tables(arena_metadata=None):
         "job_id": full_stats["job_id"],
         "logs": logs,
         "full_stats": full_stats,
+        "records_manual": records_manual,
         "players": players,
         "card_plays": card_plays,
         "card_pairs": card_pairs,
@@ -4777,6 +5199,237 @@ ICON_FIELDS = [
 ]
 
 
+RECORD_ICON_FIELDS = [item for item in ICON_FIELDS if item[0] not in {"Bears", "Petting Zoo Animals"}]
+
+
+def _build_records_query(where_sql, records_view, records_player=None,
+                         records_arena_only=False, records_tournament_only=False):
+    """Return the record rows from the read-only prepared Full Sample.
+
+    Records are deliberately hard-filtered to completed tables. Arena status is
+    stricter than merely having a rating delta: the prepared Arena season CASE
+    also enforces the configured UTC window and the MW/Base mode.
+    """
+    if records_view == RECORDS_VIEW_ELO_LEADERBOARD:
+        return """
+        SELECT CAST(NULL AS INT64) AS sort_value, CAST(NULL AS STRING) AS player
+        FROM (SELECT 1 AS placeholder)
+        WHERE FALSE
+        """
+
+    # Scope predicates are shared with the manually maintained derived rows.
+    # Completion/winner predicates are attached only to automatic Records;
+    # spreadsheet Fastest rows are explicit extrapolated exceptions.
+    # Source-absent manual exceptions have no Elo metadata.  They must not
+    # disappear from Records solely because the standard Records sidebar has a
+    # default Elo range; apply Elo bounds only when enrichment actually exists.
+    manual_where_sql = where_sql
+    for elo_clause in (
+        "f.elo >= @player_elo_min",
+        "f.elo <= @player_elo_max",
+        "f.opponent_elo >= @opponent_elo_min",
+        "f.opponent_elo <= @opponent_elo_max",
+    ):
+        manual_where_sql = manual_where_sql.replace(
+            elo_clause,
+            f"(NOT f.source_enriched OR {elo_clause})",
+        )
+    scope_predicates = [where_sql]
+    manual_scope_predicates = [manual_where_sql]
+    if records_player:
+        scope_predicates.append("CAST(f.player AS STRING) = @records_player")
+        manual_scope_predicates.append("CAST(f.player AS STRING) = @records_player")
+    if records_arena_only:
+        arena_case = _arena_season_case_sql(_load_arena_metadata())
+        scope_predicates.append(f"({arena_case}) IS NOT NULL")
+        manual_scope_predicates.append(f"({arena_case}) IS NOT NULL")
+    if records_tournament_only:
+        tournament_predicate = (
+            "CAST(f.table_id AS STRING) IN ("
+            f"SELECT DISTINCT CAST(table_id AS STRING) FROM `{TOURNAMENT_TABLES_CACHE_TABLE}` "
+            "WHERE table_id IS NOT NULL)"
+        )
+        scope_predicates.append(tournament_predicate)
+        manual_scope_predicates.append(tournament_predicate)
+    scope_sql = " AND ".join(scope_predicates)
+    manual_scope_sql = " AND ".join(manual_scope_predicates)
+    automatic_sql = " AND ".join([
+        scope_sql,
+        "COALESCE(f.table_conceded, 0) = 0",
+        "COALESCE(f.end_game_triggered, FALSE) = TRUE",
+    ])
+
+    # Full Sample contains one player row per table.  Record eligibility and
+    # result labels therefore use a table-level outcome aggregate instead of
+    # relying on the sidebar-filtered row set (which may exclude the opponent).
+    table_outcomes = f"""
+    table_outcomes AS (
+      SELECT
+        CAST(table_id AS STRING) AS table_id,
+        COUNT(*) AS result_row_count,
+        COUNTIF(SAFE_CAST(Game_result AS INT64) = 1) AS result_one_count,
+        COUNTIF(SAFE_CAST(Game_result AS INT64) = 2) AS result_two_count
+      FROM `{PREPARED_FULL_STATS_TABLE}`
+      GROUP BY table_id
+    )
+    """
+    result_code = """
+      CASE
+        WHEN o.result_row_count = 2
+          AND SAFE_CAST(f.Game_result AS INT64) = 1
+          AND o.result_two_count = 1 THEN 'W'
+        WHEN o.result_row_count = 2
+          AND SAFE_CAST(f.Game_result AS INT64) = 1
+          AND o.result_one_count = 2 THEN 'D'
+        WHEN o.result_row_count = 2
+          AND SAFE_CAST(f.Game_result AS INT64) = 2
+          AND o.result_one_count = 1 THEN 'L'
+        ELSE NULL
+      END AS result_code
+    """
+    arena_case = _arena_season_case_sql(_load_arena_metadata())
+    tournament_flag = (
+        "EXISTS (SELECT 1 "
+        f"FROM `{TOURNAMENT_TABLES_CACHE_TABLE}` tournament "
+        "WHERE tournament.table_id IS NOT NULL "
+        "AND CAST(tournament.table_id AS STRING) = CAST(f.table_id AS STRING))"
+    )
+    # Complete Records snapshots carry the small amount of row-level metadata
+    # needed by the browser. This keeps every Records filter local and avoids a
+    # BigQuery request for static, bounded record populations.
+    automatic_metadata = f"""
+      SAFE_CAST(f.opponent_elo AS FLOAT64) AS opponent_elo,
+      TRUE AS source_enriched,
+      ({arena_case}) IS NOT NULL AS is_arena,
+      {tournament_flag} AS is_tournament,
+      CAST(NULL AS INT64) AS source_row
+    """
+    manual_metadata = f"""
+      SAFE_CAST(f.opponent_elo AS FLOAT64) AS opponent_elo,
+      COALESCE(f.source_enriched, FALSE) AS source_enriched,
+      ({arena_case}) IS NOT NULL AS is_arena,
+      {tournament_flag} AS is_tournament,
+      CAST(f.source_row AS INT64) AS source_row
+    """
+    common = f"""
+      CAST(f.table_id AS STRING) AS table_id,
+      CAST(f.player AS STRING) AS player,
+      SAFE_CAST(f.Score AS FLOAT64) AS score,
+      SAFE_CAST(f.Number_of_turns AS FLOAT64) AS turns,
+      CAST(f.Map AS STRING) AS map_name,
+      FORMAT_TIMESTAMP('%Y-%m-%d', SAFE_CAST(f.game_ended_at AS TIMESTAMP)) AS game_date,
+      {result_code},
+      0 AS ept,
+      {automatic_metadata}
+    """
+    if records_view == RECORDS_VIEW_FASTEST_GAMES:
+        return f"""
+        WITH {table_outcomes},
+        automatic_records AS (
+          SELECT {common}
+          FROM `{PREPARED_FULL_STATS_TABLE}` f
+          JOIN table_outcomes o ON o.table_id = CAST(f.table_id AS STRING)
+          WHERE {automatic_sql}
+            AND o.result_row_count = 2
+            AND SAFE_CAST(f.Game_result AS INT64) = 1
+            AND o.result_two_count = 1
+            AND SAFE_CAST(f.Number_of_turns AS INT64) <= 23
+            AND NOT EXISTS (
+              SELECT 1
+              FROM `{PREPARED_RECORDS_MANUAL_TABLE}` manual
+              WHERE manual.record_view = {_sql_string(RECORDS_VIEW_FASTEST_GAMES)}
+                AND manual.table_id = CAST(f.table_id AS STRING)
+                AND manual.player = CAST(f.player AS STRING)
+            )
+        ),
+        manual_records AS (
+          SELECT
+            f.table_id,
+            f.player,
+            CAST(f.score AS FLOAT64) AS score,
+            CAST(f.turns AS FLOAT64) AS turns,
+            f.Map AS map_name,
+            FORMAT_DATE('%Y-%m-%d', f.game_date) AS game_date,
+            CAST(NULL AS STRING) AS result_code,
+            CAST(f.ept AS INT64) AS ept,
+            {manual_metadata}
+          FROM `{PREPARED_RECORDS_MANUAL_TABLE}` f
+          WHERE f.record_view = {_sql_string(RECORDS_VIEW_FASTEST_GAMES)}
+            AND {manual_scope_sql}
+        )
+        SELECT * FROM automatic_records
+        UNION ALL
+        SELECT * FROM manual_records
+        ORDER BY turns ASC, score DESC NULLS LAST, player ASC, table_id ASC
+        """
+    if records_view == RECORDS_VIEW_BIGGEST_TURNS:
+        return f"""
+        SELECT
+          CAST(f.turns AS FLOAT64) AS turns,
+          CAST(f.score AS FLOAT64) AS score,
+          f.player,
+          f.Map AS map_name,
+          f.table_id,
+          FORMAT_DATE('%Y-%m-%d', f.game_date) AS game_date,
+          f.result_code,
+          CAST(f.ept AS INT64) AS ept,
+          CAST(f.flat AS INT64) AS flat,
+          CAST(f.`end` AS INT64) AS `end`,
+          CAST(f.total AS INT64) AS total,
+          CAST(f.move AS INT64) AS move,
+           CAST(f.actions AS INT64) AS actions,
+           {manual_metadata}
+        FROM `{PREPARED_RECORDS_MANUAL_TABLE}` f
+        WHERE f.record_view = {_sql_string(RECORDS_VIEW_BIGGEST_TURNS)}
+          AND {manual_scope_sql}
+         ORDER BY f.total DESC, f.source_row ASC
+        """
+    if records_view == RECORDS_VIEW_HIGHEST_SCORES:
+        return f"""
+        WITH {table_outcomes}
+        SELECT {common}
+        FROM `{PREPARED_FULL_STATS_TABLE}` f
+        JOIN table_outcomes o ON o.table_id = CAST(f.table_id AS STRING)
+        WHERE {automatic_sql}
+          AND o.result_row_count = 2
+          AND SAFE_CAST(f.Game_result AS INT64) = 1
+          AND o.result_two_count = 1
+          AND SAFE_CAST(f.Score AS INT64) >= 170
+          AND SAFE_CAST(f.Number_of_turns AS INT64) <= 100
+        ORDER BY score DESC, turns ASC NULLS LAST, player ASC, table_id ASC
+        """
+
+    icon_selects = []
+    for display_name, field_name in RECORD_ICON_FIELDS:
+        icon_selects.append(f"""
+          SELECT
+            SAFE_CAST(f.{field_name} AS INT64) AS n,
+            {_sql_string(display_name)} AS icon,
+            CAST(f.player AS STRING) AS player,
+            SAFE_CAST(f.Number_of_turns AS FLOAT64) AS turns,
+            SAFE_CAST(f.Score AS FLOAT64) AS score,
+            CAST(f.Map AS STRING) AS map_name,
+            CAST(f.table_id AS STRING) AS table_id,
+             FORMAT_TIMESTAMP('%Y-%m-%d', SAFE_CAST(f.game_ended_at AS TIMESTAMP)) AS game_date,
+             {result_code},
+             {automatic_metadata}
+          FROM `{PREPARED_FULL_STATS_TABLE}` f
+          JOIN table_outcomes o ON o.table_id = CAST(f.table_id AS STRING)
+          WHERE {automatic_sql}
+            AND SAFE_CAST(f.{field_name} AS INT64) >= 10
+        """)
+    return f"""
+    WITH {table_outcomes}, icon_records AS (
+      %s
+    )
+    SELECT n, icon, player, turns, score, map_name, table_id, game_date,
+           result_code, 0 AS ept, opponent_elo, source_enriched, is_arena,
+           is_tournament, source_row
+    FROM icon_records
+    ORDER BY n DESC, turns ASC NULLS LAST, player ASC, table_id ASC
+    """ % "\nUNION ALL\n".join(icon_selects)
+
+
 def _build_icons_query(where_sql):
     observation_selects = "\n      UNION ALL\n      ".join(
         (
@@ -5388,6 +6041,10 @@ def _query_card_stats(
     last_x_games=None,
     players_arena_only=False,
     players_arena_seasons=None,
+    records_view=RECORDS_VIEW_FASTEST_GAMES,
+    records_player=None,
+    records_arena_only=False,
+    records_tournament_only=False,
     players_component="combined",
     hexes_expanded=False,
     combination_paged=False,
@@ -5534,8 +6191,8 @@ def _query_card_stats(
         where_sql, query_parameters = _build_full_sample_where_sql(
             is_mw,
             selected_maps,
-            None,
-            None,
+            date_from,
+            date_to,
             opponent_elo_min,
             opponent_elo_max,
             date_from,
@@ -5580,6 +6237,32 @@ def _query_card_stats(
             _build_players_comparison_query(where_sql)
             if players_view == PLAYERS_VIEW_COMPARISON
             else _build_players_query(where_sql, players_component)
+        )
+    elif stats_page == STATS_PAGE_RECORDS:
+        where_sql, query_parameters = _build_full_sample_where_sql(
+            is_mw,
+            selected_maps,
+            None,
+            None,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            None,
+            exclude_invalid_maps=False,
+        )
+        if records_player:
+            # The player predicate is part of the Records SQL, while its value
+            # must be attached to the QueryJobConfig assembled in this scope.
+            query_parameters.append(
+                bigquery.ScalarQueryParameter("records_player", "STRING", records_player)
+            )
+        query = _build_records_query(
+            where_sql,
+            records_view,
+            records_player=records_player,
+            records_arena_only=records_arena_only,
+            records_tournament_only=records_tournament_only,
         )
     else:
         where_sql, query_parameters = _build_where_sql(
@@ -5749,6 +6432,50 @@ def _query_card_stats(
                 "tooltip_experts": row.tooltip_experts,
                 "tooltip_masters": row.tooltip_masters,
             })
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+    if stats_page == STATS_PAGE_RECORDS:
+        for row in results:
+            item = {
+                "turns": getattr(row, "turns", None),
+                "score": getattr(row, "score", None),
+                "player": getattr(row, "player", None),
+                "map_name": getattr(row, "map_name", None),
+                "table_id": getattr(row, "table_id", None),
+                "game_date": getattr(row, "game_date", None),
+                "result_code": getattr(row, "result_code", None),
+                "ept": getattr(row, "ept", 0),
+                "opponent_elo": getattr(row, "opponent_elo", None),
+                "source_enriched": bool(getattr(row, "source_enriched", False)),
+                "is_arena": bool(getattr(row, "is_arena", False)),
+                "is_tournament": bool(getattr(row, "is_tournament", False)),
+                "source_row": getattr(row, "source_row", None),
+            }
+            if records_view == RECORDS_VIEW_MOST_ICONS:
+                item["n"] = getattr(row, "n", None)
+                item["icon"] = getattr(row, "icon", None)
+            elif records_view == RECORDS_VIEW_BIGGEST_TURNS:
+                item.update({
+                    "flat": getattr(row, "flat", None),
+                    "end": getattr(row, "end", None),
+                    "total": getattr(row, "total", None),
+                    "move": getattr(row, "move", None),
+                    "actions": getattr(row, "actions", None),
+                })
+            rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
             "client_ms": client_ms,
@@ -6611,26 +7338,27 @@ def _refresh_default_snapshot_from_prepared(
     conservation_view=CONSERVATION_VIEW_PROJECTS,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
+    records_view=RECORDS_VIEW_FASTEST_GAMES,
     completed_only_override=None,
     cache_blob_override=None,
 ):
     started_at = time.perf_counter()
     is_home = stats_page == STATS_PAGE_HOME
-    snapshot_date_from = None if is_home or stats_page == STATS_PAGE_PLAYERS else (
+    snapshot_date_from = None if is_home or stats_page in (STATS_PAGE_PLAYERS, STATS_PAGE_RECORDS) else (
         MAPS_METRICS_DEFAULT_DATE_FROM
         if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_METRICS
         else DEFAULT_DATE_FROM
     )
     query_args = (
         int(is_mw),
-        ALL_KNOWN_MAPS if is_home else VALID_MAPS,
+        ALL_KNOWN_MAPS if is_home or stats_page == STATS_PAGE_RECORDS else VALID_MAPS,
         DEFAULT_CARD_TYPES,
         [],
         False,
         stats_page,
-        None if is_home or stats_page == STATS_PAGE_PLAYERS else 300,
+        0 if is_home else None if stats_page in (STATS_PAGE_PLAYERS, STATS_PAGE_RECORDS) else 300,
         None,
-        0 if stats_page == STATS_PAGE_PLAYERS else None if is_home else 300,
+        0 if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS) else None if stats_page == STATS_PAGE_RECORDS else 300,
         None,
         snapshot_date_from,
         None,
@@ -6647,6 +7375,10 @@ def _refresh_default_snapshot_from_prepared(
         "conservation_view": conservation_view,
         "workers_view": workers_view,
         "players_view": players_view,
+        "records_view": records_view,
+        "records_player": None,
+        "records_arena_only": False,
+        "records_tournament_only": False,
         "players_player": None,
         "players_players": [],
         "last_x_games": None,
@@ -6679,6 +7411,7 @@ def _refresh_default_snapshot_from_prepared(
         "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
         "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
         "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
+        "records_view": records_view if stats_page == STATS_PAGE_RECORDS else None,
         "maps": (
             ALL_MAPS_FOR_METRICS
             if stats_page in (
@@ -6734,7 +7467,7 @@ def _refresh_default_snapshot_from_prepared(
         else _write_cached_snapshot(
             is_mw, payload, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-        build_view, predictors_view, actions_view, conservation_view, workers_view, players_view
+            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view, records_view
         )
     )
     return {
@@ -6942,6 +7675,18 @@ def _run_daily_refresh():
     players_general_base = _refresh_default_snapshot_from_prepared(
         0, STATS_PAGE_PLAYERS, players_view=PLAYERS_VIEW_GENERAL
     )
+    records_snapshots = []
+    for records_view in (
+        RECORDS_VIEW_ELO_LEADERBOARD,
+        RECORDS_VIEW_FASTEST_GAMES,
+        RECORDS_VIEW_HIGHEST_SCORES,
+        RECORDS_VIEW_BIGGEST_TURNS,
+        RECORDS_VIEW_MOST_ICONS,
+    ):
+        for dataset in (1, 0):
+            records_snapshots.append(_refresh_default_snapshot_from_prepared(
+                dataset, STATS_PAGE_RECORDS, records_view=records_view
+            ))
     try:
         conservation_projects_mw = conservation_futures[(1, CONSERVATION_VIEW_PROJECTS)].result()
         conservation_projects_base = conservation_futures[(0, CONSERVATION_VIEW_PROJECTS)].result()
@@ -6999,8 +7744,9 @@ def _run_daily_refresh():
          conservation_cp_rewards_mw, conservation_cp_rewards_base,
          workers_general_mw, workers_general_base,
          workers_two_cp_mw, workers_two_cp_base,
-         players_general_mw, players_general_base,
-         combinations_card_card_mw, combinations_card_card_base,
+        players_general_mw, players_general_base,
+        *records_snapshots,
+        combinations_card_card_mw, combinations_card_card_base,
         combinations_card_round_mw, combinations_card_round_base,
         combinations_card_map_mw, combinations_card_map_base,
          combinations_card_endgame_mw, combinations_card_endgame_base,
@@ -7287,6 +8033,22 @@ def get_card_stats(request):
             if stats_page == STATS_PAGE_PLAYERS
             else PLAYERS_VIEW_GENERAL
         )
+        records_view = (
+            _parse_records_view(params.get("records_view"))
+            if stats_page == STATS_PAGE_RECORDS
+            else RECORDS_VIEW_FASTEST_GAMES
+        )
+        records_player = params.get("records_player")
+        if records_player is not None and not isinstance(records_player, str):
+            raise ValueError("records_player must be a string or null")
+        records_player = records_player.strip() if records_player else None
+        records_arena_only = False
+        records_tournament_only = False
+        if stats_page == STATS_PAGE_RECORDS:
+            records_arena_only = bool(_parse_optional_bool(params.get("records_arena_only"), "records_arena_only"))
+            records_tournament_only = bool(_parse_optional_bool(params.get("records_tournament_only"), "records_tournament_only"))
+            if records_arena_only and records_tournament_only:
+                raise ValueError("Arena games only and Tournament games only are mutually exclusive")
         players_players = []
         if stats_page == STATS_PAGE_PLAYERS:
             raw_players = params.get("players_players", [])
@@ -7368,10 +8130,9 @@ def get_card_stats(request):
                 )
             arena_payload["source"] = "arena_top100_snapshot"
             return _json_http_response(arena_payload, 200, headers, request)
-        default_player_elo_min = None if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS) else 300
+        default_player_elo_min = 0 if stats_page == STATS_PAGE_HOME else None if stats_page in (STATS_PAGE_PLAYERS, STATS_PAGE_RECORDS) else 300
         default_opponent_elo_min = (
-            0 if stats_page == STATS_PAGE_PLAYERS
-            else None if stats_page == STATS_PAGE_HOME
+            0 if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS)
             else 300
         )
         player_elo_min = _parse_int_param(
@@ -7384,7 +8145,7 @@ def get_card_stats(request):
         opponent_elo_max = _parse_int_param(params.get("opponent_elo_max"), "opponent_elo_max")
         default_date_from = (
             None
-            if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS)
+            if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS, STATS_PAGE_RECORDS)
             else MAPS_METRICS_DEFAULT_DATE_FROM
             if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_METRICS
             else DEFAULT_DATE_FROM
@@ -7412,6 +8173,10 @@ def get_card_stats(request):
             players_player = None
             players_players = []
             last_x_games = None
+        if stats_page != STATS_PAGE_RECORDS:
+            records_player = None
+            records_arena_only = False
+            records_tournament_only = False
         elif players_view == PLAYERS_VIEW_GENERAL:
             players_players = []
             if last_x_games is not None and not players_player:
@@ -7427,12 +8192,13 @@ def get_card_stats(request):
     except ValueError as exc:
         return _json_http_response({"status": "error", "message": str(exc)}, 400, headers, request)
 
-    allowed_maps = ALL_KNOWN_MAPS if stats_page == STATS_PAGE_HOME else VALID_MAPS
-    selected_maps = params.get("maps", allowed_maps)
+    allowed_maps = ALL_KNOWN_MAPS if stats_page in (STATS_PAGE_HOME, STATS_PAGE_RECORDS) else VALID_MAPS
+    default_maps = RECORDS_DEFAULT_MAPS if stats_page == STATS_PAGE_RECORDS else allowed_maps
+    selected_maps = params.get("maps", default_maps)
     if not isinstance(selected_maps, list):
         selected_maps = allowed_maps
     selected_maps = [m for m in selected_maps if m in allowed_maps]
-    if not selected_maps and stats_page != STATS_PAGE_HOME:
+    if not selected_maps and stats_page not in (STATS_PAGE_HOME, STATS_PAGE_RECORDS):
         selected_maps = VALID_MAPS
     if stats_page == STATS_PAGE_ENDGAMES and endgames_view == ENDGAMES_VIEW_CP_BY_MAP:
         selected_maps = VALID_MAPS
@@ -7509,6 +8275,10 @@ def get_card_stats(request):
         players_view,
         players_players,
         last_x_games,
+        records_view,
+        records_player,
+        records_arena_only,
+        records_tournament_only,
     )
     if stats_page == STATS_PAGE_PLAYERS and players_arena_only:
         cacheable_default_request = False
@@ -7522,7 +8292,7 @@ def get_card_stats(request):
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
             build_view, predictors_view, actions_view
-            , conservation_view, workers_view, players_view
+            , conservation_view, workers_view, players_view, records_view
         )
         if cached_payload:
             return _json_http_response(cached_payload, 200, headers, request)
@@ -7558,6 +8328,12 @@ def get_card_stats(request):
             "arena_only": players_arena_only,
             "arena_seasons": players_arena_seasons,
         } if stats_page == STATS_PAGE_PLAYERS else
+        {
+            "view": records_view,
+            "player": records_player,
+            "arena_only": records_arena_only,
+            "tournament_only": records_tournament_only,
+        } if stats_page == STATS_PAGE_RECORDS else
         None
     )
     filter_cache_blob_name = None
@@ -7584,6 +8360,9 @@ def get_card_stats(request):
             completed_only,
             data_version,
             filter_subview,
+            records_player,
+            records_arena_only,
+            records_tournament_only,
         )
         cached_payload = _read_cache_blob(filter_cache_blob_name, "filter_hit")
         if cached_payload:
@@ -7634,6 +8413,10 @@ def get_card_stats(request):
             "last_x_games": last_x_games,
             "players_arena_only": players_arena_only,
             "players_arena_seasons": players_arena_seasons,
+            "records_view": records_view,
+            "records_player": records_player,
+            "records_arena_only": records_arena_only,
+            "records_tournament_only": records_tournament_only,
             "use_query_cache": (stats_page != STATS_PAGE_ENDGAMES and not debug_timing),
         }
         expanded_rows = None
@@ -7688,6 +8471,7 @@ def get_card_stats(request):
             "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
             "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
             "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
+            "records_view": records_view if stats_page == STATS_PAGE_RECORDS else None,
             "players_player": players_player if stats_page == STATS_PAGE_PLAYERS else None,
             "last_x_games": last_x_games if stats_page == STATS_PAGE_PLAYERS else None,
             "players_arena_only": players_arena_only if stats_page == STATS_PAGE_PLAYERS else None,
@@ -7728,7 +8512,7 @@ def get_card_stats(request):
             cache_write_ok = _write_cached_snapshot(
                 is_mw, payload, stats_page, endgames_view, maps_view,
                 sponsor_endgames_view, combinations_view,
-                build_view, predictors_view, actions_view, conservation_view, workers_view, players_view
+                build_view, predictors_view, actions_view, conservation_view, workers_view, players_view, records_view
             )
             payload["cache_status"] = "refreshed" if refresh_data and cache_write_ok else "miss"
             if not cache_write_ok:
