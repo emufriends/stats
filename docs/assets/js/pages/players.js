@@ -1,5 +1,5 @@
 import { divergingRangeColor } from '../color-scales.js?v=20260711-1';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260713-4';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260715-2';
 import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260713-4';
 
 export const id = 'players';
@@ -99,6 +99,7 @@ let playerNames = [];
 let playerIndexState = 'idle';
 let playerIndexError = '';
 let playerIndexRequest = 0;
+let suggestionsOpen = false;
 let selectedMaps = MAPS.map(([, full]) => full);
 let rows = [];
 let playerGameCount = 0;
@@ -117,6 +118,7 @@ let arenaGraphSearch = '';
 let arenaGraphDayStart = 1;
 let arenaGraphDayEnd = null;
 let arenaGraphHover = null;
+let arenaGraphRenderState = null;
 let arenaTableSort = { field: 'end', direction: 'desc' };
 let arenaAssetRequest = 0;
 
@@ -125,11 +127,13 @@ export function mount({ dataset = 1 } = {}) {
   token += 1;
   isMW = Number(dataset) === 0 ? 0 : 1;
   view = 'general';
-  selectedPlayer = null;
-  selectedPlayers = [];
+  // Player selections are analysis context, not filters. Keep them when the
+  // dataset changes; the new dataset simply returns unavailable/empty values
+  // when a name has no observations there.
   playerNames = [];
   playerIndexState = 'idle';
   playerIndexError = '';
+  suggestionsOpen = false;
   playerGameCount = 0;
   comparisonCounts = [];
   selectedMaps = MAPS.map(([, full]) => full);
@@ -183,8 +187,10 @@ export function setDataset(value) {
     renderArenaTop100();
     return;
   }
-  selectedPlayer = null;
-  selectedPlayers = [];
+  // Selected names are analysis context and remain valid when the dataset
+  // changes. A name with no observations in the new dataset simply returns an
+  // empty Player value; only the dataset-specific autocomplete index reloads.
+  closeSuggestions();
   comparisonCounts = [];
   playerGameCount = 0;
   playerNames = [];
@@ -452,8 +458,9 @@ function renderGeneralTable() {
       <th class="players-player-header"><div class="players-search-wrap"><span class="players-search-icon" aria-hidden="true">&#128269;</span><input id="playersSearch" data-slot="0" type="search" value="${escapeAttr(selectedPlayer || '')}" placeholder="${searchPlaceholder}" oninput="onPlayersSearchInput(event)" autocomplete="off" ${searchDisabled ? 'disabled' : ''}/>${searchAction}</div></th>
       <th>All</th><th>Winners</th><th>Experts</th><th>Masters</th>
     </tr></thead><tbody>${rows.map(row => playerRow(row, selectedPlayer ? 5 : 4)).join('')}</tbody></table>
-  </div></div><div id="playersSuggestions" class="players-suggestions" role="listbox" aria-label="Matching players"></div>`;
-  renderSuggestions();
+   </div></div><div id="playersSuggestions" class="players-suggestions" role="listbox" aria-label="Matching players"></div>`;
+   if (selectedPlayer) closeSuggestions();
+   else renderSuggestions();
 }
 
 function renderComparisonTable() {
@@ -472,8 +479,8 @@ function renderComparisonTable() {
   host.innerHTML = `<div class="table-wrap players-table-wrap"><div class="table-scroll">
     <table class="maps-table players-table"><thead><tr><th>Metric</th>${headers}</tr></thead>
     <tbody>${rows.map(row => comparisonRow(row)).join('')}</tbody></table>
-  </div></div><div id="playersSuggestions" class="players-suggestions" role="listbox" aria-label="Matching players"></div>`;
-  renderSuggestions();
+   </div></div><div id="playersSuggestions" class="players-suggestions" role="listbox" aria-label="Matching players"></div>`;
+   renderSuggestions();
 }
 
 function playerRow(row, columnsWithPlayer) {
@@ -569,6 +576,7 @@ function onPlayersSearchInput(event) {
   if (view === 'general' && selectedPlayer) selectedPlayer = null;
   if (view === 'comparison' && selectedPlayers[slot]) selectedPlayers = selectedPlayers.filter((_, index) => index !== slot);
   updatePlayersMeta();
+  suggestionsOpen = String(event.target.value || '').trim().length >= 3;
   renderSuggestions(event.target.value);
 }
 
@@ -576,7 +584,12 @@ function renderSuggestions(term = value(view === 'general' ? 'playersSearch' : `
   const host = document.getElementById('playersSuggestions');
   if (!host) return;
   const normalized = String(term || '').trim().toLocaleLowerCase();
-  if (playerIndexState !== 'ready' || normalized.length < 3) { closeSuggestions(); return; }
+  if (view === 'general' && selectedPlayer && normalized === selectedPlayer.toLocaleLowerCase()) {
+    closeSuggestions();
+    return;
+  }
+  if (!suggestionsOpen || normalized.length < 3) { closeSuggestions(); return; }
+  if (playerIndexState !== 'ready') return;
   // General and Comparison keep independent selections. Duplicate prevention
   // applies only among the five Comparison columns.
   const excluded = new Set(view === 'comparison' ? selectedPlayers.filter(Boolean) : []);
@@ -599,6 +612,7 @@ function positionSuggestions() {
 }
 
 function closeSuggestions() {
+  suggestionsOpen = false;
   const host = document.getElementById('playersSuggestions');
   if (!host) return;
   host.innerHTML = ''; host.classList.remove('open');
@@ -614,6 +628,7 @@ function selectPlayer(name, slot = activeSearchSlot) {
     next.push(exact);
     selectedPlayers = next.slice(0, 5);
   }
+  suggestionsOpen = false;
   closeSuggestions();
   loadData(++token);
 }
@@ -929,14 +944,21 @@ function renderArenaGraphCanvas() {
   const xTicks = Array.from({ length: 5 }, (_, index) => start + ((end - start) * index / 4));
   const grid = yTicks.map(value => `<g><line x1="${margin.left}" y1="${y(value)}" x2="${width - margin.right}" y2="${y(value)}"/><text x="${margin.left - 10}" y="${y(value) + 4}" text-anchor="end">${Math.round(value)}</text></g>`).join('');
   const dates = xTicks.map(value => `<g><line x1="${x(value)}" y1="${margin.top}" x2="${x(value)}" y2="${height - margin.bottom}"/><text x="${x(value)}" y="${height - 18}" text-anchor="middle">${new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</text></g>`).join('');
-  const lines = selectedPoints.map(({ item, points }, index) => {
-    const path = points.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'} ${x(point.time).toFixed(2)} ${y(point.rating).toFixed(2)}`).join(' ');
+  const plottedSeries = selectedPoints.map(({ item, points }) => ({
+    item,
+    points: points.map(point => ({ ...point, x: x(point.time), y: y(point.rating) })),
+  }));
+  const lines = plottedSeries.map(({ item, points }, index) => {
+    const path = points.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
     const color = ARENA_LINE_COLORS[index % ARENA_LINE_COLORS.length];
     return path ? `<path class="players-arena-rating-line" d="${path}" stroke="${color}" data-player="${escapeAttr(item.player)}"></path>` : '';
   }).join('');
   host.querySelector('svg')?.remove();
   host.querySelector('.players-arena-empty-chart')?.remove();
   host.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Arena rating progression for selected players" onmousemove="onPlayersArenaGraphMove(event)" onmouseleave="clearPlayersArenaGraphHover()"><g class="players-arena-grid">${grid}${dates}</g><line class="players-arena-axis" x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}"/><line class="players-arena-axis" x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}"/>${lines}<text class="players-arena-axis-title" transform="translate(15 ${height / 2}) rotate(-90)" text-anchor="middle">Arena rating</text></svg>${selected.length ? '' : '<div class="players-arena-empty-chart">Select up to five players from the legend.</div>'}`);
+  arenaGraphRenderState = {
+    pointsByPlayer: new Map(plottedSeries.map(entry => [entry.item.player, entry.points])),
+  };
   const tooltip = document.getElementById('playersArenaGraphTooltip');
   if (tooltip) {
     if (!arenaGraphHover) tooltip.classList.remove('visible');
@@ -980,12 +1002,11 @@ function onArenaGraphDayInput(event, side) {
   renderArenaGraphCanvas();
 }
 
-function nearestArenaPoint(item, targetTime) {
+function nearestArenaPoint(points, targetX) {
   let best = null;
-  (item.timestamps || []).forEach((timestamp, index) => {
-    const time = Date.parse(timestamp); const rating = Number(item.ratings?.[index]);
-    if (!Number.isFinite(time) || !Number.isFinite(rating)) return;
-    if (!best || Math.abs(time - targetTime) < Math.abs(best.time - targetTime)) best = { time, rating };
+  (points || []).forEach(point => {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.rating)) return;
+    if (!best || Math.abs(point.x - targetX) < Math.abs(best.x - targetX)) best = point;
   });
   return best;
 }
@@ -993,21 +1014,22 @@ function nearestArenaPoint(item, targetTime) {
 function onPlayersArenaGraphMove(event) {
   const data = currentArenaSeasonData();
   const svg = event.currentTarget;
-  if (!data || !svg) return;
-  const rect = svg.getBoundingClientRect();
-  const fraction = Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width)));
-  const maxDay = arenaSeasonDayCount(data); const dayMs = 24 * 60 * 60 * 1000;
-  const start = Date.parse(data.start_utc) + (arenaGraphDayStart - 1) * dayMs;
-  const end = Math.min(Date.parse(data.end_utc), Date.parse(data.start_utc) + arenaGraphDayEnd * dayMs);
-  const targetTime = start + fraction * Math.max(1, end - start);
-  const selected = (data.series || []).filter(item => arenaGraphSelected.has(item.player) && (item.ratings || []).length);
+  if (!data || !svg || !arenaGraphRenderState) return;
   const line = event.target?.closest?.('.players-arena-rating-line');
   if (!line) {
     clearPlayersArenaGraphHover();
     return;
   }
-  const item = selected.find(candidate => candidate.player === line.dataset.player);
-  const point = item ? nearestArenaPoint(item, targetTime) : null;
+  const screenMatrix = svg.getScreenCTM?.();
+  if (!screenMatrix) return;
+  const pointer = svg.createSVGPoint();
+  pointer.x = event.clientX;
+  pointer.y = event.clientY;
+  const svgPointer = pointer.matrixTransform(screenMatrix.inverse());
+  // Use the exact points used to draw this line. This avoids both CSS/viewBox
+  // scaling drift and selecting an off-screen observation outside Day X-Y.
+  const points = arenaGraphRenderState.pointsByPlayer.get(line.dataset.player) || [];
+  const point = nearestArenaPoint(points, svgPointer.x);
   if (!point) return;
   arenaGraphHover = {
     time: point.time,
@@ -1015,13 +1037,29 @@ function onPlayersArenaGraphMove(event) {
     clientX: event.clientX,
     clientY: event.clientY,
   };
-  renderArenaGraphCanvas();
+  updateArenaGraphHoverLabel();
 }
 
 function clearPlayersArenaGraphHover() {
-  if (!arenaGraphHover) return;
   arenaGraphHover = null;
-  renderArenaGraphCanvas();
+  updateArenaGraphHoverLabel();
+}
+
+function updateArenaGraphHoverLabel() {
+  const host = document.getElementById('playersArenaChart');
+  const tooltip = document.getElementById('playersArenaGraphTooltip');
+  if (!host || !tooltip) return;
+  if (!arenaGraphHover) {
+    tooltip.classList.remove('visible');
+    return;
+  }
+  tooltip.textContent = wholeOrDash(arenaGraphHover.rating);
+  tooltip.classList.add('visible');
+  const chartRect = host.getBoundingClientRect();
+  const left = arenaGraphHover.clientX - chartRect.left - (tooltip.offsetWidth / 2);
+  const top = arenaGraphHover.clientY - chartRect.top - tooltip.offsetHeight - 8;
+  tooltip.style.left = `${Math.max(8, Math.min(chartRect.width - tooltip.offsetWidth - 8, left))}px`;
+  tooltip.style.top = `${Math.max(4, top)}px`;
 }
 
 function renderArenaGraphLegend() {

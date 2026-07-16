@@ -108,13 +108,13 @@ const sideNavContentHtml = `
       <span>Players</span>
     </a>
     <div class="nav-divider"></div>
-    <button type="button" class="side-nav-link nav-placeholder">
+    <a class="side-nav-link" href="#/records" data-page-id="records">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
         <path d="M3 20h18M5 13h5v7H5v-7Zm9-3h5v10h-5V10Zm-7-2h10" />
         <text x="12" y="7" text-anchor="middle" aria-hidden="true">1</text>
       </svg>
       <span>Records</span>
-    </button>
+    </a>
     <div class="nav-divider"></div>
   </div>
   <button class="side-nav-scroll-btn side-nav-scroll-down" id="navScrollDown" onclick="scrollSideNav(1)" aria-label="Scroll navigation down"><span aria-hidden="true">&#9660;</span></button>`;

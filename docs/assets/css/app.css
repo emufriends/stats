@@ -1952,6 +1952,14 @@
       table-layout: fixed;
     }
 
+    /* A single shared canvas keeps every full-width statistics table aligned.
+       The three compact, side-by-side layouts do not use .table-wrap and are
+       intentionally allowed to shrink with their grid panels. */
+    .table-wrap .table-scroll > table {
+      width: 100%;
+      min-width: 900px;
+    }
+
     thead {
       background: var(--bg-surface);
       position: sticky;
@@ -2148,7 +2156,7 @@
       /* Avoid tiny rounding/content overflow on narrow desktop viewports while keeping the full table visible. */
       width: calc(100% - 2px);
       max-width: calc(100% - 2px);
-      min-width: 0;
+      min-width: 900px;
     }
 
     .endgames-table.cp-by-map-view th,
@@ -2727,7 +2735,7 @@
     }
 
     .icons-table {
-      min-width: 1080px;
+      min-width: 900px;
     }
 
     .icons-table .icons-value-tooltip {
@@ -2828,7 +2836,7 @@
 
     .maps-h2h-table {
       width: 100%;
-      min-width: 0;
+      min-width: 900px;
     }
 
     .maps-h2h-table th,
@@ -3170,7 +3178,7 @@
 
 .conservation-projects-table {
     table-layout: fixed;
-    min-width: 980px;
+    min-width: 900px;
 }
 
 .conservation-rewards-table,
@@ -3228,7 +3236,7 @@
 }
 
 .conservation-cp-table {
-    min-width: 980px;
+    min-width: 900px;
 }
 
 .conservation-group-separator td {
@@ -3352,7 +3360,7 @@
     .actions-map-table {
       table-layout: fixed;
       width: 100%;
-      min-width: 1080px;
+      min-width: 900px;
     }
 
     .actions-tables {
@@ -3551,6 +3559,9 @@
 
     .players-table thead th {
       text-align: center;
+      box-sizing: border-box;
+      height: 40px;
+      padding: 7px 6px;
     }
 
     .players-table .players-value-cell {
@@ -3741,9 +3752,73 @@
       overflow: auto;
     }
 
+    /* Records uses the same framed table, header slot, tabs, and pagination
+       geometry as the rest of the dashboard. */
+    .records-main-header {
+      min-height: 24.6667px;
+      align-items: center;
+    }
+
+    .records-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .records-tabs .endgames-tab { flex: 1 1 20%; min-width: 0; text-align: center; }
+    .records-table-wrap { max-height: calc(100vh - 185px); display: flex; flex-direction: column; }
+    .records-table-wrap .table-scroll { max-height: calc(100vh - 230px); overflow: auto; }
+    .records-table { width: 100%; min-width: 900px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+    .records-table.records-biggest-turns-table { min-width: 900px; }
+    .records-table thead { position: sticky; top: 0; z-index: 12; }
+    .records-table th, .records-table td { box-sizing: border-box; text-align: center; }
+    /* Standard data-table headers render at 40px (11px text at the global
+       1.5 line-height plus 11px vertical padding). Search controls need less
+       padding around their 25px input, but the resulting row must be identical. */
+    .records-table th { height: 40px; padding: 7px 6px; font-size: 11px; line-height: 1.2; vertical-align: middle; }
+    .records-table td { height: 43px; padding: 8px; }
+    .records-table td { white-space: nowrap; font-size: 13px; }
+    .records-table a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+    .records-table .records-icon-cell img { width: 21px; height: 21px; object-fit: contain; vertical-align: middle; }
+    .records-map-filter { display: flex; flex-direction: column; gap: 14px; }
+    .records-map-group { margin: 0; }
+    .records-filter-heading { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+    .records-map-chips { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+    .records-map-chip { min-width: 0; padding: 5px 4px; justify-content: center; text-align: center; font-size: 12px; }
+    .records-player-header { position: relative; overflow: visible; }
+    .records-player-header-content { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 27px; }
+    .records-player-header-title { display: block; text-align: center; }
+    .records-player-search-toggle { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; justify-content: center; width: 27px; height: 27px; padding: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 14px; }
+    .records-player-search-toggle:hover, .records-player-search-toggle:focus-visible { border-color: var(--border-light); color: var(--accent); background: var(--bg-surface); }
+    .records-player-search { position: relative; display: flex; align-items: center; min-width: 0; width: 100%; }
+    .records-player-search input { width: 100%; min-width: 0; height: 25px; box-sizing: border-box; padding: 3px 29px; border: 1px solid var(--border-light); border-radius: 7px; background: var(--bg-panel); color: var(--text); font: 500 12px/1.2 Inter, sans-serif; text-align: center; text-transform: none; letter-spacing: 0; }
+    .records-search-icon { position: absolute; left: 9px; color: var(--text-muted); font-size: 0; pointer-events: none; z-index: 1; }
+    .records-search-icon::before { content: "\1F50D"; font-size: 15px; }
+    .records-search-clear { position: absolute; right: 5px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 0; line-height: 1; }
+    .records-search-clear::before { content: "\00D7"; font-size: 17px; }
+    .records-player-suggestions { position: fixed; display: none; z-index: 1000; max-height: min(320px, 45vh); overflow-y: auto; padding: 4px; border: 1px solid var(--border-light); border-radius: 8px; background: var(--bg-panel); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .records-player-suggestions.visible { display: block; }
+    .records-player-suggestions button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+    .records-player-suggestions button:hover { background: var(--bg-surface); color: var(--accent); }
+    .records-suggestion-state { padding: 10px; color: var(--text-muted); font-size: 12px; }
+    .records-mode-filters { display: flex; flex-direction: column; gap: 12px; }
+    .records-icon-filter-wrap { position: relative; display: inline-flex; justify-content: center; }
+    .records-icon-filter-button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 4px; border: 0; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
+    .records-icon-filter-button.active { color: var(--accent-filter); }
+    .records-type-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; height: 20px; padding: 0 6px; border: 1px solid var(--accent-filter); border-radius: 9px; color: var(--accent-filter); font-size: 10px; font-weight: 600; line-height: 1; white-space: nowrap; box-sizing: border-box; }
+    .records-icon-filter-button { text-transform: uppercase; letter-spacing: .07em; white-space: nowrap; }
+    .records-icon-filter-popup { display: none; position: fixed; z-index: 1400; box-sizing: border-box; min-width: 220px; max-width: min(310px, calc(100vw - 16px)); padding: 10px; border: 1px solid var(--border-light); border-radius: var(--radius); background: var(--bg-panel); box-shadow: var(--shadow); }
+    .records-icon-filter-popup.open { display: flex; flex-direction: column; gap: 8px; }
+    .records-icon-filter-actions { align-self: flex-end; font-size: 11px; }
+    .records-icon-filter-icons { display: grid; grid-template-columns: repeat(6, 34px); justify-content: space-between; align-items: center; gap: 5px; }
+    .records-icon-filter-chip { width: 34px; height: 34px; padding: 2px; }
+    .records-icon-filter-chip img { width: 100%; height: 100%; object-fit: contain; }
+
+    @media (max-width: 600px) {
+      .records-table-wrap, .records-table-wrap .table-scroll { max-height: calc(100vh - 155px); }
+      .records-table { min-width: 900px; }
+      .records-table.records-biggest-turns-table { min-width: 900px; }
+      .records-tabs .endgames-tab { font-size: 9px; padding-inline: 4px; }
+    }
+
     .players-arena-table {
       width: 100%;
-      min-width: 1020px;
+      min-width: 900px;
       table-layout: fixed;
       border-collapse: collapse;
     }
@@ -3757,6 +3832,10 @@
       text-align: center;
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
+    }
+
+    .players-arena-table th {
+      height: 40px;
     }
 
     .players-arena-table th.sortable {
@@ -3977,7 +4056,8 @@
     .workers-header-single {
       text-decoration-line: underline;
       text-decoration-thickness: 1px;
-      text-underline-offset: 2px;
+      text-underline-offset: 3px;
+      text-decoration-skip-ink: none;
     }
 
     .workers-header-double,
@@ -3985,7 +4065,8 @@
       text-decoration-line: underline;
       text-decoration-style: double;
       text-decoration-thickness: 1px;
-      text-underline-offset: 2px;
+      text-underline-offset: 3px;
+      text-decoration-skip-ink: none;
     }
 
     .workers-map-table thead th {
@@ -4005,6 +4086,28 @@
 
     .workers-average-row .worker-average-avg {
       color: #c4a9e8;
+    }
+
+    .workers-map-table.workers-frequency-table .workers-average-row td:not(.sponsor-name-cell) {
+      font-size: calc(1em + 1px);
+    }
+
+    /* All map-chip filters use the same five-column geometry as Cards. */
+    #playersMapChips,
+    #conservationMapChips {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #playersMapChips .chip,
+    #conservationMapChips .chip {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      padding: 5px 4px;
+      justify-content: center;
+      text-align: center;
+      font-size: 12px;
     }
 
     .build-placeholder {
@@ -4328,11 +4431,11 @@
     }
     .combinations-pair-table {
       width: 100%;
-      min-width: 1080px;
+      min-width: 900px;
     }
     .combinations-map-table {
       width: 100%;
-      min-width: 1080px;
+      min-width: 900px;
     }
     .combinations-table th,
     .combinations-table td { text-align: center; }
@@ -4375,7 +4478,7 @@
     /* Preserve readable headers on narrower desktop/tablet viewports. The
        phone #statsTable rule below remains authoritative at the mobile breakpoint. */
     .cards-stats-table {
-      min-width: 950px;
+      min-width: 900px;
     }
 
     .endgames-table {
@@ -4988,22 +5091,19 @@
       /* Phone table is intentionally wider than the viewport.
          This enables horizontal scrolling while keeping columns readable. */
       #statsTable {
-        width: 755px;
-        min-width: 755px;
+        width: 900px;
+        min-width: 900px;
       }
 
-      /* Maps has 15-25 metric columns (or 15 H2H matchup columns), so the
-         generic phone width is not enough. JS updates this variable whenever
-         the visible map set or Maps tab changes. */
       #statsTable.maps-table {
-        width: var(--maps-mobile-table-width) !important;
-        min-width: var(--maps-mobile-table-width) !important;
+        width: 900px !important;
+        min-width: 900px !important;
         max-width: none !important;
       }
 
       #statsTable.icons-table {
-        width: 1080px !important;
-        min-width: 1080px !important;
+        width: 900px !important;
+        min-width: 900px !important;
         max-width: none !important;
       }
 

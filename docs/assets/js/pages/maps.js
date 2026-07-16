@@ -9,7 +9,7 @@ import {
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260711-1';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260713-1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260716-4';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';
@@ -398,10 +398,6 @@ function setTableModeClass() {
   const table = document.getElementById('statsTable');
   if (!table) return;
   table.className = activeView === H2H_VIEW ? 'maps-table maps-h2h-table' : 'maps-table maps-metrics-table';
-  const mobileWidth = activeView === H2H_VIEW
-    ? 1025
-    : 110 + Math.max(visibleMaps.length, 1) * 64;
-  table.style.setProperty('--maps-mobile-table-width', `${mobileWidth}px`);
   if (activeView === METRICS_VIEW) {
     const layout = metricsColumnLayout();
     table.style.width = `${layout.totalWidthPct}%`;

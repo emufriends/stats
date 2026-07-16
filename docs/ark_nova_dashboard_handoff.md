@@ -1,3 +1,7 @@
+Exit code: 0
+Wall time: 0.9 seconds
+Total output lines: 2462
+Output:
 # Ark Nova Statistics Dashboard Handoff
 
 Date: 2026-06-21  
@@ -140,6 +144,15 @@ Small entry point only:
 
 Do not turn this back into a giant single-file app.
 
+Static module cache-busters form a dependency chain and must be advanced all
+the way back to `index.html`. When a lazy page module changes, bump that module's
+URL in `page-registry.js`, bump the registry URL in `app.js`, and bump the
+`app.js` URL in `index.html`. When `snapshot-cache.js` or its manifest changes,
+bump its URL in `app.js` and in any page module that imports it, then bump the
+root `app.js` URL as well. Stylesheet changes require a new `app.css` URL in
+`index.html`. Reusing a previous URL can leave returning browsers on an older
+page implementation even when the source file and live snapshots are current.
+
 ### app.js
 
 Owns the runtime shell and route rendering:
@@ -260,7 +273,7 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, Build, Conservation, Workers, Players, and the Records placeholder. Home has no rail item; the topbar logo links to it. Build routes to `#/build`; Conservation routes to `#/conservation`; Workers routes to `#/workers`; Players routes to `#/players`. Scoring occupies a non-clickable placeholder position between Conservation and Workers. Scoring and Records are placeholders; all three Players views are active.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, Build, Conservation, Workers, Players, and Records. Home has no rail item; the topbar logo links to it. Build routes to `#/build`; Conservation routes to `#/conservation`; Workers routes to `#/workers`; Players routes to `#/players`; Records routes to `#/records`. Scoring occupies a non-clickable placeholder position between Conservation and Workers. Scoring and the MW Action Cards entry are placeholders; Records has two placeholder views and three active views, and all Players views are active.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Rail icons are either complete inline `<svg>...</svg>` elements or the Build PNG mask span. Keep every inline SVG wrapper balanced when reordering nav items; paths/circles outside an opening SVG are silently discarded by the browser.
 - Header topbar includes:
@@ -535,1524 +548,7 @@ The enlarged graph toggle at the selector's right edge swaps the table for an En
 
 The graph and legend keep a fixed height with a stable scrollbar gutter, so reducing the available icon lines does not resize or shift the chart. Icon bucket headers use the same styled header-tooltip event path as Sponsor Endgames.
 
-Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table cells are tooltip-free dashes and are absent from graphs and color ranges. The `#` column follows the current sort. Delta-column sorting places valid values first, sub-1,000 values second, and impossible/missing values last while respecting numeric direction inside the first two tiers; only valid values receive ranks. Frequency sorting similarly leaves impossible/missing rows unranked. Unranked rows display an em dash.
-
-The page supports MW/Base plus player/opponent Elo, maps, and date filters, with no Completed-only control. Default snapshots are `card-stats/icons/default-{mw|base}.json`.
-
-### Chip Selection
-
-Every chip UI uses independent toggling: clicking an active chip deselects only it, and clicking an inactive chip selects only it. There is no all-selected-to-isolated shortcut. This applies to sidebar Maps/Rounds, Home maps, table Type filters, Card/Open Hand attribute chips, Combo Type and header filters, Sponsor/Endgame maps, and Icons. Existing all/none controls, empty-selection behavior, and attribute/type dependency rules remain intact.
-
-Cards and Opening Hand render Species and Habitat choices as the same PNG artwork used by Icons rather than text chips. Their styled hover tooltips show the complete label; the underlying `America` metadata value is deliberately presented as `Americas`. Selection semantics and the text summaries on the popup-opening buttons are unchanged.
-
-The deliberate exception is line-chart selection in Endgames CP distribution, Endgames CP by map, and Icons: when every available graph line is selected, clicking one line or legend item isolates it. Subsequent graph clicks toggle normally. This exception does not change selector-bar chip behavior.
-- The right-aligned `Delta Elo / Frequency` switch is frontend-only, defaults to Delta Elo on mount, and retains its state across CP/Appeal, dataset, and filter changes.
-- Frequency mode changes bucket headers to `f (value)`, displays two-decimal percentages, and sorts bucket columns by the displayed frequency. Its denominator is the sum of the card's theoretically valid bucket counts, so impossible logged values are excluded and the displayed valid buckets total 100% apart from rounding. Hover shows the exact `bucket count / valid-bucket total`.
-- In Delta Elo mode, valid buckets with at least 1,000 occurrences expose their 95% Elo-delta confidence interval on hover. Values below 1,000 occurrences remain visible in grey parentheses and show `Insufficient data (fewer than 1,000 observations).` instead of a CI.
-- Low-sample values use muted grey at 70% opacity so they are visually subordinate;
-  the shared tooltip remains full-opacity.
-- Impossible and unavailable buckets remain tooltip-free dashes.
-- When a Sponsor bucket is the active sort, valid values rank first; insufficient values remain numerically sorted below them and impossible/missing values remain last. Insufficient and impossible/missing rows display an em dash instead of a rank. Frequency sorting likewise leaves impossible/missing rows unranked.
-- Desktop widths are `5/25/10/15/15/15/15` for CP and `5/25/10` plus seven `8.5714%` buckets for Appeal.
-- No Round filter
-- No Completed games toggle exposed to the user
-- No attributes bar
-- No endgame-name search UI
-
-CP distribution:
-
-- Table view has columns `0`, `1`, `2`, `3`, `4`, and `CP`.
-- CP percentage cells use the shared blue frequency scale with a fixed 0–50% domain.
-- Graph view renders the same data as custom SVG with x-axis `0..4` and y-axis `0..60%`.
-- Graph legend supports all/none controls plus per-endgame selection. If all lines are selected, clicking one legend entry or graph line isolates it.
-- Deselected graph lines remain visible but greyed out.
-- Hover tooltips show only the CP point nearest the pointer, not the complete series.
-- Graph mode removes the table header entirely, so no empty header strip remains above the chart.
-
-CP by map:
-
-- Rows are endgames; columns are the 15 maps plus final `CP`.
-- Map cells show average CP on that map.
-- Map cells use the red/neutral/green semantic scale, normalized across all visible map columns together across the complete filtered CP-by-map result.
-- Final `CP` column keeps the normal CP color styling.
-- Map filter is hidden and ignored in this view because all maps must be shown as columns.
-- Graph mode uses the same payload, with maps ordered `1a` through `8a`, then `9` through `14`, then `T1` on the x-axis and average CP on a dynamically padded y-axis. Missing points break line segments. Legend selection and nearest-point tooltips match CP distribution.
-- The `Raw / vs. avg` switch is frontend-only and applies to table and graph. Comparison values are `map CP - CP`, display signed to two decimals, use zero-anchored capped Delta colors with one shared range across all map columns, and retain raw `CP` as the final reference column.
-- CP-distribution frequency columns use the shared blue frequency scale with the fixed 0–50% cap.
-
-Default snapshots:
-
-```text
-https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/default-mw.json
-https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/default-base.json
-https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/cp-distribution/default-mw.json
-https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/cp-distribution/default-base.json
-https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/cp-by-map/default-mw.json
-https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/cp-by-map/default-base.json
-```
-
-### Maps Page
-
-File:
-
-```text
-assets/js/pages/maps.js
-```
-
-In-page views:
-
-- `Metrics`
-- `Tournament H2H`
-
-Metrics:
-
-- Uses map codes as columns and metric names as rows.
-- Maps General has four `- / O / +` segmented controls in this order: Map Pack 1, Map Pack 2, Legacy Maps, and Beginner Maps. `-` excludes the category, `O` includes it with ordinary maps, and `+` shows only that category. Defaults are Map Pack 1 `O`, Map Pack 2 `O`, Legacy `-`, and Beginner `-`, producing columns 1a-8a, 9-14, and T1. Selecting `+` forces the other three controls to `-`; ordinary maps remain visible whenever no category is in `+` mode. Exclude/Include/Only labels use the shared dashboard tooltip, not native browser titles. A larger Reset button sits on the same Metrics control row and restores these switch defaults plus the default metric ordering without changing sidebar filters. These are client-side controls because the backend payload already contains all 25 maps.
-- Default sort is by `Turns` ascending. `Rounds` also sorts ascending because lower values are better; other metric rows sort descending.
-- Percentage metrics display one decimal. The rows after `$ gained` are `$ gained (income)`, `$ spent (Animals)`, `$ spent (Build)`, `$ spent (Donations)`, and `$ spent (Range)`. Income reads `Money_gained_through_income`. `$ gained per turn` is the average of the per-player-game ratio `Money_gained / Number_of_turns`; it is not a ratio of aggregate averages. The four spending rows remain category averages divided by total spending and therefore display percentages despite their concise labels. Their per-map tooltips show the absolute category average with two decimals and no currency symbol. Zero denominators display `-`. Map headers use the global `Map name (code)` tooltip wording, and compact Games footer values use the dashboard tooltip with the full comma-grouped integer.
-- Filters are MW/Base, Elo ranges, and date range only. No map filter, no round filter, no Completed games toggle.
-- Metrics default date is `2026-01-13` onward because Map Pack 2 was added on January 13th, 2026. Home and both active Players views are unrestricted by date by default; the remaining dated pages default to `2025-01-01`.
-- The visible end-date input stays blank by default; blank means no upper date limit.
-- Map Pack 1 consists of Maps 9 and 10. Map Pack 2 consists of Maps 11-14 and T1. Legacy maps are Maps 1-8 (the non-alternate versions); beginner maps are Maps A and 0. Fill% is calculated from `Empty_hexes`: total hexes default to 42, Maps 5/5a/10 use 43, and Map 0 uses 39.
-
-Tournament H2H:
-
-- Uses `maps_view: "tournament_h2h"`.
-- Shows a row-map vs column-map crosstable for asymmetric tournament games only.
-- Tournament tables come from `ark-nova-stats-dashboard.dashboard_cache.tournament_tables`, a native BigQuery cache of the Google Sheets-backed `freestyle-190711.ark_nova.tournament_tables`.
-- Only MW/Base applies; H2H ignores Elo, date, concede, map, and completed-game filters.
-- Winner is determined by Score, then `Conservation_project_association_tasks`, then `Starting_position_in_first_round = Second player`; unresolved malformed games are excluded.
-- Toggle modes are Win% and Elo delta.
-- Win% cells show percentage plus exact `wins-losses`; Elo cells show signed average delta plus `n = X`.
-- The rightmost Overall column is wider and separated with a double border.
-- Matchup cells and Overall use separate color populations. Win% matchups normalize
-  across matchup rows; Elo matchups use the capped adaptive Delta scale. Overall
-  normalizes independently across Overall rows and uses CP-style orange-to-green text
-  in both modes, without a tinted background.
-- Rows default to natural map order and can be ranked descending by the active Overall metric; missing Overall values remain last. H2H row height tracks the rendered map-column width through a scoped `ResizeObserver`.
-
-### Combos Page
-
-`assets/js/pages/combos.js` is routed at `#/combos` and uses backend `stats_page: "combinations"` with four equal-width views:
-
-- `card_card`: unordered same-player card pairs. Card 1 is alphabetically first; actual delta is the player's delta when both were played, and Synergy is actual minus the sum of both individual card deltas.
-- `card_map`: card/map rows for the 15 standard maps. Synergy is map-specific delta minus the card's general delta.
-- `card_round`: card/round rows for rounds `1` through `5` and a `6+` bucket. Synergy is round-specific delta minus the card's general delta.
-- `card_endgame`: a played card paired with an endgame scored by the same player in the same non-conceded game. Delta Sum is the filtered card-play baseline plus the scored-endgame baseline; Delta Actual is the exact pair mean and Synergy is Actual minus Sum.
-
-Played cards are deduplicated per table/player/card/round before aggregation. All six type combinations are supported for Card + Card; self-pairs and unobserved pairs are omitted, and individual baselines use the same active filters as interaction rows. Frontend defaults to minimum 1000 plays and Synergy descending. Every card/endgame entity cell displays its general Delta beneath its name. Card + Card supports one-card or exact unordered-pair header filtering.
-
-Sidebar filters are view-aware: Card + Card shows Map and Round, Card + Map hides Map and shows Round, and Card + Round shows Map and hides Round. Card + Map and Card + Round provide multi-select header filters for their represented dimension. Card + Map's Map header is filter-only; a narrowed selection replaces its filter icon with an `N/15` chip, and popup map chips expose styled full-name tooltips. Card selectors search both display names and aliases from `cards_altnames.csv`; their single-choice popup uses the same Inter 12px typography and row spacing as Attributes/Abilities. A selected card leaves the header label unchanged and replaces only the search icon with a muted-red clear X. Card + Map displays map names as `Observation Tower (1a)` while retaining raw full names for matching. Card + Card's six-value Type popup includes all/none controls and spans the Played plus Type columns exactly. Fixed-position Type popups are flush with their headers, follow layout/scroll changes, and close only after the complete popup leaves the viewport. Empty Type, Map, or Round selections return no rows, and `6+` means round 6 or later.
-The Card + Round header uses the same active-filter treatment as Card + Map: the header and filter button receive the active state, and the button displays the selected-round count as `N/6` while narrowed.
-
-Card + Card rows remain canonical unordered alphabetical pairs in the payload. When a
-Card 1 or Card 2 header filter is selected, the frontend projects the matching card
-and individual Delta into that chosen display slot. With no selection, body order
-remains alphabetical; global rank calculation continues to use canonical pair
-identity. Card/Card 1/Card 2 headers are filter-only and are deliberately not sortable.
-
-The default combination snapshots are generated with `n_played >= 1000`. They retain
-`combination_ranges`, calculated from the complete untrimmed population, so the
-client-side color scale does not change merely because low-play rows were omitted.
-While a default snapshot is active and Minimum plays is at least 1000, sorting,
-pagination, card selection, and header filtering stay client-side. If a sidebar
-filter is applied or Minimum plays is lowered below 1000, the page switches to the
-server-paged API. Paged requests return at most 25, 50, or 100 rows, plus `page`,
-`page_size`, `total_rows`, global ranks, `combination_ranges`, and the option metadata
-needed by the visible filters. This keeps filtered responses small without changing
-the displayed rank or color semantics.
-
-The paged request fields are `combination_page`, `combination_page_size`,
-`combination_sort`, `combination_sort_dir`, `combination_min_plays`,
-`combination_pair_types`, `combination_card_types`, `combination_primary`,
-`combination_secondary`, `combination_header_maps`, and
-`combination_header_rounds`. The response marks this mode with
-`combination_paged: true`; its `data` array contains only the requested page.
-The page, page-size, and minimum-play request fields are optional and use the
-backend defaults `1`, `50`, and `1000` when omitted; explicitly invalid values
-are rejected.
-Minimum-plays and multi-chip header changes are debounced by 250 ms, while sorting
-and page changes request immediately. Stale responses are ignored by the existing
-request-token guard.
-
-All four tables use 100%-total desktop allocations and a `1080px` readability floor. Card + Card and Card + Endgame use `5/18/18/11/11/11/7/9/10`; Card + Endgame has independent non-sortable Card and Endgame searches, puts each general Delta beneath its name, uses only the card's three-value Type filter, and hides Completed-only because scored pairs are inherently complete. Its Round filter applies to the card play.
-
-Default snapshots:
-
-```text
-card-stats/combinations/card-card/default-{mw|base}.json
-card-stats/combinations/card-map/default-{mw|base}.json
-card-stats/combinations/card-round/default-{mw|base}.json
-card-stats/combinations/card-endgame/default-{mw|base}.json
-```
-
-Combo result metadata uses `combinations` on desktop and the shorter `combos` on phones.
-
-### Build Page
-
-`assets/js/pages/build.js` is routed at `#/build`; backend page id is `build`. The page has `Enclosures` and `Hexes` tabs. Enclosures uses joined Full/Log observations at one player/game row. Standard rows are sizes 1-5 with exact buckets 0-4 and `5+`; unique rows are Aviary, Reptile House, Petting Zoo, Large Aquarium, and Small Aquarium with No/Yes buckets. Only Petting Zoo has Empty, defined exactly as built once with `COALESCE(Petting_Zoo_icons, 0) = 0` and no Horse Whisperer in `played_sponsors`.
-
-Elo Delta and Frequency share the two-table layout. Delta cells expose the usual CI and use the 1,000-observation sufficiency rule. Ordinary frequency denominators are non-null observations for that enclosure field. Empty Petting Zoo frequency uniquely divides empty Petting Zoos by built Petting Zoos and uses violet. Standard enclosures use one shared bucket color range across `0-5+`; unique enclosures use one shared range across No/Yes/Empty, except the violet Empty Petting Zoo frequency exception. Enclosures keep the Completed games only control; when enabled, `completed_only=true` limits the table to rows whose derived `table_conceded` value is zero. The default Delta view is unrestricted and the default Frequency view enables this control. Default snapshots live under `card-stats/build/enclosures/{delta|frequency}/default-{mw|base}.json`.
-
-Hexes uses prepared Full Sample rows from non-conceded tables only; it has no Completed games only control. Collapsed `Empty_hexes` buckets are `0`, `1-5`, `6-11`, `12-17`, `18-23`, and `24+`. Each default and filtered response contains both the six collapsed rows and exact `0` through `23` plus `24+` in `expanded_data`, so the attached arrow changes the table locally without another request. The API has no expansion request flag; it always calculates both populations for Hexes. The arrow points down to expand and up to collapse. The state is shared across Elo Delta/Frequency and MW/Base switches. Columns are the 15 map columns plus a final raw `Avg` reference. It has `Elo Δ / Frequency` and `Raw / vs. avg` switches. In comparison mode, each map cell shows `map value - row Avg`; `Avg` remains the raw reference. Delta cells use CI and the 1,000-observation rule in raw mode. Frequency cells show exact `count / denominator` tooltips. Expanded Hexes blue frequency cells use a fixed `0–20%` color domain; collapsed Hexes uses the normal `0–50%` domain. The violet Avg frequency styling is unchanged. Default snapshots live under `card-stats/build/hexes/{delta|frequency}/default-{mw|base}.json` and contain both bucket modes.
-
-Prepared Logs includes numeric fields for all five standard sizes plus `aviary_built`, `reptile_house_built`, `petting_zoo_built`, `large_aquarium_built`, and `small_aquarium_built`.
-
-### Predictors Page
-
-`assets/js/pages/predictors.js` is routed at `#/predictors`; backend page id is `predictors`. It has three equal tabs: General, Icon, and Specific.
-
-General and Icon are backend-backed. One observation compares a player to their opponent in the same non-conceded table. A condition includes only rows where the player value is greater than the opponent value; ties do not count. Rows display the condition in the PDF-defined order plus Elo Delta with the normal CI tooltip and 1,000-observation sufficiency styling. Filters are player/opponent Elo, Maps, and Date Range. There is no Completed toggle for General/Icon.
-
-Specific is backend-backed and has a client-side `Elo Δ / Frequency` switch. Delta uses the normal CI and 1,000-observation behavior. Frequency is `count / denominator`, where denominator is every filtered player-game observation for that condition; it uses exact count tooltips and the standard blue `0–50%` color domain. Switching metrics does not request data or alter the Completed games only toggle. Unchecked completion includes recorded values from conceded and non-conceded games, while checked applies `table_conceded = 0`. MW has 22 rows; Base omits More reefers and Round 1: Humphead Wrasse and therefore has 20. Insufficient Delta and Frequency value cells use the shared styled tooltip path.
-
-Specific conditions are Triggered endgame; More endgame points; More endgame CP; More ingame CP; More reefers; More small/medium/large animals; Round 1 Upgrade, Project, Release, 2+ association actions, and Humphead Wrasse; Round 1/2 New Zealand Fur Seal; First to 5/8 CP with and without the exclusive university/partner-zoo bonus; No project/sponsor in the starting hand; No sponsor in the starting hand with Sponsors at 5; and that final condition further restricted to second player, Association at 2, and Sponsors at 5.
-
-For Specific only, a checked Completed games only toggle sends `completed_only=true`, bypasses the default snapshot, and applies the completed-table predicate in the backend. General and Icon do not expose this toggle and remain hard-filtered to non-conceded tables.
-
-Endgame CP is sponsor CP plus scored endgame-card CP. Endgame points value each CP at 3 and sponsor endgame appeal at 1. Ingame CP is `Conservation - endgame CP`. Threshold timing uses the first `cp_history.move` reaching the target; reaching it when the opponent never does counts as first. Sponsor endgame values are deduplicated per sponsor before summing.
-
-Reefer, animal-size, Project, and Sponsor classifications come from the canonical `cards_attributes.csv`. The same file is packaged with the Cloud Function and its parsed groups are published to `card-stats/metadata/cards-attributes.json` during daily refresh. Keep the frontend and backend copies synchronized when changing card metadata; ordinary requests use the cached parsed copy and do not fetch the CSV repeatedly.
-
-Default snapshots live under:
-
-```text
-card-stats/predictors/general/default-{mw|base}.json
-card-stats/predictors/icon/default-{mw|base}.json
-card-stats/predictors/specific/default-{mw|base}.json
-```
-
-### Actions Page
-
-`assets/js/pages/actions.js` is routed at `#/actions`; backend page id is `actions`. It has four equal tabs: Starting position, Upgrades, Upgrade order, and Upgrades by map.
-
-Starting position shows two non-sortable tables. The action-strength table compares Association, Build, Cards, and Sponsors at starting strengths 2-5. The comparison table covers Higher Association, Higher Build, Higher Cards, Higher Sponsors, and First player, with a double separator before First player. Delta cells use the usual CI and 1,000-observation rules, with one shared range across comparable Delta columns. Insufficient-data cells use the shared dashboard tooltip.
-
-Upgrades has no metric switch. Its two equal-width tables cover number of upgrades (`0-5`) and action upgrades (Animals, Association, Build, Cards, Sponsors); each table has three equal columns for its label, Elo Delta, and Frequency. One non-conceded payload supplies both metrics. Delta keeps CI/insufficient styling, while Frequency shows percentages with exact count tooltips. The Upgrade-count table uses the standard blue `0-50%` domain; the action-upgrade table uses `0-100%` because its normal values frequently exceed 50%. Its only default snapshots are `actions/upgrades/delta/default-{mw|base}.json`.
-
-Upgrade order has the same mode switch, one row per action, and columns for 1st through 4th upgrade. The left-side swap-axes button transposes the table locally into four timing rows and equal-width columns for Upgrade timing plus the five actions; it remains transposed across Elo Delta/Frequency and MW/Base changes, and resets on a new Actions mount. Elo values and CI metadata are unchanged. In the normal orientation, frequency divides by all upgrades of that action. In the transposed orientation, frequency divides by all upgrades occupying that timing slot. The tooltip always shows the applicable numerator and denominator, and swapping never requests data.
-
-Upgrades by map uses the map-grid framework with `Elo Δ / Frequency` and `Raw / vs. avg` switches. Rows are the five action upgrades, map columns are `1a-8a, 9-14, T1`, and the final `Avg` column stays as the raw reference when comparison mode is active. Frequency denominators are the scoped non-conceded player-game observations for that action row: each map column divides upgraded observations on that map by all scoped observations on that map, while `Avg` divides upgraded observations overall by all scoped observations overall. Frequency `vs. avg` is calculated entirely in the browser as the map percentage minus the Avg percentage; changing only Raw/`vs. avg` must rerender the loaded payload and must not issue a request. Its tooltip continues to show the raw map numerator and denominator.
-
-Default snapshots live under:
-
-```text
-card-stats/actions/starting_position/delta/default-{mw|base}.json
-card-stats/actions/upgrades/delta/default-{mw|base}.json
-card-stats/actions/upgrade_order/{delta|frequency}/default-{mw|base}.json
-card-stats/actions/upgrades_by_map/{delta|frequency}/default-{mw|base}.json
-```
-
-### Conservation Page
-
-`assets/js/pages/conservation.js` is routed at `#/conservation`; the backend page id is `conservation`. Its API subview is `conservation_view: "projects" | "project_rewards" | "cp_rewards"`. The page occupies the former Projects nav position because all three tabs describe different conservation mechanisms in Ark Nova.
-
-#### Gameplay concepts
-
-Conservation Points (CP) are the green-track points that eventually meet the opposing Appeal track to determine final score. Three related game events must not be conflated:
-
-1. A player supports a conservation project through an Association action. This increments `Conservation_project_association_tasks` in Full Sample.
-2. After supporting a project, the player takes one project reward. Log Sample records that event in `project_rewards`.
-3. When the player's CP marker first reaches the 5 CP and 8 CP spaces, the player chooses a separate CP-track bonus from an offered pool. These choices are stored in the CP bonus fields and are not project rewards.
-
-A player can support at most seven projects, so the Projects tab deliberately has the complete fixed domain `0-7`. A project reward event has `cp`, `round`, `reward`, `order`, and `project`, but this dashboard uses only `reward` and `order`. `order=1` means the reward taken after the player's first supported project; it does not mean round one. Likewise, orders 2-7 describe the sequence of that player's project rewards, not game rounds.
-
-#### Prepared data and API flow
-
-Source BigQuery tables are read-only. Daily refresh copies the required fields into backend-owned derived tables. Prepared Full Sample contains the complete source row plus derived table-level `table_conceded`. Prepared Logs includes `project_rewards`, source ``5cp_bonus`` as `five_cp_bonus`, source ``8cp_bonus`` as `eight_cp_bonus`, `chosen_5cp_bonus`, `chosen_8cp_bonus`, and `cp_history`. The two aliased availability fields are arrays of offered reward strings; the chosen fields are the one reward actually taken.
-
-The flow is:
-
-```text
-read-only Full/Log Sample
-  -> backend-owned prepared tables with table_conceded
-  -> Conservation SQL aggregation
-  -> MW/Base Cloud Storage snapshots or filtered Cloud Function response
-  -> one frontend payload per tab
-  -> client-side metric/scope/comparison switches
-```
-
-The switches do not issue requests. A tab, dataset, or applied sidebar-filter change loads a new payload. During daily maintenance, three worker threads generate the six Conservation snapshots concurrently with the existing sequential page refreshes; this prevents the new queries from extending the already long refresh beyond the Cloud Function timeout. Snapshot paths are:
-
-```text
-card-stats/conservation/projects/default-{mw|base}.json
-card-stats/conservation/project-rewards/default-{mw|base}.json
-card-stats/conservation/cp-rewards/default-{mw|base}.json
-```
-
-#### Projects
-
-Projects is a fixed eight-row map table. `count_value` is the exact integer value of `Conservation_project_association_tasks`. Columns are Count, the 15 supported maps, and Avg. It uses a `12% / 15 x 5.5% / 5.5%` allocation.
-
-All Projects observations are from non-conceded tables. There is consequently no Completed games only toggle. The filters are player/opponent Elo, Maps, and Date Range.
-
-For a row `c` and map `m`:
-
-```text
-delta(m,c) = average elo_delta among scoped player-games on m with project count c
-frequency numerator(m,c) = scoped player-games on m with project count c
-frequency denominator(m,c) = all scoped player-games on m
-```
-
-Avg repeats these formulas across every selected map. Raw Delta uses its observation count for CI and the 1,000-observation rule. The Projects Avg Delta cell also exposes CI metadata, uses the special orange-green Avg scale, and shows the same insufficient-data tooltip when needed. Frequency has no CI or sufficiency suppression, shows the exact numerator/denominator tooltip, uses the standard blue `0-50%` domain, and reduces numerical body cells by 1px to keep dense percentage tables legible while leaving the Count label column at normal size. Avg keeps the special orange-green Delta and violet Frequency treatment.
-
-Example: if 320 of 1,000 completed player-games on Map 1a supported exactly three projects, the Map 1a Frequency in row 3 is `320 / 1,000 = 32.00%`.
-
-#### Project rewards
-
-Project rewards contains six generic choices followed by map-specific choices. Generic rewards can normally occur across maps; map-specific choices exist only on their named map. The table always keeps the two sections contiguous and places a double separator before Marketing (1a). Sorting is performed within each section. Overall is the default descending sort; Reward uses the configured game order rather than alphabetical order.
-
-The exact frontend/raw mappings are:
-
-| Frontend | Log `project_rewards.reward` | Scope |
-|---|---|---|
-| Snapping | Snapping | generic; unavailable on T1 |
-| 2-size | 2-size | generic; unavailable on Map 13 |
-| 5 money | 5 Money | generic |
-| Worker | Worker | generic |
-| 12 money | 12 Money | generic |
-| 3 X-tokens | 3 X Token | generic |
-| Marketing (1a) | Marketing | Map 1a |
-| 1 CP (2a) | 1 CP | Map 2a |
-| Determination (3a) | Determination | Map 3a |
-| University (4a) | University | Map 4a |
-| Unique building (5a) | Aviary/Reptile House | Map 5a; one literal raw value |
-| Clever (6a) | Clever | Map 6a |
-| Pouching (7a) | Pouching | Map 7a |
-| Partner zoo (8a) | Partner Zoo | Map 8a |
-| Token (9) | Remove Continent Cube | Map 9 |
-| 2 reputation (10) | 2 Reputation | Map 10 |
-| Upgrade (11) | Upgrade | Map 11 |
-| Animal magnet (12) | Animal Magnet | Map 12 |
-| Adapt (13) | Adapt 3 | Map 13 |
-| Person sponsor (14) | Play a person sponsor | Map 14 |
-| Draw + ability (T1) | Draw from range | T1 |
-| 3 reputation (T1) | 3 Reputation | T1 |
-
-Delta Overall averages `elo_delta` whenever that reward was selected. Delta order columns average only reward events at that exact `project_rewards.order`. Overall Delta uses its own color range, separate from the order columns. Delta defaults to conceded and non-conceded games; its visible Completed games only toggle changes the Delta population to `table_conceded=0`.
-
-Frequency uses a deliberately different, always non-conceded population. Overall asks “in how many applicable player-games was this reward taken?”:
-
-```text
-f Overall numerator = distinct applicable player-games containing the reward
-f Overall denominator = all applicable scoped player-games
-```
-
-For a map-specific reward, “applicable” means only its map. Generic rewards use all selected maps. If Map 13 is the only selected map, 2-size is unavailable and displays `-`; if T1 is the only selected map, Snapping displays `-`. A map-specific row also displays `-` when its map is not selected. These are unavailable populations, not zero-percent observations.
-
-Order Frequency answers a different question: “when this reward was taken, at which project number was it taken?” Its denominator is reward occurrences, not player-games:
-
-```text
-f nth numerator = completed-table occurrences of this reward with order=n
-f nth denominator = all completed-table occurrences of this reward
-```
-
-Therefore orders 1-7 sum to 100% apart from display rounding. For example, if a reward has 100 occurrences split 60/30/10 across orders 1/2/3, the cells are 60%, 30%, 10%, and 0% thereafter. If 250 distinct player-games take that reward among 1,000 applicable player-games, f Overall is 25%; that calculation is independent of the order distribution.
-
-Frequency cells remain visible at small denominators and have no CI. f Overall uses a blue `0-100%` domain; the seven order columns share the dashboard's `0-50%` domain. Delta cells use CI and become insufficient below 1,000 observations. Exact duplicate malformed reward events are deduplicated by table, player, normalized reward, and order before aggregation.
-
-#### CP rewards
-
-At both 5 CP and 8 CP the player sees three bonus options. `five_cp_bonus` and `eight_cp_bonus` record the two random alternatives; the fixed third option, 5 money, is implicit and is added by the query at both thresholds. `chosen_5cp_bonus` and `chosen_8cp_bonus` record the selected option. Availability and choice are intentionally separate: a non-money reward cannot enter a Frequency denominator merely because it exists in the game.
-
-The exact mappings are:
-
-| Frontend | Raw bonus string | Dataset |
-|---|---|---|
-| University | 1 University | MW + Base |
-| Partner zoo | 1 Partner-Zoo | MW + Base |
-| Posturing 3 | 3 bonus-kiosk-pavilion | MW only |
-| x2 | 1 Multiplier | MW + Base |
-| 10 money | 10 money | MW + Base |
-| 2 reputation | 2 reputation | MW + Base |
-| 3 X-tokens | 3 xtoken | MW + Base |
-| 3-size | 1 size-3 | MW + Base |
-| Marketing | 1 bonus-sponsor-gray | MW + Base |
-| Extra Shift | 1 bonus-extra-shift | MW only |
-| Bonus icon | 1 bonus-icon | MW only |
-| 3 cards | 3 take-in-range-or-deck | MW + Base |
-| Snap + Handsize | 1 bonus-increased-hand | MW only |
-| Ignore 3 | 3 bonus-ignore-conditions | MW only |
-| Adapt 3 | 3 bonus-scoring-cards | MW only |
-| 5 money | 5 money | MW + Base |
-
-MW has 16 configured rewards. Base omits the six MW-only rewards and has 10. Each reward has three backend rows, with `scope` equal to `5`, `8`, or `combined`; the frontend switches locally between them.
-
-Delta includes a player-game when the matching chosen field contains the reward. Combined Delta includes a reward chosen at either threshold but deduplicates it to one player-game/reward observation because a reward cannot normally be claimed twice.
-
-Frequency measures choice only when the player had full choice. Full choice means the player reached the threshold before the opponent. For each player and threshold, the backend finds the first `cp_history.move` where CP is at least 5 or 8. The player qualifies when their move is lower than the opponent's, or when the opponent never reaches the threshold. Equal moves do not qualify. A Frequency opportunity then exists only if the reward also appears in that threshold's availability array.
-
-```text
-frequency numerator = eligible offered opportunities where the reward was chosen
-frequency denominator = eligible offered opportunities for the reward
-```
-
-The `5` and `8` modes use one threshold. `combined` unions the threshold opportunities rather than collapsing them by player-game. The always-offered 5 money can therefore contribute one 5 CP opportunity and one 8 CP opportunity in the same game. Other rewards are never offered at both thresholds. Example: if 5 money has 80 eligible 5 CP offers and 70 eligible 8 CP offers, with 30 and 20 choices respectively, combined Frequency is `(30+20)/(80+70) = 33.33%`.
-
-The table uses the same map-grid allocation as Conservation Projects: Reward at 12%, each map at 5.5%, and a rightmost AVG column at 5.5%. AVG aggregates every map and uses the same special Avg styling as Projects: orange-green for Delta and violet for Frequency, with matching CI color metadata in Delta mode. AVG body values are normal weight rather than bold. Its header keeps the tooltip and sort indicator in a compact inline layout so it does not create horizontal overflow. Map columns aggregate only that map. Raw shows direct values. `vs. avg` displays `map value - AVG` while leaving AVG unchanged. For example, a Map 1a Delta of `+2.400` and AVG Delta of `+2.050` produces `+0.350` in comparison mode. The same subtraction applies to percentage points in Frequency mode.
-
-Delta cells use their chosen-observation counts for CI and insufficiency. Frequency has no CI or small-denominator suppression, uses exact count tooltips and the blue `0-50%` domain, and labels its meaning with `% (chosen when having full choice between all 3 options)`. In Frequency mode only, CP Rewards reduces numerical body cells by 1px; the Reward label column keeps the normal body size. Frequency comparison cells remain blue rather than using Elo Delta red/green, because they are percentage-point differences. The CP rewards sidebar has player/opponent Elo, Date Range, and Completed games only; it intentionally has no map filter because all map columns remain comparable in one table. The completion toggle applies to both metrics.
-
-### Workers Page
-
-Workers is routed at `#/workers` and uses `stats_page: "workers"` with
-`workers_view: "general" | "two_cp_worker"`. It uses the Actions → Upgrades by
-map table framework: a fixed-order label column, all 15 map columns, a final
-`Avg` reference column, `Raw / vs. avg`, and `Elo Δ / Frequency`. Worker rows
-are deliberately not sortable because their order is part of the gameplay
-meaning.
-
-General reads `Association_workers` from prepared Full Sample. This is the
-number of workers a player took overall, with valid values 1–4. It is always
-restricted to non-conceded tables. The rows are exactly `1`, `2`, `3`, and `4`,
-and the Frequency denominator is the valid 1–4 population for the selected
-scope. Delta averages `elo_delta` among the matching worker-count observations;
-CI sample size counts matching observations with non-null `elo_delta`.
-
-The Workers header also documents the gameplay timing convention: `Last worker:
-0 CP - 1 CP - 2 CP`, with 1 CP underlined once and 2 CP underlined twice. Map
-headers use single underlines for 2a, 4a, 5a, 8a, 11, 12, 14, and T1, and
-double underlines for 6a, 7a, and 10.
-
-In General + Frequency, a separated `n (Avg)` row reports the arithmetic mean
-of `Association_workers` among the valid 1–4 population for each map and for
-the overall scope. It is prevalence rather than a percentage: map cells use a
-muted light-blue scale and the overall cell uses a light-violet scale. In
-`vs. avg`, map values subtract the overall mean while the overall cell remains
-the raw reference. The row is hidden in Delta mode and on 2 CP Worker.
-
-2 CP Worker reads prepared Logs’ `two_cp_worker` field. `false` means the player
-chose the upgrade at the 2 CP decision and `true` means the player chose the
-worker. Rows are always `Upgrade`, then `Worker`. Null or malformed values are
-excluded because an early quit can leave the choice unset. The Frequency
-denominator is the valid Boolean population. Unlike General, this tab exposes
-the optional `Completed games only` toggle: unchecked includes valid conceded
-and non-conceded tables, while checked adds `table_conceded = 0`.
-
-For both tabs, the tabs are equal-width, map header tooltips use the global
-`Map name (code)` wording, and the 2 CP Worker table header is shortened to
-`2 CP`. Map cells use only that map’s player-game observations. Avg uses
-the complete selected map scope. Raw Delta cells use the normal CI and
-fewer-than-1,000 rule; Avg Delta uses the special orange-green Avg scale and
-the same CI metadata. Raw Frequency uses the fixed 0–50% blue scale; Avg
-Frequency uses the violet reference scale. Frequency cells expose the exact
-count/denominator tooltip through the shared dashboard hover behavior.
-`vs. avg` is `map value - Avg`, and its signed Frequency values remain blue
-percentage-point comparisons. Signed
-Frequency comparisons use two decimals below an absolute value of 10 and one
-decimal at 10 or above so the sign and value fit dense cells.
-
-Default snapshots are:
-
-```text
-card-stats/workers/general/default-{mw|base}.json
-card-stats/workers/two-cp-worker/default-{mw|base}.json
-```
-
-General snapshots are hard-filtered to non-conceded tables. 2 CP Worker
-snapshots include all valid Boolean choices with the completion toggle off.
-Filtered requests include Elo bounds, date range, dataset, view, and the
-optional completion flag in their cache key. Source Full Sample and Log tables
-remain read-only; prepared tables and snapshots are backend-owned derived
-data.
-
-### Players Page
-
-Players is routed at `#/players` and uses `stats_page: "players"` with
-`players_view: "general" | "comparison" | "arena_top_100"`. Tabs are ordered
-General, Comparison, Arena Top 100 and are equal width. General and Comparison
-are interactive player analysis; Arena Top 100 is a closed, static seasonal
-ranking analysis. The Players main header reserves the shared `24.6667px`
-control slot used by other pages; the Arena season selector is constrained to
-that slot so switching tabs does not move the tab bar or table.
-
-General displays six equal-width columns: Metric, Player, All, Winners, Experts,
-and Masters. Its 64 rows are the Maps/Metrics rows from Turns through Science
-icons, excluding Games and Rounds, with `Breaks triggered` and `Break%` inserted
-after Turns. `Breaks triggered` reads `Number_of_breaks_triggered` and `Break%`
-is `100 * Number_of_breaks_triggered / total_breaks`; an invalid or zero
-denominator displays `-`. The displayed money metric is `$ gained per turn`,
-calculated as the average of per-player-game `Money_gained / Number_of_turns`.
-
-All populations are player-game rows from non-conceded tables. The Player
-column is the selected exact `player` value. All is every scoped row. Winners
-require the player row to have `Game_result = 1` while the other row in the same
-table has `Game_result = 2`. A table where both rows have result 1 is a draw and
-does not enter Winners, although it remains eligible for All, Experts, or
-Masters. Experts use player `elo >= 500`; Masters use player `elo >= 700`.
-Malformed result combinations do not qualify as wins.
-
-Players filters are opponent Elo, maps, date range, Last X games, and Arena
-season. The
-opponent Elo minimum is visually empty and means `0`; this is a Players-specific
-default. There is no player Elo filter and no completion toggle because
-concession is always excluded. Last X selects the selected player's newest
-qualifying rows by `game_ended_at DESC` and deterministic table-id order. Both
-date fields are empty by default. Date Range and Last X are strictly mutually
-exclusive: typing either date boundary disables both pointer and keyboard input
-for Last X, while typing Last X disables both date inputs. Clearing the active
-field re-enables the other control immediately. Disabled fields serialize as
-`null`, and the backend rejects any manually constructed request that contains
-both a date boundary and Last X. Reset clears both mechanisms, changes only
-filters, and preserves selected players.
-
-Arena Seasons are always visible below Last X; selecting one or more seasons
-activates the Arena restriction, while an empty selection means no Arena
-restriction. A game belongs to an Arena season only when `arena_rating_delta` is non-null and its UTC
-`game_ended_at` lies in a configured interval whose `Mode` matches the row's
-Base/MW dataset. The interval is half-open: `Start <= game_ended_at < End`.
-Arena-marked rows outside every interval, or in an interval for the other
-ruleset, receive no `arena_season` and are treated as non-Arena. Started
-seasons appear newest-first. Other-mode chips remain visible but disabled and
-darkened; `all` selects every compatible season and `none` clears the Arena
-restriction. Dataset changes remove incompatible choices without selecting a
-replacement. Arena filtering intersects maps, opponent Elo, dates, and Last X
-normally. Requests use `players_arena_only` (derived from whether the selected
-season list is non-empty) and `players_arena_seasons`; both
-fields participate in response and component-cache keys. Selected-season date
-bounds are also added to SQL for partition pruning, while `arena_season`
-remains the exact semantic predicate.
-
-The General API accepts `players_player` and `last_x_games`; its payload includes
-`player_game_count` and absolute tooltip fields for the four spending-share rows.
-Body value tooltips are otherwise absent, and an empty Player value is `-` with
-no tooltip. Player colors use the normal Elo-delta diverging family without a
-fixed clamp; each metric row has its own range. `Turns` has
-`lower_is_better: true`, so its color direction is reversed without changing its
-number or sort behavior. The current card labels are `Cards drawn (deck)` and
-`Cards drawn (Range)`.
-
-Comparison accepts `players_players`, an ordered array of one to five unique
-exact player names. It returns `players: [{name, game_count}]` plus metric rows
-whose `values` arrays contain each selected player's value and spending tooltip
-value. All selected players share the active filters, while Last X is applied
-independently to each player's newest rows. Selecting from any search bar adds
-the player to the leftmost available column; clearing a selection compacts the
-remaining players. Comparison prevents duplicate selections and begins color
-coding only after at least two players are selected. Its status text is
-`Number of games considered: p1 (x1), p2 (x2), ...`.
-
-#### Arena metadata and Arena Top 100
-
-Board Game Arena's Arena mode changes only the ranking ladder; Ark Nova play is
-otherwise ordinary. Arena is divided into roughly three-month seasons named
-S1, S2, and so on. `arena/arena_settings.csv` is canonical and contains
-`Season`, `Start (UTC)`, `End (UTC)`, and `Mode`. Refresh rejects duplicate
-names, overlapping or reversed intervals, invalid UTC values, and modes other
-than `Base`/`MW`. The frontend reads a normalized manifest rather than parsing
-CSV, so season chips are local and immediate.
-
-Top 100 availability is intentionally different from the interactive filter:
-a season appears in Arena Top 100 exactly when a lowercase ranking file such as
-`s12.csv` exists, not when its configured end time passes. Each file must have
-exactly ranks 1-100, 100 unique non-empty `BGA Name` values, and numeric
-`Rating` values. Daily refresh checks every configured season. Adding `s13.csv`
-therefore adds S13 at the next successful refresh without a code change. The
-Function checks the dashboard's canonical remote Arena directory first and
-ships a packaged last-known copy as an outage fallback.
-
-Arena Top 100 has one season selector above the tab bar, newest first, and
-defaults to the newest ranking-file season. Selecting a season forces the
-global dataset to that season's Mode, disables the incompatible Base/MW button,
-and disables the Filter button. Those controls are restored on leaving the
-tab. The fixed, non-sortable table is:
-
-```text
-# | Player | End | Peak | Games | Winrate | Opp. Elo | PR | Turns | PPT
-```
-
-`#` is 5%, Player is 20%, and each remaining column is 9.375%. Rank, Player,
-and End come directly from the ranking CSV. Peak is maximum non-null
-`post_match_arena_rating`; Games counts every matched Arena player-game;
-Winrate is average valid score times 100, where win=1, draw=0.5, loss=0; Opp.
-Elo averages non-null `opponent_elo`. Games, Peak, Winrate, Opp. Elo, PR, and
-graph history include conceded games. Turns and PPT average `Number_of_turns`
-and `points_per_turn` only from non-conceded rows. A malformed result still
-counts as a game but cannot enter Winrate or PR. A ranked player with no matched
-rows displays Games 0 and `-` for unavailable metrics.
-
-PR is a tournament performance rating based on ordinary Elo, never Arena
-rating. It uses valid scored games only, rounds score rate to the nearest whole
-percentage, adds the official FIDE table 8.1.1 `dp` value to those games'
-average opponent Elo, uses -800/+800 at 0%/100%, and rounds the result to a
-whole number. The integer lookup is deliberate; do not replace it with the
-continuous logistic approximation.
-
-The graph toggle belongs to the Arena Top 100 tab. It plots UTC
-`game_ended_at` against `post_match_arena_rating`, ordered by timestamp and
-then table ID. Conceded observations remain and null ratings are skipped. All
-100 ranked players remain in a searchable, scrolling legend; players without
-rating points are disabled. Ranks 1-5 start selected. At most five lines may be
-active, a sixth choice is blocked, and `Maximum 5 players` is permanently
-shown. `Top 5`, `None`, and `Random` are local shortcuts; Random selects five
-eligible players without contacting the backend.
-
-The graph has a fixed viewport-sized shell and a vertically scrolling legend.
-Hovering a selected line shows only that line's rating, directly above the
-cursor; no player name or date is shown. The x-axis has no separate `Date (UTC)`
-title. While graph mode is active, local `Day X to Day Y` inputs appear in the
-shared Players header slot rather than below the graph. They zoom the existing
-chart without changing its physical size or requesting data. The season length
-is `ceil((End - Start) / 24 hours)`, so the default is Day 1 to the final season
-day. Inputs accept digits only: X below 1 becomes 1; X at or above the season
-length resets to 1; Y is capped at the season length; and Y at or below X is
-corrected to the season maximum. Changing season resets the full range. These
-controls, hover values, and zooming are frontend-only.
-
-The Arena Top 100 table keeps the permanent season rank in `#` while allowing
-End, Peak, Games, Winrate, Opp. Elo, PR, Turns, and PPT to sort. End descending
-is the default. Clicking the active header reverses its direction; selecting a
-different header starts descending. Missing values sort after valid values and
-rank is the stable tie-breaker. Sortable headers use the shared highlighted
-header and arrow indicator.
-
-Every daily job rebuilds every available Top 100 season because late game
-indexes can arrive. Publication occurs only after all seasons succeed, leaving
-the previous object intact on any failure:
-
-```text
-card-stats/players/arena/manifest.json
-card-stats/players/arena-top-100/all-seasons.json
-```
-
-The gzip-compressed all-season bundle contains season metadata, all 100-row
-tables, and compact parallel timestamp/rating arrays. It is not part of the
-universal default pack. Hovering, focusing, or choosing Players in the nav and
-mounting Players both start the same versioned Cache Storage download. The
-previous successful cache remains usable across a daily version transition.
-Once cached, season switching, table/graph switching, legend search, and line
-selection make no Cloud Function or BigQuery request.
-
-Default snapshots are:
-
-```text
-card-stats/players/general/default-{mw|base}.json
-```
-
-The large player directory is separate and generated during daily refresh:
-
-```text
-card-stats/players/index/default-{mw|base}.json
-```
-
-It is a sorted, non-conceded, dataset-specific list. The frontend downloads it
-when Players first opens, then reuses it through memory and versioned Cache
-Storage; searches begin at three characters and show a bounded alphabetical
-suggestion list. The public cache bucket allows cross-origin GET/HEAD requests
-from the static site and local development servers. If direct snapshot delivery
-fails, the frontend sends `players_index: true` with `stats_page: "players"` and
-`is_mw`; the Cloud Function reads the same cache object and returns it through
-its CORS/gzip response path. This fallback never queries BigQuery. Index loading,
-failure, and retry states remain visible instead of becoming an empty directory.
-Searching does not query BigQuery per keystroke.
-
-Interactive statistics read the backend-owned
-`dashboard_cache.players_stats_prepared` table, not Full Sample directly. The
-daily refresh derives one narrow player-game row per source observation,
-including table-level concession, winner status, all 64 metric values, the four
-raw spending amounts, timestamp, table ID, validated Arena score,
-`arena_rating_delta`, `post_match_arena_rating`, and derived `arena_season`. It is partitioned by game date and
-clustered by player, dataset, map, and opponent Elo. Player leads because exact
-player lookup is the latency-sensitive path. General uses one aggregate
-for All/Winners/Experts/Masters and a separate exact-player aggregate. The player
-filter is applied before `ROW_NUMBER()`, so Last X never ranks unrelated players.
-When both components are missing they are submitted concurrently and merged into
-the established payload shape.
-
-Players component caches are data-versioned. A baseline key contains dataset,
-maps, opponent-Elo bounds, date bounds, Arena-only state, and selected seasons.
-A selected-player key adds the exact player and Last X. The ordinary full-response filter cache remains the first
-repeat-request layer; Comparison includes its normalized selected-player set and
-Last X in its response cache key. With default filters, General takes its
-comparison columns from the daily Players snapshot and queries only the selected
-player. Changing a player under unchanged custom filters reuses the baseline
-component. Exact repeats avoid BigQuery.
-
-The same refresh also builds
-`dashboard_cache.players_default_prepared`, one compact aggregate row per exact
-player and dataset for the default population (valid maps, opponent Elo at least
-0, no date restriction, non-conceded). Default-filter General selections and
-default-filter Comparison lookups read this table, so they do not rescan the wide
-player-game table. Last X and any custom filter intentionally fall back to
-`players_stats_prepared` because they require game-level rows.
-
-The suggestion list is a viewport-positioned overlay outside the table scroll
-container, so it cannot be clipped by the sticky header or table frame. Player
-names are selected through escaped data attributes rather than executable inline
-strings. The table's inner scroll container owns the viewport height and vertical
-scrollbar, exposing the complete metric catalog while the header remains sticky.
-When no player is selected, null Player values display `-`; only real numerical
-zero values display as zero. The player search popup is a viewport-positioned
-overlay and closes immediately after selection.
-
-Across the dashboard, signed Frequency comparison values use an adaptive
-display precision: absolute values below 10 percentage points show two decimals;
-absolute values of 10 or more show one decimal. This affects only signed
-`vs. avg` percentage-point displays, not raw Frequency percentages or Elo
-Delta values. The sign, including the `±` zero form, is preserved.
-
-Elo Delta cells use a separate global precision rule: values with absolute
-magnitude below 10 display three decimals; values at or above 10 display two
-decimals. This applies to Elo Delta cells and insufficient-data cells across all
-pages, but not to ordinary Maps metrics, money, CP, or Frequency values. Maps
-Metrics ordinary numeric values with three integer digits retain two decimals
-so values such as `114.24` remain visible.
-
-#### Conservation null and malformed-data rules
-
-- A missing numeric value does not enter a Delta mean or CI.
-- A zero or missing Frequency denominator renders `-`, never an invented 0%.
-- A missing CP threshold move cannot qualify as first to that threshold.
-- A missing opponent threshold move qualifies only when the player has a valid threshold move.
-- A non-money CP reward absent from the availability array cannot enter the Frequency numerator or denominator even if malformed chosen data claims it; 5 money is the documented fixed exception and is injected as an opportunity at both thresholds.
-- Configured rewards remain present when they have no data, so MW/Base and filtered layouts do not shift.
-- Explicitly impossible map/reward combinations render `-`.
-- Source BigQuery tables are never updated; only prepared tables, cache blobs, and snapshots are replaceable derived artifacts.
-
-### Shared Table UI
-
-`app.js` observes rendered `.rank-cell` elements and reduces only overflowing rank text, down to a legible minimum; page modules do not need their own four-digit-rank handling. Card-header search buttons keep their compact glyph but use a larger invisible hit target extending mainly to the left. Sortable tables should add the shared `sorted` class to the active `<th>`; narrowed filters use `--accent-filter` instead.
-
-Default sort highlighting is hidden during loading and applied only after data has loaded. Cards, Opening Hand, and Combos distinguish a genuine empty filter result from a Minimum plays/keeps threshold that removed otherwise-valid rows; only the latter temporarily pulses the minimum input, stopping after five seconds or immediately on focus.
-
-Every Filter-bar player/opponent Elo minimum serializes a cleared input as numeric `0`. Initial and Reset values remain page-specific (normally 300); clearing a minimum deliberately prevents use of a 300-minimum default snapshot.
-
-Cards, Opening Hand, and all Combo views calculate `#` globally among rows that
-meet the current Minimum plays/keeps threshold. Secondary client-side filters
-preserve those global ranks and therefore intentionally leave gaps.
-
-On phones, the navigation rail overlays rather than resizes the main content and collapses after selecting a route. The rail remains `84px` wide. Only its attached collapse/expand control is enlarged: the button is `21px x 60px`, sits at `right: -21px`, and uses a `15px` arrow glyph. Rank columns (`#`) are hidden on phone layouts only. Maps and Combos do not freeze left-side data columns on phones; their full tables scroll horizontally. Maps Metrics receives a computed readable width (`110px` metric column plus `64px` per currently visible map), so enabling Map Pack 1, Map Pack 2, Legacy, or Beginner expands the scrollable table rather than compressing columns. Maps H2H uses a fixed `1025px` mobile table width. Combo result metadata hides only the `Showing` prefix on phones.
-
-## Shared Page Module Pitfalls
-
-This is very important.
-
-The page modules currently contain HTML strings with inline handlers such as:
-
-```html
-onclick="sortBy('delta_played')"
-onclick="applyFiltersFromSidebar()"
-```
-
-Because ES modules are evaluated only once and `window` handlers persist across pages, each page module must bind its handlers every time it mounts.
-
-`cards.js`, `opening-hand.js`, and `endgames.js` now use:
-
-```js
-const PAGE_WINDOW_HANDLERS = { ... };
-
-function bindWindowHandlers() {
-  Object.assign(window, PAGE_WINDOW_HANDLERS);
-}
-```
-
-And call `bindWindowHandlers()` at the start of `mount()`.
-
-Do not remove this unless the inline handler architecture is replaced with proper event delegation.
-
-### Stale Async Response Guard
-
-A previous bug caused Cards numbers to be replaced by Opening Hand numbers or vice versa. Root causes:
-
-1. Global window handlers from one page could remain active on another page.
-2. A slow async request from a previous page could resolve after navigation and write into the current page DOM.
-
-The data-fetching page modules now maintain:
-
-```js
-let isPageMounted = false;
-let mountToken = 0;
-
-function isCurrentMount(token) {
-  return isPageMounted && token === mountToken;
-}
-```
-
-Async work passes/uses the active mount token. Before writing data or UI state, it checks `isCurrentMount(token)`.
-
-Keep this pattern for all future pages that fetch data asynchronously.
-
-## Static CSV Metadata
-
-### cards_altnames.csv
-
-Used by search alias/nickname matching.
-
-Expected columns:
-
-```text
-card_name,aliases
-```
-
-Aliases are semicolon-separated. Search is normalized case-insensitively and accent-insensitively.
-
-### cards_attributes.csv
-
-Used by the Attributes bar. Important columns include:
-
-```text
-Type
-Name
-Species
-Continent
-Water
-Rock
-Science
-Strength
-Size
-Abilities
-Reefer
-Aviary
-```
-
-Notes:
-
-- "Continent" is displayed as Habitat in the UI. User-facing conversation may use Habitat and Continent interchangeably; in code/CSV this field is named Continent, while the Attributes bar labels it Habitat because it is shorter.
-- Conditions may exist in old CSV versions but are intentionally not exposed.
-- The Attributes bar is client-side only and never triggers a backend query.
-- Missing metadata should fail open so table rows are not accidentally hidden.
-- For Sponsor rows with no Species or Continent/Habitat, the CSV stores `0` as an explicit no-tag value. Zooplankton also has `0` in Continent/Habitat. The UI does not show a `None` chip; clicking `none` in the Species/Habitat popup means an empty selected set, which filters for this explicit `0` no-tag value.
-
-### arena/
-
-`arena/arena_settings.csv` defines every Arena season and each optional
-lowercase `sN.csv` defines that season's final Top 100. The Function packages a
-copy of this directory but checks the canonical dashboard-hosted directory
-first on every refresh, allowing a newly committed season/ranking file to be
-discovered without a backend code change. Never infer Top 100 availability from
-the current date: ranking-file existence is the explicit publication signal.
-See the Players section for schemas, validation, populations, and formulas.
-
-## Backend Overview
-
-Backend source:
-
-```text
-C:\Users\ascri\Desktop\ark-nova-function\main.py
-```
-
-Cloud Function:
-
-```text
-get-card-stats
-```
-
-Region:
-
-```text
-europe-west1
-```
-
-Runtime:
-
-```text
-python312
-```
-
-Entry point:
-
-```text
-get_card_stats
-```
-
-Public endpoint:
-
-```text
-https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats
-```
-
-Project:
-
-```text
-ark-nova-stats-dashboard
-```
-
-Service account:
-
-```text
-dashboard-backend@ark-nova-stats-dashboard.iam.gserviceaccount.com
-```
-
-Requirements:
-
-```text
-functions-framework==3.*
-google-cloud-bigquery==3.*
-google-cloud-storage==2.*
-```
-
-Important env vars:
-
-```text
-CACHE_BUCKET=ark-nova-stats-dashboard-cache
-BIGQUERY_JOB_PROJECT=ark-nova-stats-dashboard
-BIGQUERY_LOCATION=US
-PREPARED_LOGS_TABLE=ark-nova-stats-dashboard.dashboard_cache.card_logs_prepared
-MAINTENANCE_TOKEN=<secret, never commit or paste>
-```
-
-The Cloud Function is public because GitHub Pages must call normal query/default paths. Maintenance actions are protected by application-level token checks.
-
-## Backend Data Sources
-
-Primary source tables:
-
-```text
-freestyle-190711.ark_nova.all_games_stat
-freestyle-190711.ark_nova.game_log_stat_v2
-freestyle-190711.ark_nova.tournament_tables
-```
-
-Project terminology:
-
-- `freestyle-190711.ark_nova.all_games_stat` is the **Full Sample**.
-- `freestyle-190711.ark_nova.game_log_stat_v2` is the **Log Sample**.
-
-Prepared table:
-
-```text
-ark-nova-stats-dashboard.dashboard_cache.card_logs_prepared
-```
-
-Prepared Full Sample and card interaction tables:
-
-```text
-ark-nova-stats-dashboard.dashboard_cache.full_stats_prepared
-ark-nova-stats-dashboard.dashboard_cache.players_stats_prepared
-ark-nova-stats-dashboard.dashboard_cache.players_default_prepared
-ark-nova-stats-dashboard.dashboard_cache.card_plays_prepared
-ark-nova-stats-dashboard.dashboard_cache.card_pairs_prepared
-```
-
-Filtered Home requests read the prepared Full Sample. Players reads its narrow prepared table. Combos reads the partitioned/clustered flattened card-play table; Card + Card additionally reads the prepared unordered pair table instead of rebuilding every pair per request. These are backend-owned derived tables rebuilt during daily refresh. The source Full Sample and Log Sample are read-only and are never altered by refresh, filtering, snapshots, or caches.
-
-Tournament H2H cache table:
-
-```text
-ark-nova-stats-dashboard.dashboard_cache.tournament_tables
-```
-
-`freestyle-190711.ark_nova.tournament_tables` is a Google Sheets external table. The Cloud Function reads the native cache table instead, because the deployed service account does not have Drive-scoped credentials for external Sheets reads. If the tournament sheet changes, refresh the native cache from the sheet CSV before refreshing H2H snapshots.
-
-Current sheet CSV export source:
-
-```text
-https://docs.google.com/spreadsheets/d/1wJnQFXgaWa3rCUTOZpNwVETCn5fMtGo6IhjzUKlOWCs/export?format=csv&gid=1099485726
-```
-
-The daily refresh rebuilds the prepared tables, then refreshes default snapshots. Full Sample and Prepared Logs derive `table_conceded` per table from the raw Full Sample `concede` field: a table is completed when no player conceded, and incomplete when any player conceded. `completed_only=true` applies the completed-table filter (`table_conceded = 0`) on pages that retain the Completed games only control. Default snapshots include both completed and incomplete games unless a page has a hard non-conceded rule. Build/Hexes is always hard-filtered to completed tables and does not expose that control.
-
-Default date filter:
-
-```text
-2025-01-01 onward
-```
-
-Exceptions: Home and Players have no default date restriction. Maps Metrics defaults to `2026-01-13` onward. Tournament H2H ignores date filters entirely.
-
-Maps excluded from standard card/endgame pages:
-
-```text
-Map A
-Map 0
-Maps 1-8
-```
-
-Valid maps include numbered maps 1-14 and tournament map T1.
-
-Elo defaults:
-
-```text
-player_elo_min = 300
-opponent_elo_min = 300
-```
-
-Completed games filter default:
-
-```text
-completed_only = null
-```
-
-## Concession and Completion Semantics
-
-The source field is Full Sample `concede`. During prepared-table refresh, the backend derives `table_conceded` for every table: it is `1` when any player row has a non-zero `concede` value and `0` otherwise. Therefore a completed game/table means `table_conceded = 0`; an incomplete game/table means `table_conceded = 1`. `completed_only` is an API filter flag, not a database column. When true on a page that exposes the Completed games only control, the query filters to `table_conceded = 0`; null means both populations are included. Pages with an inherent non-conceded definition retain their hard `table_conceded = 0` predicate. Build/Hexes is always in that hard-filtered population and has no completion toggle.
-
-## Backend API Shape
-
-One Cloud Function handles Cards, Opening Hand, and Endgames.
-
-Cards default request:
-
-```json
-{
-  "is_mw": 1,
-  "maps": ["..."],
-  "completed_only": null,
-  "player_elo_min": 300,
-  "opponent_elo_min": 300,
-  "date_from": "2025-01-01"
-}
-```
-
-Opening Hand request adds:
-
-```json
-{
-  "stats_page": "opening_hand"
-}
-```
-
-Endgames request adds:
-
-```json
-{
-  "stats_page": "endgames",
-  "endgames_view": "general"
-}
-```
-
-Accepted `endgames_view` values:
-
-```text
-general
-cp_distribution
-cp_by_map
-```
-
-Maps request adds:
-
-```json
-{
-  "stats_page": "maps",
-  "maps_view": "metrics"
-}
-```
-
-Accepted `maps_view` values:
-
-```text
-metrics
-tournament_h2h
-```
-
-Accepted stats pages:
-
-```text
-cards
-home
-opening_hand
-endgames
-maps
-sponsor_endgames
-combinations
-icons
-build
-predictors
-actions
-conservation
-workers
-players
-```
-
-Backend also accepts `page` as a legacy alias, but frontend uses `stats_page`.
-
-Maintenance-only request bodies:
-
-```json
-{"daily_refresh": true}
-{"refresh_prepared": true}
-{"refresh_players_prepared": true}
-{"refresh_data": true}
-```
-
-These require header:
-
-```text
-X-Ark-Nova-Maintenance-Token: <secret>
-```
-
-Never expose this token in frontend code.
-
-## Backend Caching Model
-
-Cloud Storage bucket:
-
-```text
-ark-nova-stats-dashboard-cache
-```
-
-Cache prefix:
-
-```text
-card-stats
-```
-
-Default snapshots:
-
-```text
-card-stats/default-mw.json
-card-stats/default-base.json
-card-stats/home/default-mw.json
-card-stats/home/default-base.json
-card-stats/home/defaults.js
-card-stats/opening-hand/default-mw.json
-card-stats/opening-hand/default-base.json
-card-stats/endgames/default-mw.json
-card-stats/endgames/default-base.json
-card-stats/endgames/cp-distribution/default-mw.json
-card-stats/endgames/cp-distribution/default-base.json
-card-stats/endgames/cp-by-map/default-mw.json
-card-stats/endgames/cp-by-map/default-base.json
-card-stats/maps/metrics/default-mw.json
-card-stats/maps/metrics/default-base.json
-card-stats/maps/tournament_h2h/default-mw.json
-card-stats/maps/tournament_h2h/default-base.json
-card-stats/sponsor-endgames/cp/default-mw.json
-card-stats/sponsor-endgames/cp/default-base.json
-card-stats/sponsor-endgames/appeal/default-mw.json
-card-stats/sponsor-endgames/appeal/default-base.json
-```
-
-Data-version marker:
-
-```text
-card-stats/data-version.json
-```
-
-Filter cache version:
-
-```text
-v11
-```
-
-The daily combined snapshot asset is:
-
-```text
-card-stats/bootstrap/default-pack.json
-```
-
-Default snapshots are public gzip-encoded JSON files. Home additionally has
-`card-stats/home/defaults.js`, a tiny parser-loaded JavaScript bootstrap containing
-both Home datasets and the current data version. Home's blank Elo inputs map to
-`null`, so an unfiltered mount recognizes this embedded payload and renders it
-synchronously without an API request or loading overlay.
-
-After Home paint, the frontend requests the combined pack immediately. The pack
-contains every active MW/Base default statistics payload, including Combos, but
-not the player-name indexes. It is parsed once and atomically seeds the shared
-in-memory snapshot cache; in-flight sharing prevents duplicate work. A snapshot
-already in memory is returned before a loading indicator can appear. If a
-non-Home route opens before pack warmup, that route's individual snapshot is
-requested directly after a short foreground priority window.
-
-The pack itself is persisted in versioned Cache Storage. During a daily version
-transition, the newest previously successful pack is hydrated first while the
-current pack downloads. The current pack becomes active only after a complete,
-valid parse, so displayed data never changes halfway through installation. Cache
-Storage retains the current and immediately previous successful pack versions;
-individual snapshot fetching remains the fallback where Cache Storage is absent.
-The backend publishes a new pack only after every constituent default snapshot
-refresh succeeds, preventing mixed-version packs.
-
-Filtered requests always go through the Cloud Function and show an updating state
-immediately. Memory/in-flight caching and Cloud Storage filter caches prevent
-duplicate work. Large Function JSON responses are gzip-compressed when supported,
-and data-versioned keys invalidate old results after refresh. The first-ever pack
-download still requires network transfer; Home remains immediate, and subsequent
-default navigation is memory-local or persistent-cache-local.
-
-Performance budgets are: under 100 ms for a memory/default-pack hit with no visible
-loader; under 500 ms for an exact repeated filtered Players request; under 3 seconds
-target and 5 seconds maximum for an uncached default-filter player selection; and
-5 seconds maximum for representative uncached filtered General or five-player
-Comparison requests. Measure Function wall time, BigQuery wait, bytes processed,
-and slot time separately before considering a paid minimum Function instance.
-
-## Daily Refresh / Scheduler
-
-Cloud Scheduler job:
-
-```text
-refresh-card-dashboard-daily
-```
-
-Location:
-
-```text
-europe-west1
-```
-
-Schedule:
-
-```text
-5 1 * * *
-```
-
-Timezone:
-
-```text
-UTC
-```
-
-This runs daily at:
-
-```text
-01:05 UTC
-03:05 CEST during German summer time
-02:05 CET during German winter time
-```
-
-It POSTs to:
-
-```text
-https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats
-```
-
-With JSON body:
-
-```json
-{"daily_refresh":true}
-```
-
-And headers:
-
-```text
-Content-Type: application/json
-X-Ark-Nova-Maintenance-Token: <secret>
-```
-
-### Scheduler Bug That Was Fixed
-
-The Scheduler body once became:
-
-```text
-{daily_refresh:true}
-```
-
-This is not valid JSON. Because the backend uses `request.get_json(silent=True)`, invalid JSON became `{}`. The function treated the scheduler request as a normal public request, returned 200, and refreshed nothing. Scheduler showed `status: {}`, making it look successful.
-
-The PowerShell quoting fix is to use escaped quotes:
-
-```powershell
-gcloud scheduler jobs update http refresh-card-dashboard-daily `
-  --location=europe-west1 `
-  --project=ark-nova-stats-dashboard `
-  --message-body='{\"daily_refresh\":true}'
-```
-
-Verify body:
-
-```powershell
-$jobJson = gcloud scheduler jobs describe refresh-card-dashboard-daily `
-  --location=europe-west1 `
-  --project=ark-nova-stats-dashboard `
-  --format=json
-
-$job = $jobJson | ConvertFrom-Json
-[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($job.httpTarget.body))
-```
-
-Expected exact output:
-
-```text
-{"daily_refresh":true}
-```
-
-### Manual Scheduler Run
-
-```powershell
-gcloud scheduler jobs run refresh-card-dashboard-daily `
-  --location=europe-west1 `
-  --project=ark-nova-stats-dashboard
-```
-
-### Check Scheduler Config Safely
-
-Do not paste command output if it includes the maintenance token. Prefer safe inspection:
-
-```powershell
-$jobJson = gcloud scheduler jobs describe refresh-card-dashboard-daily `
-  --location=europe-west1 `
-  --project=ark-nova-stats-dashboard `
-  --format=json
-
-$job = $jobJson | ConvertFrom-Json
-
-[pscustomobject]@{
-  Body = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($job.httpTarget.body))
-  ContentType = $job.httpTarget.headers.'Content-Type'
-  HasMaintenanceTokenHeader = ($job.httpTarget.headers.PSObject.Properties.Name -contains 'X-Ark-Nova-Maintenance-Token')
-}
-```
-
-Expected:
-
-```text
-Body                    ContentType       HasMaintenanceTokenHeader
-----                    -----------       -------------------------
-{"daily_refresh":true}  application/json  True
-```
-
-## Routine Backend Deploy And Snapshot Refresh
-
-Use this when the Python Cloud Function code changed and the user has already copied the desired backend file to:
-
-```text
-C:\Users\ascri\Desktop\ark-nova-function\main.py
-```
-
-Normal code-only deploy from PowerShell:
-
-```powershell
-cd "C:\Users\ascri\Desktop\ark-nova-function"
-
-gcloud functions deploy get-card-stats `
-  --gen2 `
-  --runtime=python312 `
-  --region=europe-west1 `
-  --source=. `
-  --entry-point=get_card_stats `
-  --trigger-http `
-  --allow-unauthenticated `
-  --project=ark-nova-stats-dashboard
-```
-
-This deploy form should preserve the existing environment variables. If env vars need repair or rotation, use the fuller commands in the sections below.
-
-After deploy, manually refresh prepared data and default snapshots so the public frontend sees the new defaults immediately. First read the currently deployed maintenance token without writing it into files:
-
-```powershell
-$token = gcloud functions describe get-card-stats `
-  --gen2 `
-  --region=europe-west1 `
-  --project=ark-nova-stats-dashboard `
-  --format="value(serviceConfig.environmentVariables.MAINTENANCE_TOKEN)"
-```
-
-Then run the refresh:
-
-```powershell
-$body = @{ daily_refresh = $true } | ConvertTo-Json
-$headers = @{ "X-Ark-Nova-Maintenance-Token" = $token }
-
-Invoke-RestMethod `
-  -Uri "https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats" `
-  -Method POST `
-  -ContentType "application/json" `
-  -Headers $headers `
-  -Body $body
-```
-
-Expected result: JSON with `status: ok`, `home_bootstrap: ok`, `default_pack: ok`, a successful `players` prepared-table entry, a successful `arena.top_100` bundle entry, and refreshed entries for Home, Cards, Opening Hand, all Endgames views, both Maps views, both Sponsor Endgames views, Icons, both Build views, all four Combinations views, all Predictors and Actions views, all Conservation views, Workers General/2 CP Worker, Players General, and both Players indexes for MW/Base. Do not paste the token or command output if it includes secrets.
-## Maintenance Token Rotation
-
-If the maintenance token is exposed, rotate it immediately.
-
-Generate local token:
-
-```powershell
-$bytes = New-Object byte[] 32
-$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-$rng.GetBytes($bytes)
-$rng.Dispose()
-
-$maintenanceToken = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
-```
-
-Redeploy/update Function env var:
-
-```powershell
-gcloud functions deploy get-card-stats `
-  --gen2 `
-  --runtime=python312 `
-  --region=europe-west1 `
-  --source=C:\Users\ascri\Desktop\ark-nova-function\ `
-  --entry-point=get_card_stats `
-  --trigger-http `
-  --allow-unauthenticated `
-  --project=ark-nova-stats-dashboard `
-  --service-account=dashboard-backend@ark-nova-stats-dashboard.iam.gserviceaccount.com `
-  --timeout=1200s `
-  --update-env-vars="MAINTENANCE_TOKEN=$maintenanceToken" | Out-Null
-```
-
-Update Scheduler header and preserve valid JSON body:
-
-```powershell
-gcloud scheduler jobs update http refresh-card-dashboard-daily `
-  --location=europe-west1 `
-  --project=ark-nova-stats-dashboard `
-  --update-headers="Content-Type=application/json,X-Ark-Nova-Maintenance-Token=$maintenanceToken" `
-  --message-body='{\"daily_refresh\":true}' | Out-Null
-```
-
-Then verify body/header presence and manually run the job once.
-
-## Backend Deploy Command
-
-Full deploy, preserving required config:
-
-```powershell
-gcloud functions deploy get-card-stats `
-  --gen2 `
-  --runtime=python312 `
-  --region=europe-west1 `
-  --source=C:\Users\ascri\Desktop\ark-nova-function\ `
-  --entry-point=get_card_stats `
-  --trigger-http `
-  --allow-unauthenticated `
-  --project=ark-nova-stats-dashboard `
-  --service-account=dashboard-backend@ark-nova-stats-dashboard.iam.gserviceaccount.com `
-  --timeout=1200s `
-  --set-env-vars="CACHE_BUCKET=ark-nova-stats-dashboard-cache,BIGQUERY_JOB_PROJECT=ark-nova-stats-dashboard,BIGQUERY_LOCATION=US,PREPARED_LOGS_TABLE=ark-nova-stats-dashboard.dashboard_cache.card_logs_prepared,MAINTENANCE_TOKEN=$maintenanceToken"
-```
-
-Important:
-
-- `BIGQUERY_LOCATION=US` is required.
-- `--timeout=1200s` is reserved for the authenticated daily refresh, which rebuilds all derived tables and 66 default payloads before atomically publishing the pack. Normal interactive requests are expected to finish within the page-specific performance budgets.
-- `MAINTENANCE_TOKEN` must match Scheduler header.
-- Do not run deploy from `C:\Windows\system32`; use the function folder or specify `--source`.
-
-## Useful Diagnostics
-
-Describe function:
-
-```powershell
-gcloud functions describe get-card-stats `
-  --gen2 `
-  --region=europe-west1 `
-  --project=ark-nova-stats-dashboard `
-  --format="yaml(serviceConfig.timeoutSeconds,serviceConfig.environmentVariables.CACHE_BUCKET,serviceConfig.environmentVariables.BIGQUERY_LOCATION,serviceConfig.environmentVariables.PREPARED_LOGS_TABLE)"
-```
-
-Read logs:
-
-```powershell
-gcloud functions logs read get-card-stats `
-  --gen2 `
-  --region=europe-west1 `
-  --project=ark-nova-stats-dashboard `
-  --limit=50
-```
-
-Inspect snapshot timestamps:
-
-```powershell
-$urls = @(
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/opening-hand/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/opening-hand/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/cp-distribution/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/cp-distribution/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/cp-by-map/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/endgames/cp-by-map/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/metrics/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/metrics/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/tournament_h2h/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/tournament_h2h/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/index/default-mw.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/index/default-base.json',
-  'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/data-version.json'
-)
-
-foreach ($url in $urls) {
-  $res = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing
-  [pscustomobject]@{
-    Url = $url
-    Status = $res.StatusCode
-    LastModified = $res.Headers['Last-Modified']
-    CacheControl = $res.Headers['Cache-Control']
-    Age = $res.Headers['Age']
-  }
-}
-```
-
-## Frontend Validation Commands
-
-Run JS syntax check after changing frontend JavaScript:
-
-```powershell
-Get-ChildItem -LiteralPath 'C:\Users\ascri\Desktop\ark-nova-stats-dashboard\assets\js' -Recurse -Filter '*.js' |
-  ForEach-Object {
-    node --check $_.FullName
-    if ($LASTEXITCODE -ne 0) { throw "JS syntax failed: $($_.FullName)" }
-  }
-```
-
-In Codex environment, Node may be at:
-
-```text
-C:\Users\ascri\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe
-```
-
-If the app is opened via `file://`, module loading works in the in-app browser context used so far. GitHub Pages serves normally from `/docs`.
-
-## Current Visual / UX State
-
-User is happy with the current look. Avoid unnecessary frontend changes.
-
-Important visual decisions:
-
-- Navigation rail on desktop is 112px.
-- Navigation rail on mobile remains 84px; only the attached toggle is enlarged to 21px by 60px with a 15px glyph.
-- Main content/filter button alignment was carefully tuned.
-- Filter button uses a funnel icon.
-- Filter sidebar closes automatically after Apply filters.
-- Apply filters also closes the sidebar when everything is still default; it should not requery in that case.
-- Attributes title uses label-like Inter styling rather than serif/accent display font.
-- Attributes bar on mobile is horizontally scrollable and one-row.
-- MW/Base switch text weight was softened.
-- Opening Hand table has delta dealt before delta kept, and defaults to sorting by delta dealt.
-- Endgames General has delta scored before delta dealt, but still defaults to sorting by delta dealt.
-- Endgames has a fixed three-cell view bar instead of the collapsible Attributes bar.
-- Endgames CP distribution graph uses selectable lines/legend items; deselected lines stay visible but greyed out.
-- Mobile pagination stays visible because only `.table-scroll` scrolls horizontally; `.pagination` remains outside that inner scroller.
-
-## Design/Implementation Preferences From User
-
-- User prefers separate new files for major backend changes/backups, but the current backend has now been consolidated to `main.py`.
-- User often manually copies/uploads files and asks which files changed.
-- User is a self-described beginner in web/Git/GCP and appreciates careful step-by-step explanations.
-- User likes preserving a public stable version while continuing development privately.
-- User wants up to roughly 1k future subpages eventually, so structure should scale.
-
-## Adding Future Subpages
-
-Recommended approach:
-
-1. Reuse the current static shell.
-2. Add a new page module under `assets/js/pages/`.
-3. Register it in `page-registry.js`.
-4. Add nav link in `layout.js`.
-5. Reuse page-level `mountToken` guard pattern.
-6. Rebind page-specific inline handlers on every mount.
-7. Use existing filter/sidebar style, but page-specific `sidebarHtml`.
-8. Only add backend query support when data cannot be derived client-side.
-9. If default data is expensive or common, add daily default snapshots for MW/Base.
-
-Avoid copying huge page modules blindly forever. Cards, Opening Hand, and Endgames currently duplicate a lot of logic. If adding many pages, consider extracting shared helpers/components once patterns stabilize:
-
-- table sorting/pagination rendering
-- attributes bar logic
-- type filter logic
-- filter sidebar helpers
-- mount token guard
-- API/default snapshot loader
-
-Do not abstract too early if the next page has unique needs, but the duplication is real.
-
-## Known Technical Debt
-
-- `cards.js`, `opening-hand.js`, and `endgames.js` are large and duplicate some table/filter logic.
-- Many handlers are inline HTML attributes requiring `window` binding.
-- Header/nav HTML in `layout.js` is one long string, making small edits tricky.
-- The logo uses embedded base64 SVG/image mask content inside `layout.js`, making the file noisy.
+Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table cells are tooltip-free dashes and are absent from graphs and color ranges. The `#` column follows the current sort. Delta-column sorting places valid values first, sub-1,000 values second, and impossible/missing values last while respecting numeric direction inside the first two tiers; only valid values receive ranks. Frequency sorting simil…21104 tokens truncated…k content inside `layout.js`, making the file noisy.
 - Frontend has no build step and no automated browser test suite.
 - There are global document listeners in page modules for popups/tooltips. They have not caused data bugs, but a future cleanup could centralize or guard them.
 - CSS is large and monolithic.
@@ -2165,10 +661,10 @@ There are deliberate exceptions:
 Other numeric scales use the minimum and maximum for that variable from the complete
 applicable payload: Elo uses `#2a5a5a` through `#2a8a7a` to `#4acfb0`;
 Cards Playrate, Opening Hand Keeprate, and Endgames Keeprate retain their payload-range
-blue scale. Other blue frequency cells use the fixed `0–50%` domain from
+blue scale. Other blue frequency cells use the fixed `00-50%` domain from
 `#2a4a6a` through `#3a7abf` to `#6bb5f0`; values above 50% saturate at the high endpoint
 while displayed percentages and tooltips remain exact. Expanded Build/Hexes map-frequency
-cells use a page-specific fixed `0–20%` domain instead. Violet Avg/special cells retain
+cells use a page-specific fixed `00-20%` domain instead. Violet Avg/special cells retain
 their own scales. CP and other orange-to-green measures use `#ff6027` to `#7cba43`.
 Maps metric/H2H
 scales retain their metric-specific endpoint colors. Equal minimum/maximum values use
@@ -2309,7 +805,7 @@ Current display rules:
 
 - Lowercase backend names are title-cased for the table display.
 - Small words stay lowercase unless they are the first word: `on`, `in`, `of`, `the`, `a`.
-- Explicit display exceptions are applied after title-casing: `Waza` renders as `WAZA`; `Galapagos` renders as `Galápagos`.
+- Explicit display exceptions are applied after title-casing: `Waza` renders as `WAZA`; `Galapagos` renders as `GalGalapagos`.
 - Keep these helpers in sync until the page-specific table logic is extracted into a shared module.
 
 ## Safe Public Repo Cleanup
@@ -2355,6 +851,178 @@ Be careful with backend changes:
 - Update scheduler daily refresh to include new page snapshots.
 - Ensure all new maintenance paths require token.
 
+## Records page (current behavior)
+
+The Records route is `#/records` and is backed by `stats_page: "records"` with
+`records_view` set to one of `elo_leaderboard`, `fastest_games`,
+`highest_scores`, `biggest_turns`, or `most_icons`. Elo leaderboard is the only
+placeholder; the other four views are functional.
+
+Automatic Records rows are individual player-game observations from the
+backend-owned `full_stats_prepared` table. Fastest Games also unions manually
+extrapolated rows, and Biggest Turns is entirely manual; both use the derived
+`records_manual_prepared` table described below. Source BigQuery tables remain
+read-only. Automatic Fastest, Highest Scores, and Most Icons rows hard-filter
+`table_conceded = 0` and `end_game_triggered = TRUE`. `table_conceded` is
+derived from Full Sample `concede` at table level: any concession makes the
+table incomplete. The visible default opponent-Elo minimum is 300. Records
+defaults to the 15 current maps plus legacy maps 1-8; beginner maps A and 0
+remain selectable but are off by default. These are browser defaults only:
+every functional Records snapshot contains the complete eligible population
+for all 25 known maps, with no player, opponent-Elo, date, Arena, or Tournament
+restriction.
+
+Automatic Fastest Games keeps won rows (`Game_result = 1` for the player and
+exactly one opponent row with `Game_result = 2`) with `Number_of_turns <= 23`.
+The manual Fastest sheet is an explicit exception for conceded games whose
+Turns and final Score were extrapolated. Manual values override an automatic
+row with the same ID and player. The combined table sorts by Turns ascending,
+Score descending, player name ascending, and ID. Highest scores
+uses the same won-game rule, keeps `Score >= 170` and
+`Number_of_turns <= 100`, and sorts by Score descending, turns ascending, and
+player name ascending. Most icons expands the valid icon fields into one row
+per icon and player-game, keeps counts of at least 10, and sorts by count
+descending, turns ascending, and player name ascending. Its table ID displays a
+result suffix: `(W)`, `(D)`, or `(L)`, derived from the two player results.
+Bears and Petting Zoo Animals are not valid Most-icons record types. These
+tables are deliberately not user-sortable.
+
+The displayed automatic columns are direct record values: Player is `player`, Score is
+`Score`, Turns is `Number_of_turns`, Map is rendered as `Map name (code)`, ID
+links to the corresponding Board Game Arena table, and Date is a `YYYY-MM-DD`
+date from `game_ended_at`. Automatic Fastest rows use EPT zero; manual Fastest
+rows use the spreadsheet's EPT value, where EPT means extrapolated turns.
+
+The canonical Fastest supplement is the first worksheet of Google Sheet
+`1RSOjQdZcGmOY7PBsDY7erGz--dtPJLc3ydNArr9bV48`. Its columns are Turns, Player,
+Score, Map code, ID, Date, EPT, and Mode. Mode is `MW` or `Base`, so separate
+dataset sheets are neither required nor supported. Biggest Turns uses the first
+worksheet of `1SfWmRUo3c2jHbezJDVwXxi3zqEm5RdiZxp4hbHfEl0Q`; the consumed
+columns are Flat A, End B, Total C, Player D, Score E, Turns F, Map G, Move H,
+Actions I, ID K, Result L, Date M, and Mode N. Result must be W, D, or L and
+Total must equal Flat plus End.
+
+The daily refresh downloads both public CSV exports once and validates every
+nonblank row. When an exact ID/player pair exists in Full Sample, that match
+supplies opponent Elo, exact timestamp, and Arena metadata; Mode and Map must
+agree or the refresh fails. Date remains the sheet-owned display value and is
+not an identity field because UTC/local boundaries and historical manual dates
+can differ from the source timestamp. For matched rows, date filtering and Arena
+classification still use the exact source timestamp. Some manually extrapolated early concessions
+are absent from Full Sample by definition. Those rows remain valid with their
+sheet-native dataset, map, player, and date, while unavailable enrichment fields
+are stored as null (`source_enriched = false`). They therefore participate in
+the default, player, map, date, and dataset populations. Elo bounds apply only
+to enriched manual rows, because treating unknown Elo as a failed range check
+would silently erase the exact early concessions the sheet exists to restore.
+Source-absent rows cannot satisfy Arena-only, whose required rating metadata is
+unavailable. Tournament filtering remains possible because it is an independent
+table-ID lookup. A contradictory upstream match is never treated as
+source-absent.
+
+Only after all rows validate is the backend-owned
+`records_manual_prepared` table atomically replaced. A valid source is cached in
+`card-stats/metadata/records-manual-source.json`. Temporary delivery errors or
+invalid edits reuse the last fully validated source; without a valid cached
+source, the refresh fails instead of publishing partial data.
+
+Biggest Turns contains only spreadsheet rows and has fixed Total-descending
+ordering, preserving spreadsheet row order for equal Total values. Its columns
+are Flat, End, Total, Player, Score, Turns, Map, Move, Actions, ID, and Date,
+with widths `6/6/6/18/6/6/15/6/6/15/10%`. Numeric values are whole numbers;
+ID is a BGA link with the spreadsheet W/D/L suffix. It uses the normal Records
+search, filters, row selector, pagination, and `games` count.
+
+Each view has an always-visible centered Player search field with a search icon
+on its left, backed by the daily MW/Base player-index snapshots. Search
+suggestions are alphabetical, begin after three characters, are limited to 50
+visible matches, and selecting a name filters the already-loaded snapshot to
+that exact player value. Most Icons has a client-side `TYPE` popup with all 14
+valid icon types shown in three unlabeled six-slot rows (species, habitats, then
+Rock/Water/Science). An active filter displays `selected/14`. The popup is a
+body-level overlay clamped to the visible table frame, so table scrolling cannot
+clip it. Its all/none controls and icon selections filter the already-loaded
+payload without another request. Arena-only means a valid
+configured Arena season assignment: the observation has a non-null Arena
+rating delta and falls within a configured UTC season interval with the
+matching MW/Base mode. Tournament-only joins the backend-owned tournament
+table cache used by Maps' Tournament H2H. The two switches are mutually
+exclusive in both the UI and API. The Filter bar also has an empty-by-default
+Date Range between Maps and these switches. Its inclusive local predicate is
+`date_from <= game_date <= date_to`; either endpoint may be omitted, while a
+From date after To is rejected.
+
+The Records header includes the shared Rows selector with options 25, 50, 100,
+and All. It defaults to 50 and controls client-side pagination. The result
+count uses the noun `games` and retains the existing displayed-row semantics,
+including the one-row-per-icon behavior of Most Icons.
+
+Records and every Players table (General, Comparison, and Arena Top 100) use the
+same 40px rendered table-header height as Workers and Conservation. Their 25px
+player-search inputs use 7px vertical cell padding so the controls fit inside
+that shared slot; search inputs must never increase the row height or move the
+table when switching pages.
+
+Records widths are view-specific: Fastest and Highest use Player 20% and EPT
+10%; Most Icons uses Player 20% and ID 15%; Biggest Turns uses the exact widths
+documented above.
+
+Complete Records payloads are written daily under:
+
+```text
+card-stats/records/fastest-games/default-{mw|base}.json
+card-stats/records/highest-scores/default-{mw|base}.json
+card-stats/records/biggest-turns/default-{mw|base}.json
+card-stats/records/most-icons/default-{mw|base}.json
+```
+
+All eight assets participate in the atomic default snapshot pack. Each row
+carries `opponent_elo`, `source_enriched`, `is_arena`, `is_tournament`, and the
+available sheet `source_row`, in addition to the displayed fields. The browser
+loads a view snapshot once and performs Player, Maps, Opponent Elo, Date Range,
+Arena-only, Tournament-only, Type, pagination, and row-count changes locally;
+applying or resetting Records filters never calls the Cloud Function or
+BigQuery. An empty Elo minimum means zero and an empty maximum means no upper
+bound. Rows with unavailable opponent Elo deliberately survive any Elo range,
+because excluding them would erase the manual exceptions the sheet exists to
+restore.
+
+The pack has a
+schema version; a frontend may reuse the previous successful pack only when its
+schema matches, preventing an older payload contract from masquerading as the
+current one. A warm browser
+therefore renders default Records data from memory/cache and every Records
+filter is an immediate in-memory operation.
+
+## Current cross-page polish rules
+
+- Normal single statistics tables use `width: 100%` with a shared `900px`
+  minimum canvas on desktop and mobile. Below 900px their `.table-scroll`
+  wrapper scrolls horizontally. The only shrinkable `min-width: 0` exceptions
+  are the compact side-by-side Actions Starting position, Actions Upgrades, and
+  Build Enclosures tables.
+- Clearing any Player/Opponent minimum-Elo input means zero; a blank maximum is
+  unrestricted. Home serializes blank minima as zero so its unrestricted
+  bootstrap payload still renders synchronously without an API request.
+- Map tooltips use `Map name (code)`, for example `Observation Tower (1a)`;
+  backend filter values retain the full `Map 1a: Observation Tower` string.
+- Records, Players, Conservation, and Cards map chips use the same five-column
+  chip geometry and padding so changing pages does not change their visual
+  scale.
+- Players Arena Top 100 graph hover is line-specific. Pointer coordinates are
+  transformed through the SVG screen matrix, then matched against the exact
+  plotted points for that player inside the active Day X-Y range. Only the
+  stored rating is shown above the cursor; off-screen observations are never
+  eligible.
+- Players' General and Comparison selections are analysis context and persist
+  when switching MW/Base. The selected player is not a global filter and is
+  intentionally independent between the two views. Suggestion overlays open
+  only from active typing and are cleared immediately after selection.
+- Workers' Last worker annotation is normal (not italic). `1 CP` has a single
+  underline and `2 CP` has a double underline; the General Frequency `n (Avg)`
+  label uses the ordinary label size, while only its numerical map/Avg cells are
+  one pixel larger than ordinary body values.
+
 ## Secret Handling Reminder
 
 Never put these in chat, code, GitHub, handoff files, or screenshots:
@@ -2380,8 +1048,3 @@ If exposed, rotate immediately:
 - Cache-busting was advanced for the shared helper and affected page modules.
 - A visual audit found the reviewed desktop CP-by-Map and Actions table geometries aligned. Wide map tables on phones intentionally retain horizontal scrolling rather than compressing columns.
 - Backend verification (read-only) confirmed Maps Fill% is based on `Empty_hexes` with the documented 42/43/39 map totals, and Empty Petting Zoo requires a built petting zoo, zero Petting Zoo icons, and no Horse Whisperer sponsor. No backend changes were made during this review.
-
-
-
-
-

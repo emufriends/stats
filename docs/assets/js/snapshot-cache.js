@@ -6,6 +6,7 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
+const DEFAULT_PACK_SCHEMA_VERSION = 3;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
@@ -76,6 +77,14 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-base.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena/manifest.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena-top-100/all-seasons.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/fastest-games/default-mw.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/fastest-games/default-base.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/highest-scores/default-mw.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/highest-scores/default-base.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/biggest-turns/default-mw.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/biggest-turns/default-base.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/most-icons/default-mw.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/most-icons/default-base.json'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-card/default-mw.json?v=20260629-13'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-card/default-base.json?v=20260629-13'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-map/default-mw.json?v=20260629-13'],
@@ -219,8 +228,12 @@ function snapshotBlobPath(url) {
   } catch { return ''; }
 }
 
+function compatibleDefaultPack(payload) {
+  return Boolean(payload && Number(payload.schema_version) === DEFAULT_PACK_SCHEMA_VERSION && typeof payload.snapshots === 'object');
+}
+
 function seedDefaultPack(payload) {
-  if (!payload || typeof payload.snapshots !== 'object') return false;
+  if (!compatibleDefaultPack(payload)) return false;
   const byPath = new Map(DEFAULT_SNAPSHOT_MANIFEST.map(([, url]) => [snapshotBlobPath(url), url]));
   let seeded = 0;
   Object.entries(payload.snapshots).forEach(([path, snapshot]) => {
@@ -280,7 +293,20 @@ async function installCurrentPack() {
     response = await fetch(requestUrl, { cache: 'default', priority: 'low' });
     if (!response.ok) throw new Error(`Default pack request failed (${response.status})`);
   }
-  const payload = await response.json();
+  let payload = await response.json();
+  if (!compatibleDefaultPack(payload)) {
+    // A Cache Storage entry can outlive a frontend schema bump. Replace it
+    // immediately instead of repeatedly failing and falling back forever.
+    const fetched = await fetch(requestUrl, { cache: 'reload', priority: 'low' });
+    if (!fetched.ok) throw new Error(`Default pack refresh failed (${fetched.status})`);
+    if ('caches' in window) {
+      try {
+        const cache = await caches.open(cacheName);
+        await cache.put(requestUrl, fetched.clone());
+      } catch { /* A fresh in-memory pack is still useful without persistence. */ }
+    }
+    payload = await fetched.json();
+  }
   if (!seedDefaultPack(payload)) throw new Error('Default pack has no recognized snapshots');
   currentPackReady = true;
 
