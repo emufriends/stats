@@ -276,7 +276,7 @@ function renderBody() {
   const meta = document.getElementById('recordsMeta');
   const filteredRows = filteredRecordsRows();
   if (view === 'elo_leaderboard') {
-    if (meta) meta.innerHTML = 'Top 100 players (for full leaderboard, click <a href="https://emufriends.pet/leaderboard" target="_blank" rel="noopener noreferrer">here</a>).';
+    if (meta) meta.innerHTML = 'Top 100 players (for full leaderboard, click <a class="records-full-leaderboard-link" href="https://emufriends.github.io/leaderboard/" target="_blank" rel="noopener noreferrer">here</a>).';
     if (!filteredRows.length) {
       body.innerHTML = `<tr><td colspan="${recordsColumnCount()}"><div class="state-overlay"><div class="state-title">No matching players</div></div></td></tr>`;
       renderPagination(0);
