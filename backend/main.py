@@ -84,9 +84,14 @@ RECORDS_BIGGEST_TURNS_SHEET_URL = os.environ.get(
     "RECORDS_BIGGEST_TURNS_SHEET_URL",
     "https://docs.google.com/spreadsheets/d/1SfWmRUo3c2jHbezJDVwXxi3zqEm5RdiZxp4hbHfEl0Q/export?format=csv",
 )
+RECORDS_ELO_LEADERBOARD_SHEET_URL = os.environ.get(
+    "RECORDS_ELO_LEADERBOARD_SHEET_URL",
+    "https://docs.google.com/spreadsheets/d/1NG3FPP70riMzhHPJ6Suz30bhJxUocFd_rKDKxn0kZbM/export?format=csv&sheet=Masters",
+)
 RECORDS_MANUAL_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-manual-source.json"
-FILTER_CACHE_VERSION = "v15"
-DEFAULT_PACK_SCHEMA_VERSION = 3
+RECORDS_ELO_LEADERBOARD_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-elo-leaderboard-source.json"
+FILTER_CACHE_VERSION = "v17"
+DEFAULT_PACK_SCHEMA_VERSION = 5
 STATS_PAGE_CARDS = "cards"
 STATS_PAGE_HOME = "home"
 STATS_PAGE_OPENING_HAND = "opening_hand"
@@ -99,6 +104,7 @@ STATS_PAGE_BUILD = "build"
 STATS_PAGE_PREDICTORS = "predictors"
 STATS_PAGE_ACTIONS = "actions"
 STATS_PAGE_CONSERVATION = "conservation"
+STATS_PAGE_SCORING = "scoring"
 STATS_PAGE_WORKERS = "workers"
 STATS_PAGE_PLAYERS = "players"
 STATS_PAGE_RECORDS = "records"
@@ -115,6 +121,7 @@ VALID_STATS_PAGES = {
     STATS_PAGE_PREDICTORS,
     STATS_PAGE_ACTIONS,
     STATS_PAGE_CONSERVATION,
+    STATS_PAGE_SCORING,
     STATS_PAGE_WORKERS,
     STATS_PAGE_PLAYERS,
     STATS_PAGE_RECORDS,
@@ -161,6 +168,16 @@ VALID_CONSERVATION_VIEWS = {
     CONSERVATION_VIEW_PROJECTS,
     CONSERVATION_VIEW_PROJECT_REWARDS,
     CONSERVATION_VIEW_CP_REWARDS,
+}
+SCORING_VIEW_FINAL_SCORE = "final_score"
+SCORING_VIEW_APPEAL = "appeal"
+SCORING_VIEW_CONSERVATION_POINTS = "conservation_points"
+SCORING_VIEW_REPUTATION = "reputation"
+VALID_SCORING_VIEWS = {
+    SCORING_VIEW_FINAL_SCORE,
+    SCORING_VIEW_APPEAL,
+    SCORING_VIEW_CONSERVATION_POINTS,
+    SCORING_VIEW_REPUTATION,
 }
 WORKERS_VIEW_GENERAL = "general"
 WORKERS_VIEW_TWO_CP_WORKER = "two_cp_worker"
@@ -598,7 +615,7 @@ def _parse_stats_page(raw_value):
     if value not in VALID_STATS_PAGES:
         raise ValueError(
             "stats_page must be cards, home, opening_hand, endgames, maps, "
-            "sponsor_endgames, combinations, icons, build, predictors, actions, conservation, workers, players, or records"
+            "sponsor_endgames, combinations, icons, build, predictors, actions, conservation, scoring, workers, players, or records"
         )
     return value
 
@@ -675,6 +692,17 @@ def _parse_conservation_view(raw_value):
     return value
 
 
+def _parse_scoring_view(raw_value):
+    if raw_value in (None, ""):
+        return SCORING_VIEW_FINAL_SCORE
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_SCORING_VIEWS:
+        raise ValueError(
+            "scoring_view must be final_score, appeal, conservation_points, or reputation"
+        )
+    return value
+
+
 def _parse_workers_view(raw_value):
     if raw_value in (None, ""):
         return WORKERS_VIEW_GENERAL
@@ -695,7 +723,7 @@ def _parse_players_view(raw_value):
 
 def _parse_records_view(raw_value):
     if raw_value in (None, ""):
-        return RECORDS_VIEW_FASTEST_GAMES
+        return RECORDS_VIEW_ELO_LEADERBOARD
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_RECORDS_VIEWS:
         raise ValueError(
@@ -773,9 +801,10 @@ def _cache_blob_name(
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
     conservation_view=CONSERVATION_VIEW_PROJECTS,
+    scoring_view=SCORING_VIEW_FINAL_SCORE,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
-    records_view=RECORDS_VIEW_FASTEST_GAMES,
+    records_view=RECORDS_VIEW_ELO_LEADERBOARD,
 ):
     dataset = "mw" if int(is_mw) == 1 else "base"
     if stats_page == STATS_PAGE_HOME:
@@ -797,6 +826,9 @@ def _cache_blob_name(
     if stats_page == STATS_PAGE_CONSERVATION:
         view_slug = conservation_view.replace("_", "-")
         return f"{CACHE_PREFIX}/conservation/{view_slug}/default-{dataset}.json"
+    if stats_page == STATS_PAGE_SCORING:
+        view_slug = scoring_view.replace("_", "-")
+        return f"{CACHE_PREFIX}/scoring/{view_slug}/default-{dataset}.json"
     if stats_page == STATS_PAGE_WORKERS:
         view_slug = workers_view.replace("_", "-")
         return f"{CACHE_PREFIX}/workers/{view_slug}/default-{dataset}.json"
@@ -1267,6 +1299,89 @@ def _parse_records_biggest_turns_sheet(source_text):
     return rows
 
 
+def _records_sheet_float(raw_value, field_name, row_number):
+    token = str(raw_value or "").strip()
+    try:
+        value = float(token)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Records sheet row {row_number} has invalid {field_name}: {token!r}"
+        ) from exc
+    if not math.isfinite(value):
+        raise ValueError(
+            f"Records sheet row {row_number} has non-finite {field_name}: {token!r}"
+        )
+    return value
+
+
+def _parse_records_elo_leaderboard_sheet(source_text):
+    """Parse the public Masters sheet by column position.
+
+    The export has an intentionally blank first column, so DictReader would
+    create an unstable empty header. Positional parsing keeps the source
+    contract explicit: B country, C player, F Peak Elo, H Peak Arena.
+    """
+    reader = csv.reader(io.StringIO(source_text))
+    try:
+        header = next(reader)
+    except StopIteration as exc:
+        raise ValueError("Elo Leaderboard sheet is empty") from exc
+    if len(header) < 8:
+        raise ValueError("Elo Leaderboard sheet must contain at least eight columns")
+    normalized_header = [str(value or "").strip().lower() for value in header]
+    expected_headers = {
+        1: {"nationality", "country"},
+        2: {"bga name", "player"},
+        5: {"peak elo"},
+        7: {"peak arena"},
+    }
+    for index, accepted in expected_headers.items():
+        if normalized_header[index] not in accepted:
+            raise ValueError(
+                f"Elo Leaderboard sheet column {index + 1} must be one of {sorted(accepted)}"
+            )
+
+    rows = []
+    seen_players = set()
+    for row_number, raw in enumerate(reader, start=2):
+        if not any(str(value or "").strip() for value in raw):
+            continue
+        if len(raw) < 8:
+            raise ValueError(f"Elo Leaderboard row {row_number} has fewer than eight columns")
+        country = str(raw[1] or "").strip().lower()
+        player = str(raw[2] or "").strip()
+        if len(country) != 2 or not all("a" <= char <= "z" for char in country):
+            raise ValueError(
+                f"Elo Leaderboard row {row_number} has invalid country code: {raw[1]!r}"
+            )
+        if not player:
+            raise ValueError(f"Elo Leaderboard row {row_number} has a blank player")
+        player_key = player.casefold()
+        if player_key in seen_players:
+            raise ValueError(f"Elo Leaderboard has duplicate player at row {row_number}: {player!r}")
+        seen_players.add(player_key)
+        peak_elo = _records_sheet_float(raw[5], "Peak Elo", row_number)
+        peak_arena = None
+        if str(raw[7] or "").strip():
+            peak_arena = _records_sheet_float(raw[7], "Peak Arena", row_number)
+        rows.append({
+            "source_row": row_number,
+            "country": country,
+            "player": player,
+            "peak_elo": peak_elo,
+            "peak_arena": peak_arena,
+        })
+
+    if len(rows) < 100:
+        raise ValueError(f"Elo Leaderboard sheet contains only {len(rows)} valid players; 100 are required")
+    rows.sort(key=lambda item: (-item["peak_elo"], item["source_row"], item["player"].casefold()))
+    rows = [
+        {**item, "rank": rank}
+        for rank, item in enumerate(rows[:100], start=1)
+    ]
+    return rows
+
+
 def _fetch_records_manual_source():
     fastest_text = _download_public_csv(RECORDS_FASTEST_SHEET_URL)
     biggest_text = _download_public_csv(RECORDS_BIGGEST_TURNS_SHEET_URL)
@@ -1281,6 +1396,78 @@ def _fetch_records_manual_source():
         "fastest_games": fastest,
         "biggest_turns": biggest,
     }
+
+
+def _fetch_records_elo_leaderboard_source():
+    source_text = _download_public_csv(RECORDS_ELO_LEADERBOARD_SHEET_URL)
+    return {
+        "status": "ok",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+        "rows": _parse_records_elo_leaderboard_sheet(source_text),
+    }
+
+
+def _cached_records_elo_leaderboard_source():
+    cached = _read_cache_blob(RECORDS_ELO_LEADERBOARD_CACHE_BLOB, "hit")
+    if not cached:
+        return None
+    cached.pop("cache_status", None)
+    cached.pop("cache_updated_at", None)
+    return cached
+
+
+def _refresh_records_elo_leaderboard_snapshots():
+    """Refresh the dataset-neutral Masters Top 100 snapshots atomically by view.
+
+    The source sheet has no MW/Base dimension. Both dashboard dataset paths
+    therefore publish the same validated rows so changing the global dataset
+    cannot make the leaderboard disappear.
+    """
+    live_error = None
+    try:
+        source = _fetch_records_elo_leaderboard_source()
+        if not _write_cache_blob(RECORDS_ELO_LEADERBOARD_CACHE_BLOB, source, "refreshed"):
+            raise RuntimeError("Could not persist validated Elo Leaderboard source")
+        source_status = "live"
+    except Exception as exc:
+        live_error = exc
+        logging.exception("Failed to refresh Elo Leaderboard source from Google Sheets")
+        source = _cached_records_elo_leaderboard_source()
+        if not source:
+            raise RuntimeError("Elo Leaderboard is unavailable and no validated cache exists") from exc
+        source_status = "cached"
+
+    results = []
+    for dataset in (1, 0):
+        payload = {
+            "status": "ok",
+            "stats_page": STATS_PAGE_RECORDS,
+            "records_view": RECORDS_VIEW_ELO_LEADERBOARD,
+            "is_mw": dataset,
+            "data": source["rows"],
+            "row_count": len(source["rows"]),
+            "source": "records_elo_leaderboard_snapshot",
+            "source_status": source_status,
+            "source_sha256": source.get("source_sha256"),
+        }
+        if live_error:
+            payload["live_error"] = str(live_error)
+        cache_write_ok = _write_cached_snapshot(
+            dataset,
+            payload,
+            STATS_PAGE_RECORDS,
+            records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+        )
+        results.append({
+            "status": "ok" if cache_write_ok else "error",
+            "is_mw": dataset,
+            "stats_page": STATS_PAGE_RECORDS,
+            "records_view": RECORDS_VIEW_ELO_LEADERBOARD,
+            "cache_status": source_status if cache_write_ok else "cache_write_failed",
+            "rows": len(source["rows"]),
+        })
+    return results
 
 
 def _cached_records_manual_source():
@@ -1349,15 +1536,16 @@ def _read_cached_snapshot(
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
     conservation_view=CONSERVATION_VIEW_PROJECTS,
+    scoring_view=SCORING_VIEW_FINAL_SCORE,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
-    records_view=RECORDS_VIEW_FASTEST_GAMES,
+    records_view=RECORDS_VIEW_ELO_LEADERBOARD,
 ):
     return _read_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
         ),
         "hit",
     )
@@ -1375,15 +1563,16 @@ def _write_cached_snapshot(
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
     conservation_view=CONSERVATION_VIEW_PROJECTS,
+    scoring_view=SCORING_VIEW_FINAL_SCORE,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
-    records_view=RECORDS_VIEW_FASTEST_GAMES,
+    records_view=RECORDS_VIEW_ELO_LEADERBOARD,
 ):
     return _write_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
         ),
         payload,
         "refreshed",
@@ -1446,9 +1635,14 @@ def _default_snapshot_pack_blob_names():
             f"{CACHE_PREFIX}/conservation/projects/default-{dataset}.json",
             f"{CACHE_PREFIX}/conservation/project-rewards/default-{dataset}.json",
             f"{CACHE_PREFIX}/conservation/cp-rewards/default-{dataset}.json",
+            f"{CACHE_PREFIX}/scoring/final-score/default-{dataset}.json",
+            f"{CACHE_PREFIX}/scoring/appeal/default-{dataset}.json",
+            f"{CACHE_PREFIX}/scoring/conservation-points/default-{dataset}.json",
+            f"{CACHE_PREFIX}/scoring/reputation/default-{dataset}.json",
             f"{CACHE_PREFIX}/workers/general/default-{dataset}.json",
             f"{CACHE_PREFIX}/workers/two-cp-worker/default-{dataset}.json",
             f"{CACHE_PREFIX}/players/general/default-{dataset}.json",
+            f"{CACHE_PREFIX}/records/elo-leaderboard/default-{dataset}.json",
             f"{CACHE_PREFIX}/records/fastest-games/default-{dataset}.json",
             f"{CACHE_PREFIX}/records/highest-scores/default-{dataset}.json",
             f"{CACHE_PREFIX}/records/biggest-turns/default-{dataset}.json",
@@ -1559,7 +1753,7 @@ def _is_default_cache_request(
     players_view=PLAYERS_VIEW_GENERAL,
     players_players=None,
     last_x_games=None,
-    records_view=RECORDS_VIEW_FASTEST_GAMES,
+    records_view=RECORDS_VIEW_ELO_LEADERBOARD,
     records_player=None,
     records_arena_only=False,
     records_tournament_only=False,
@@ -4169,6 +4363,134 @@ def _build_build_hexes_query(where_sql, expanded=False):
     """
 
 
+def _scoring_bucket_config(scoring_view, expanded=False):
+    """Return source field, valid range, and fixed display buckets for Scoring."""
+    if scoring_view == SCORING_VIEW_FINAL_SCORE:
+        buckets = (
+            [("under_100", "<100", "metric_value < 100")]
+            + [(str(value), str(value), f"metric_value = {value}") for value in range(100, 150)]
+            + [("150_plus", "150+", "metric_value >= 150")]
+            if expanded
+            else [
+                ("under_100", "<100", "metric_value < 100"),
+                ("100_109", "100–109", "metric_value BETWEEN 100 AND 109"),
+                ("110_119", "110–119", "metric_value BETWEEN 110 AND 119"),
+                ("120_129", "120–129", "metric_value BETWEEN 120 AND 129"),
+                ("130_139", "130–139", "metric_value BETWEEN 130 AND 139"),
+                ("140_149", "140–149", "metric_value BETWEEN 140 AND 149"),
+                ("150_plus", "150+", "metric_value >= 150"),
+            ]
+        )
+        return "Score", "metric_value IS NOT NULL", buckets
+    if scoring_view == SCORING_VIEW_APPEAL:
+        buckets = (
+            [("under_40", "<40", "metric_value < 40")]
+            + [(str(value), str(value), f"metric_value = {value}") for value in range(40, 114)]
+            if expanded
+            else [
+                ("under_40", "<40", "metric_value < 40"),
+                ("40_49", "40–49", "metric_value BETWEEN 40 AND 49"),
+                ("50_59", "50–59", "metric_value BETWEEN 50 AND 59"),
+                ("60_69", "60–69", "metric_value BETWEEN 60 AND 69"),
+                ("70_79", "70–79", "metric_value BETWEEN 70 AND 79"),
+                ("80_89", "80–89", "metric_value BETWEEN 80 AND 89"),
+                ("90_99", "90–99", "metric_value BETWEEN 90 AND 99"),
+                ("100_112", "100–112", "metric_value BETWEEN 100 AND 112"),
+                ("113", "113", "metric_value = 113"),
+            ]
+        )
+        return "Appeal", "metric_value BETWEEN 0 AND 113", buckets
+    if scoring_view == SCORING_VIEW_CONSERVATION_POINTS:
+        buckets = (
+            [(str(value), str(value), f"metric_value = {value}") for value in range(42)]
+            if expanded
+            else [
+                ("0_10", "0–10", "metric_value BETWEEN 0 AND 10"),
+                ("11_15", "11–15", "metric_value BETWEEN 11 AND 15"),
+                ("16_20", "16–20", "metric_value BETWEEN 16 AND 20"),
+                ("21_25", "21–25", "metric_value BETWEEN 21 AND 25"),
+                ("26_30", "26–30", "metric_value BETWEEN 26 AND 30"),
+                ("31_35", "31–35", "metric_value BETWEEN 31 AND 35"),
+                ("36_40", "36–40", "metric_value BETWEEN 36 AND 40"),
+                ("41", "41", "metric_value = 41"),
+            ]
+        )
+        return "Conservation", "metric_value BETWEEN 0 AND 41", buckets
+    buckets = [(str(value), str(value), f"metric_value = {value}") for value in range(1, 16)]
+    return "Reputation", "metric_value BETWEEN 1 AND 15", buckets
+
+
+def _build_scoring_query(where_sql, scoring_view, expanded=False):
+    """Aggregate one Scoring distribution; both modes travel in one API payload."""
+    source_field, valid_condition, buckets = _scoring_bucket_config(scoring_view, expanded)
+    map_selects = []
+    for map_meta in ALL_MAPS_FOR_METRICS[:15]:
+        key = map_meta["key"]
+        full = _sql_string(map_meta["full"])
+        map_selects.extend([
+            f"ROUND(AVG(IF(Map = {full} AND bucket_condition, elo_delta, NULL)), 3) AS {key}",
+            f"COUNTIF(Map = {full} AND bucket_condition) AS count_{key}",
+            f"COUNTIF(Map = {full}) AS denom_{key}",
+            f"AVG(IF(Map = {full} AND bucket_condition, elo_delta, NULL)) AS {key}_ci_mean",
+            f"STDDEV_SAMP(IF(Map = {full} AND bucket_condition, elo_delta, NULL)) AS {key}_ci_sd",
+            f"COUNTIF(Map = {full} AND bucket_condition AND elo_delta IS NOT NULL) AS {key}_ci_n",
+        ])
+    bucket_structs = ",\n        ".join(
+        f"STRUCT({_sql_string(key)} AS bucket_key, {_sql_string(label)} AS bucket_label, {order} AS sort_order)"
+        for order, (key, label, _) in enumerate(buckets, 1)
+    )
+    condition_case = "\n          ".join(
+        f"WHEN b.bucket_key = {_sql_string(key)} THEN {condition}"
+        for key, _, condition in buckets
+    )
+    return f"""
+    WITH filtered AS (
+      SELECT
+        f.Map,
+        SAFE_CAST(f.{source_field} AS INT64) AS metric_value,
+        SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {where_sql}
+        AND COALESCE(f.table_conceded, 0) = 0
+        AND COALESCE(f.end_game_triggered, FALSE) = TRUE
+    ),
+    valid AS (
+      -- Only gameplay-valid values own denominator observations. Score keeps
+      -- open tails, while the three bounded tracks reject theoretical values.
+      SELECT * FROM filtered WHERE {valid_condition}
+    ),
+    bucketed AS (
+      SELECT
+        valid.*,
+        b.bucket_key,
+        b.bucket_label,
+        b.sort_order,
+        CASE
+          {condition_case}
+          ELSE FALSE
+        END AS bucket_condition
+      FROM valid
+      CROSS JOIN UNNEST([
+        {bucket_structs}
+      ]) AS b
+    )
+    SELECT
+      bucket_key,
+      bucket_label,
+      sort_order,
+      ROUND(AVG(IF(bucket_condition, elo_delta, NULL)), 3) AS avg,
+      COUNTIF(bucket_condition) AS count_avg,
+      COUNT(*) AS denom_avg,
+      AVG(IF(bucket_condition, elo_delta, NULL)) AS avg_ci_mean,
+      STDDEV_SAMP(IF(bucket_condition, elo_delta, NULL)) AS avg_ci_sd,
+      COUNTIF(bucket_condition AND elo_delta IS NOT NULL) AS avg_ci_n,
+      {', '.join(map_selects)}
+    FROM bucketed
+    GROUP BY bucket_key, bucket_label, sort_order
+    ORDER BY sort_order
+    """
+
+
 PREDICTOR_GENERAL_FIELDS = [
     ("More conservation", "Conservation"),
     ("More appeal", "Appeal"),
@@ -4889,7 +5211,7 @@ def _build_conservation_projects_query(where_sql):
     for map_meta in ALL_MAPS_FOR_METRICS[:15]:
         key = map_meta["key"]
         full = _sql_string(map_meta["full"])
-        condition = f"Map = {full} AND project_count = count_value"
+        condition = f"Map = {full} AND subject_count = count_value"
         map_selects.extend([
             f"ROUND(AVG(IF({condition}, elo_delta, NULL)), 3) AS {key}",
             f"COUNTIF({condition}) AS count_{key}",
@@ -4901,32 +5223,46 @@ def _build_conservation_projects_query(where_sql):
     map_select_sql = ",\n      ".join(map_selects)
     return f"""
     WITH configured AS (
-      SELECT count_value, count_value + 1 AS sort_order
-      FROM UNNEST(GENERATE_ARRAY(0, 7)) AS count_value
+      SELECT subject, count_value, count_value + 1 AS sort_order
+      FROM UNNEST(['projects', 'releases']) AS subject
+      CROSS JOIN UNNEST(GENERATE_ARRAY(0, 7)) AS count_value
     ),
-    scoped AS (
+    scoped_raw AS (
       SELECT
         f.Map,
         SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta,
-        SAFE_CAST(f.Conservation_project_association_tasks AS INT64) AS project_count
+        subject,
+        CASE subject
+          WHEN 'projects' THEN SAFE_CAST(f.Conservation_project_association_tasks AS INT64)
+          ELSE SAFE_CAST(f.Released_animals AS INT64)
+        END AS subject_count
       FROM `{PREPARED_FULL_STATS_TABLE}` f
+      CROSS JOIN UNNEST(['projects', 'releases']) AS subject
       WHERE {where_sql}
         AND COALESCE(f.table_conceded, 0) = 0
+    ),
+    scoped AS (
+      -- Each subject owns its denominator. Missing and malformed counts, plus
+      -- theoretical values outside the gameplay range 0..7, are excluded.
+      SELECT *
+      FROM scoped_raw
+      WHERE subject_count BETWEEN 0 AND 7
     )
     SELECT
       c.sort_order,
+      c.subject,
       c.count_value,
-      ROUND(AVG(IF(s.project_count = c.count_value, s.elo_delta, NULL)), 3) AS avg,
-      COUNTIF(s.project_count = c.count_value) AS count_avg,
+      ROUND(AVG(IF(s.subject_count = c.count_value, s.elo_delta, NULL)), 3) AS avg,
+      COUNTIF(s.subject_count = c.count_value) AS count_avg,
       COUNT(s.Map) AS denom_avg,
-      AVG(IF(s.project_count = c.count_value, s.elo_delta, NULL)) AS avg_ci_mean,
-      STDDEV_SAMP(IF(s.project_count = c.count_value, s.elo_delta, NULL)) AS avg_ci_sd,
-      COUNTIF(s.project_count = c.count_value AND s.elo_delta IS NOT NULL) AS avg_ci_n,
+      AVG(IF(s.subject_count = c.count_value, s.elo_delta, NULL)) AS avg_ci_mean,
+      STDDEV_SAMP(IF(s.subject_count = c.count_value, s.elo_delta, NULL)) AS avg_ci_sd,
+      COUNTIF(s.subject_count = c.count_value AND s.elo_delta IS NOT NULL) AS avg_ci_n,
       {map_select_sql}
     FROM configured c
-    LEFT JOIN scoped s ON TRUE
-    GROUP BY c.sort_order, c.count_value
-    ORDER BY c.sort_order
+    LEFT JOIN scoped s ON s.subject = c.subject
+    GROUP BY c.sort_order, c.subject, c.count_value
+    ORDER BY c.subject, c.sort_order
     """
 
 
@@ -5211,11 +5547,7 @@ def _build_records_query(where_sql, records_view, records_player=None,
     also enforces the configured UTC window and the MW/Base mode.
     """
     if records_view == RECORDS_VIEW_ELO_LEADERBOARD:
-        return """
-        SELECT CAST(NULL AS INT64) AS sort_value, CAST(NULL AS STRING) AS player
-        FROM (SELECT 1 AS placeholder)
-        WHERE FALSE
-        """
+        raise ValueError("Elo Leaderboard is static and must be served from its snapshot")
 
     # Scope predicates are shared with the manually maintained derived rows.
     # Completion/winner predicates are attached only to automatic Records;
@@ -6034,6 +6366,7 @@ def _query_card_stats(
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
     conservation_view=CONSERVATION_VIEW_PROJECTS,
+    scoring_view=SCORING_VIEW_FINAL_SCORE,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     players_player=None,
@@ -6041,12 +6374,13 @@ def _query_card_stats(
     last_x_games=None,
     players_arena_only=False,
     players_arena_seasons=None,
-    records_view=RECORDS_VIEW_FASTEST_GAMES,
+    records_view=RECORDS_VIEW_ELO_LEADERBOARD,
     records_player=None,
     records_arena_only=False,
     records_tournament_only=False,
     players_component="combined",
     hexes_expanded=False,
+    scoring_expanded=False,
     combination_paged=False,
     combination_page=COMBINATION_PAGE_DEFAULT,
     combination_page_size=COMBINATION_PAGE_SIZE_DEFAULT,
@@ -6161,6 +6495,19 @@ def _query_card_stats(
             None,
         )
         query = _build_conservation_query(where_sql, conservation_view)
+    elif stats_page == STATS_PAGE_SCORING:
+        where_sql, query_parameters = _build_full_sample_where_sql(
+            is_mw,
+            selected_maps,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            None,
+        )
+        query = _build_scoring_query(where_sql, scoring_view, expanded=scoring_expanded)
     elif stats_page == STATS_PAGE_WORKERS and workers_view == WORKERS_VIEW_GENERAL:
         where_sql, query_parameters = _build_full_sample_where_sql(
             is_mw,
@@ -6285,6 +6632,8 @@ def _query_card_stats(
         query = _build_actions_query(where_sql, actions_view)
     if stats_page == STATS_PAGE_CONSERVATION:
         query = _build_conservation_query(where_sql, conservation_view)
+    if stats_page == STATS_PAGE_SCORING:
+        query = _build_scoring_query(where_sql, scoring_view, expanded=scoring_expanded)
     if stats_page == STATS_PAGE_WORKERS:
         query = _build_workers_query(where_sql, workers_view)
     if stats_page == STATS_PAGE_COMBINATIONS:
@@ -6592,6 +6941,41 @@ def _query_card_stats(
         }
         return rows, timing
 
+    if stats_page == STATS_PAGE_SCORING:
+        schema_field_names = {field.name for field in results.schema}
+        for row in results:
+            item = {
+                "bucket_key": row.bucket_key,
+                "bucket_label": row.bucket_label,
+                "sort_order": row.sort_order,
+                "avg": row.avg,
+                "count_avg": row.count_avg,
+                "denom_avg": row.denom_avg,
+            }
+            _attach_ci95(item, row, schema_field_names, "avg")
+            for map_meta in ALL_MAPS_FOR_METRICS[:15]:
+                key = map_meta["key"]
+                item[key] = getattr(row, key, None)
+                item[f"count_{key}"] = getattr(row, f"count_{key}", 0)
+                item[f"denom_{key}"] = getattr(row, f"denom_{key}", 0)
+                _attach_ci95(item, row, schema_field_names, key)
+            rows.append(item)
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+
     if stats_page == STATS_PAGE_PREDICTORS:
         schema_field_names = {field.name for field in results.schema}
         for row in results:
@@ -6628,6 +7012,7 @@ def _query_card_stats(
             if conservation_view == CONSERVATION_VIEW_PROJECTS:
                 item = {
                     "sort_order": row.sort_order,
+                    "subject": row.subject,
                     "count_value": row.count_value,
                 }
                 prefixes = ["avg", *map_keys]
@@ -7301,6 +7686,27 @@ def _query_hexes_both(*args, **kwargs):
     return collapsed_rows, expanded_rows, combined_timing
 
 
+def _query_scoring_both(*args, **kwargs):
+    """Return collapsed and exact Scoring buckets in one frontend request."""
+    collapsed_kwargs = dict(kwargs)
+    collapsed_kwargs["scoring_expanded"] = False
+    expanded_kwargs = dict(kwargs)
+    expanded_kwargs["scoring_expanded"] = True
+    collapsed_rows, collapsed_timing = _query_card_stats(*args, **collapsed_kwargs)
+    scoring_view = collapsed_kwargs.get("scoring_view", SCORING_VIEW_FINAL_SCORE)
+    if scoring_view == SCORING_VIEW_REPUTATION:
+        return collapsed_rows, list(collapsed_rows), collapsed_timing
+    expanded_rows, expanded_timing = _query_card_stats(*args, **expanded_kwargs)
+    combined_timing = dict(collapsed_timing)
+    combined_timing["expanded_query_wait_ms"] = expanded_timing.get("query_wait_ms")
+    combined_timing["expanded_job_id"] = expanded_timing.get("job_id")
+    combined_timing["expanded_job_total_bytes_processed"] = expanded_timing.get(
+        "job_total_bytes_processed"
+    )
+    combined_timing["expanded_job_total_slot_ms"] = expanded_timing.get("job_total_slot_ms")
+    return collapsed_rows, expanded_rows, combined_timing
+
+
 def _combination_ranges(rows, combinations_view):
     fields = {
         COMBINATIONS_VIEW_CARD_CARD: ["avg_elo", "interaction", "delta_1", "delta_2", "delta_combined", "delta_actual"],
@@ -7336,9 +7742,10 @@ def _refresh_default_snapshot_from_prepared(
     predictors_view=PREDICTORS_VIEW_GENERAL,
     actions_view=ACTIONS_VIEW_STARTING_POSITION,
     conservation_view=CONSERVATION_VIEW_PROJECTS,
+    scoring_view=SCORING_VIEW_FINAL_SCORE,
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
-    records_view=RECORDS_VIEW_FASTEST_GAMES,
+    records_view=RECORDS_VIEW_ELO_LEADERBOARD,
     completed_only_override=None,
     cache_blob_override=None,
 ):
@@ -7373,6 +7780,7 @@ def _refresh_default_snapshot_from_prepared(
         "predictors_view": predictors_view,
         "actions_view": actions_view,
         "conservation_view": conservation_view,
+        "scoring_view": scoring_view,
         "workers_view": workers_view,
         "players_view": players_view,
         "records_view": records_view,
@@ -7387,6 +7795,8 @@ def _refresh_default_snapshot_from_prepared(
     expanded_rows = None
     if stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
         rows, expanded_rows, timing = _query_hexes_both(*query_args, **query_kwargs)
+    elif stats_page == STATS_PAGE_SCORING:
+        rows, expanded_rows, timing = _query_scoring_both(*query_args, **query_kwargs)
     else:
         rows, timing = _query_card_stats(*query_args, **query_kwargs)
     combination_ranges = None
@@ -7409,6 +7819,7 @@ def _refresh_default_snapshot_from_prepared(
         "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
         "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
         "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
+        "scoring_view": scoring_view if stats_page == STATS_PAGE_SCORING else None,
         "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
         "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
         "records_view": records_view if stats_page == STATS_PAGE_RECORDS else None,
@@ -7416,7 +7827,7 @@ def _refresh_default_snapshot_from_prepared(
             ALL_MAPS_FOR_METRICS
             if stats_page in (
                 STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS,
-                STATS_PAGE_CONSERVATION, STATS_PAGE_WORKERS,
+                STATS_PAGE_CONSERVATION, STATS_PAGE_SCORING, STATS_PAGE_WORKERS,
             )
             else None
         ),
@@ -7439,6 +7850,8 @@ def _refresh_default_snapshot_from_prepared(
             if stats_page == STATS_PAGE_ACTIONS
             else f"{stats_page}_{conservation_view}_default_snapshot"
             if stats_page == STATS_PAGE_CONSERVATION
+            else f"{stats_page}_{scoring_view}_default_snapshot"
+            if stats_page == STATS_PAGE_SCORING
             else f"{stats_page}_{workers_view}_default_snapshot"
             if stats_page == STATS_PAGE_WORKERS
             else f"{stats_page}_default_snapshot"
@@ -7467,7 +7880,7 @@ def _refresh_default_snapshot_from_prepared(
         else _write_cached_snapshot(
             is_mw, payload, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
         )
     )
     return {
@@ -7486,6 +7899,7 @@ def _refresh_default_snapshot_from_prepared(
         "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
         "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
         "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
+        "scoring_view": scoring_view if stats_page == STATS_PAGE_SCORING else None,
         "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
         "cache_status": "refreshed" if cache_write_ok else "cache_write_failed",
         "rows": len(rows),
@@ -7524,6 +7938,22 @@ def _run_daily_refresh():
             CONSERVATION_VIEW_PROJECTS,
             CONSERVATION_VIEW_PROJECT_REWARDS,
             CONSERVATION_VIEW_CP_REWARDS,
+        )
+    }
+    scoring_executor = ThreadPoolExecutor(max_workers=4)
+    scoring_futures = {
+        (dataset, view): scoring_executor.submit(
+            _refresh_default_snapshot_from_prepared,
+            dataset,
+            STATS_PAGE_SCORING,
+            scoring_view=view,
+        )
+        for dataset in (1, 0)
+        for view in (
+            SCORING_VIEW_FINAL_SCORE,
+            SCORING_VIEW_APPEAL,
+            SCORING_VIEW_CONSERVATION_POINTS,
+            SCORING_VIEW_REPUTATION,
         )
     }
     home_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_HOME)
@@ -7675,9 +8105,9 @@ def _run_daily_refresh():
     players_general_base = _refresh_default_snapshot_from_prepared(
         0, STATS_PAGE_PLAYERS, players_view=PLAYERS_VIEW_GENERAL
     )
+    elo_leaderboard_snapshots = _refresh_records_elo_leaderboard_snapshots()
     records_snapshots = []
     for records_view in (
-        RECORDS_VIEW_ELO_LEADERBOARD,
         RECORDS_VIEW_FASTEST_GAMES,
         RECORDS_VIEW_HIGHEST_SCORES,
         RECORDS_VIEW_BIGGEST_TURNS,
@@ -7696,6 +8126,17 @@ def _run_daily_refresh():
         conservation_cp_rewards_base = conservation_futures[(0, CONSERVATION_VIEW_CP_REWARDS)].result()
     finally:
         conservation_executor.shutdown(wait=True)
+    try:
+        scoring_final_score_mw = scoring_futures[(1, SCORING_VIEW_FINAL_SCORE)].result()
+        scoring_final_score_base = scoring_futures[(0, SCORING_VIEW_FINAL_SCORE)].result()
+        scoring_appeal_mw = scoring_futures[(1, SCORING_VIEW_APPEAL)].result()
+        scoring_appeal_base = scoring_futures[(0, SCORING_VIEW_APPEAL)].result()
+        scoring_conservation_mw = scoring_futures[(1, SCORING_VIEW_CONSERVATION_POINTS)].result()
+        scoring_conservation_base = scoring_futures[(0, SCORING_VIEW_CONSERVATION_POINTS)].result()
+        scoring_reputation_mw = scoring_futures[(1, SCORING_VIEW_REPUTATION)].result()
+        scoring_reputation_base = scoring_futures[(0, SCORING_VIEW_REPUTATION)].result()
+    finally:
+        scoring_executor.shutdown(wait=True)
     combinations_card_card_mw = _refresh_default_snapshot_from_prepared(
         1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_CARD
     )
@@ -7742,10 +8183,15 @@ def _run_daily_refresh():
          conservation_projects_mw, conservation_projects_base,
          conservation_project_rewards_mw, conservation_project_rewards_base,
          conservation_cp_rewards_mw, conservation_cp_rewards_base,
+         scoring_final_score_mw, scoring_final_score_base,
+         scoring_appeal_mw, scoring_appeal_base,
+         scoring_conservation_mw, scoring_conservation_base,
+         scoring_reputation_mw, scoring_reputation_base,
          workers_general_mw, workers_general_base,
          workers_two_cp_mw, workers_two_cp_base,
-        players_general_mw, players_general_base,
-        *records_snapshots,
+         players_general_mw, players_general_base,
+         *elo_leaderboard_snapshots,
+         *records_snapshots,
         combinations_card_card_mw, combinations_card_card_base,
         combinations_card_round_mw, combinations_card_round_base,
         combinations_card_map_mw, combinations_card_map_base,
@@ -8023,6 +8469,11 @@ def get_card_stats(request):
             if stats_page == STATS_PAGE_CONSERVATION
             else CONSERVATION_VIEW_PROJECTS
         )
+        scoring_view = (
+            _parse_scoring_view(params.get("scoring_view"))
+            if stats_page == STATS_PAGE_SCORING
+            else SCORING_VIEW_FINAL_SCORE
+        )
         workers_view = (
             _parse_workers_view(params.get("workers_view"))
             if stats_page == STATS_PAGE_WORKERS
@@ -8036,7 +8487,7 @@ def get_card_stats(request):
         records_view = (
             _parse_records_view(params.get("records_view"))
             if stats_page == STATS_PAGE_RECORDS
-            else RECORDS_VIEW_FASTEST_GAMES
+            else RECORDS_VIEW_ELO_LEADERBOARD
         )
         records_player = params.get("records_player")
         if records_player is not None and not isinstance(records_player, str):
@@ -8130,6 +8581,22 @@ def get_card_stats(request):
                 )
             arena_payload["source"] = "arena_top100_snapshot"
             return _json_http_response(arena_payload, 200, headers, request)
+        if stats_page == STATS_PAGE_RECORDS and records_view == RECORDS_VIEW_ELO_LEADERBOARD:
+            # Elo Leaderboard is a daily Google-Sheets snapshot. Serving it
+            # directly prevents the static table from ever starting a
+            # BigQuery job or inheriting Records filter predicates.
+            leaderboard_payload = _read_cached_snapshot(
+                is_mw, STATS_PAGE_RECORDS, records_view=RECORDS_VIEW_ELO_LEADERBOARD
+            )
+            if leaderboard_payload is None:
+                return _json_http_response(
+                    {"status": "error", "message": "Elo Leaderboard snapshot is unavailable"},
+                    503,
+                    headers,
+                    request,
+                )
+            leaderboard_payload["source"] = "records_elo_leaderboard_snapshot"
+            return _json_http_response(leaderboard_payload, 200, headers, request)
         default_player_elo_min = 0 if stats_page == STATS_PAGE_HOME else None if stats_page in (STATS_PAGE_PLAYERS, STATS_PAGE_RECORDS) else 300
         default_opponent_elo_min = (
             0 if stats_page in (STATS_PAGE_HOME, STATS_PAGE_PLAYERS)
@@ -8218,6 +8685,7 @@ def get_card_stats(request):
         STATS_PAGE_PREDICTORS,
         STATS_PAGE_ACTIONS,
         STATS_PAGE_CONSERVATION,
+        STATS_PAGE_SCORING,
         STATS_PAGE_WORKERS,
         STATS_PAGE_PLAYERS,
     ):
@@ -8238,6 +8706,10 @@ def get_card_stats(request):
         completed_only = None
     if stats_page == STATS_PAGE_CONSERVATION and conservation_view == CONSERVATION_VIEW_PROJECTS:
         # Projects always use completed tables; the page intentionally has no toggle.
+        completed_only = None
+    if stats_page == STATS_PAGE_SCORING:
+        # Scoring owns a stricter eligibility rule in its query: non-conceded
+        # tables with endgame_triggered. It intentionally has no completion toggle.
         completed_only = None
     if stats_page == STATS_PAGE_WORKERS and workers_view == WORKERS_VIEW_GENERAL:
         # General Workers is intentionally a hard completed-table population.
@@ -8292,7 +8764,7 @@ def get_card_stats(request):
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
             build_view, predictors_view, actions_view
-            , conservation_view, workers_view, players_view, records_view
+            , conservation_view, scoring_view, workers_view, players_view, records_view
         )
         if cached_payload:
             return _json_http_response(cached_payload, 200, headers, request)
@@ -8319,6 +8791,7 @@ def get_card_stats(request):
         predictors_view if stats_page == STATS_PAGE_PREDICTORS else
         actions_view if stats_page == STATS_PAGE_ACTIONS else
         conservation_view if stats_page == STATS_PAGE_CONSERVATION else
+        scoring_view if stats_page == STATS_PAGE_SCORING else
         workers_view if stats_page == STATS_PAGE_WORKERS else
         {
             "view": players_view,
@@ -8386,6 +8859,7 @@ def get_card_stats(request):
         )
         query_kwargs = {
             "hexes_expanded": False,
+            "scoring_expanded": False,
             "combination_paged": combination_paged,
             "combination_page": combination_page,
             "combination_page_size": combination_page_size,
@@ -8406,6 +8880,7 @@ def get_card_stats(request):
             "predictors_view": predictors_view,
             "actions_view": actions_view,
             "conservation_view": conservation_view,
+            "scoring_view": scoring_view,
             "workers_view": workers_view,
             "players_view": players_view,
             "players_player": players_player,
@@ -8440,6 +8915,8 @@ def get_card_stats(request):
             rows, timing = _query_default_players_comparison(is_mw, players_players)
         elif stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
             rows, expanded_rows, timing = _query_hexes_both(*query_args, **query_kwargs)
+        elif stats_page == STATS_PAGE_SCORING:
+            rows, expanded_rows, timing = _query_scoring_both(*query_args, **query_kwargs)
         else:
             rows, timing = _query_card_stats(*query_args, **query_kwargs)
         default_combination_floor = (
@@ -8469,6 +8946,7 @@ def get_card_stats(request):
             "predictors_view": predictors_view if stats_page == STATS_PAGE_PREDICTORS else None,
             "actions_view": actions_view if stats_page == STATS_PAGE_ACTIONS else None,
             "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
+            "scoring_view": scoring_view if stats_page == STATS_PAGE_SCORING else None,
             "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
             "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
             "records_view": records_view if stats_page == STATS_PAGE_RECORDS else None,
@@ -8478,7 +8956,10 @@ def get_card_stats(request):
             "players_arena_seasons": players_arena_seasons if stats_page == STATS_PAGE_PLAYERS else None,
             "maps": (
                 ALL_MAPS_FOR_METRICS
-                if stats_page in (STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS, STATS_PAGE_CONSERVATION)
+                if stats_page in (
+                    STATS_PAGE_MAPS, STATS_PAGE_BUILD, STATS_PAGE_ACTIONS,
+                    STATS_PAGE_CONSERVATION, STATS_PAGE_SCORING,
+                )
                 else None
             ),
             "data": rows,
@@ -8512,7 +8993,7 @@ def get_card_stats(request):
             cache_write_ok = _write_cached_snapshot(
                 is_mw, payload, stats_page, endgames_view, maps_view,
                 sponsor_endgames_view, combinations_view,
-                build_view, predictors_view, actions_view, conservation_view, workers_view, players_view, records_view
+                build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
             )
             payload["cache_status"] = "refreshed" if refresh_data and cache_write_ok else "miss"
             if not cache_write_ok:
