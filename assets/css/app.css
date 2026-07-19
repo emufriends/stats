@@ -1,0 +1,5441 @@
+/* ── Design tokens ───────────────────────────────────────────────────────
+       Central colour/spacing variables. Most of the visual theme should be changed here first.
+       Redesigned 2026-06-18: moved the dark base from a yellow-green "forest"
+       cast to a cooler deep-marine teal-black. This gives the emerald accent
+       real contrast to pop against (rather than green-on-khaki-green), while
+       staying on-theme — Ark Nova's own box/board palette is dark teal, not
+       olive. Two secondary accents were added for variety: a marine teal
+       (Marine Worlds tab) and a warm gold (Base tab, "narrowed filter"
+       highlights, echoing the sponsorship/conservation gold already used on
+       the Project type badge in the table). The table's own value-driven
+       colours (delta/elo/playrate gradients, type badges) are NOT touched. */
+    :root {
+      --bg:          #0a1614;   /* deep marine-black, cool undertone */
+      --bg-panel:    #0e1f1c;   /* sidebar / card panel */
+      --bg-surface:  #152c28;   /* table rows, inputs */
+      --bg-hover:    #1d3a34;   /* row hover */
+      --bg-deep:     #071110;   /* near-black, for floating tooltips/dropdowns */
+      --border:      #25453f;
+      --border-light:#386059;
+
+      --text:        #eef6f1;   /* primary text */
+      --text-muted:  #84ada3;   /* labels, secondary */
+      --text-dim:    #4f7269;   /* very faint */
+
+      --accent:        #34d399;   /* vivid emerald — Ark Nova leaf, primary */
+      --accent-dim:    #1d6b48;
+      --accent-bright: #6df5b8;   /* lighter emerald, for links/hover */
+      --accent-glow:   rgba(52,211,153,0.18);
+
+      --accent-teal:     #17368f;   /* darker, subtler ultramarine for the Marine Worlds tab */
+      --accent-teal-dim: #0d1f5a;
+
+      --accent-gold:     #e8ad4f;   /* warm amber-gold — Base tab only */
+      --accent-gold-dim: #6b4a1d;
+
+      --accent-filter:     #9edfc2;   /* pale mint for narrowed filters:
+                                          Species/Habitat/Abilities buttons and
+                                          the Type column header. */
+      --accent-filter-dim: #3d6f5b;
+
+      --accent-refresh:     #4fd5c4;   /* cooler blue-green, only for Refresh data */
+      --accent-refresh-dim: #1e6f69;
+
+      --tab-active:  var(--accent);
+      --tab-bg:      var(--bg-surface);
+
+      /* Anchor colours for the continuous Elo-delta scale. */
+      --pos-strong:  #4caf72;
+      --pos-mid:     #8bc78a;
+      --pos-weak:    #b8dbb5;
+      --neg-weak:    #e8b9a0;
+      --neg-mid:     #d97c5a;
+      --neg-strong:  #c0432a;
+      --neutral:     #7a9e80;
+
+      /* Anchor colours for continuous Elo and playrate/frequency scales. */
+      --elo-low:   #2a5a5a;
+      --elo-mid:   #2a8a7a;
+      --elo-high:  #4acfb0;
+      --pr-low:      #2a4a6a;
+      --pr-mid:      #3a7abf;
+      --pr-high:     #6bb5f0;
+
+      --radius:      6px;
+      --radius-lg:   10px;
+      --shadow:      0 2px 12px rgba(0,0,0,0.4);
+    }
+
+    /* ── Reset & base ──────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html {
+      /* Reserve page-scrollbar space even when short filtered result sets do not
+         need scrolling, preventing the table from shifting horizontally. */
+      scrollbar-gutter: stable;
+      scrollbar-color: var(--accent-dim) var(--bg);
+    }
+
+    html::-webkit-scrollbar {
+      width: 14px;
+    }
+
+    html::-webkit-scrollbar-track {
+      background: var(--bg);
+    }
+
+    html::-webkit-scrollbar-thumb {
+      background: var(--accent-dim);
+      border: 3px solid var(--bg);
+      border-radius: 999px;
+    }
+
+    html::-webkit-scrollbar-thumb:hover {
+      background: var(--accent);
+    }
+
+    html::-webkit-scrollbar-button {
+      display: none;
+      width: 0;
+      height: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ── Top bar ───────────────────────────────────────────────────────────── */
+    .topbar {
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      height: 56px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    /* The logo/title is absolutely centred so it stays visually centred even though
+       utility controls sit on both sides of the topbar. */
+    .topbar-logo {
+      white-space: nowrap;
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      line-height: 1;
+    }
+
+    .topbar-wordmark {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      line-height: 1;
+    }
+
+    .topbar-wordmark-top {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      line-height: 1;
+    }
+
+    .wm-ark,
+    .wm-nova {
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+      font-weight: 700;
+      font-size: 22px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+
+    .wm-ark {
+      color: var(--text);
+    }
+
+    .wm-rhino {
+      display: flex;
+      align-items: center;
+      margin: 0 5px;
+      color: var(--accent);
+      opacity: 0.95;
+    }
+
+    .wm-rhino svg {
+      display: block;
+      width: 22px;
+      height: 26px;
+    }
+
+    .wm-nova {
+      color: #BAFFE0;
+      text-shadow: 0 0 14px rgba(186, 255, 224, 0.2);
+    }
+
+    .wm-stats {
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 8.5px;
+      letter-spacing: 0.32em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      text-align: center;
+      width: 100%;
+      margin-top: 2px;
+      line-height: 1;
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .topbar-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    /* MW / Base segmented switch */
+    .tabs {
+      width: 88px;
+      height: 30px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+      padding: 2px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+
+    /* push filter button to the far right */
+    .mobile-filter-btn {
+      margin-left: auto;
+    }
+
+    .topbar-actions .mobile-filter-btn {
+      margin-left: 0;
+    }
+
+    .tab-btn {
+      height: 24px;
+      min-width: 0;
+      padding: 0;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 0;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .tab-btn::after {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+
+    .tab-mw::after { content: 'MW'; }
+    .tab-base::after { content: 'Base'; }
+
+    .tab-btn.active {
+      border-color: currentColor;
+      color: var(--bg);
+      font-weight: 500;
+    }
+
+    .tab-btn.active.tab-mw {
+      background: var(--accent-teal);   /* marine teal for Marine Worlds */
+      border-color: var(--accent-teal);
+      color: var(--text);
+    }
+
+    .tab-btn.active.tab-base {
+      background: var(--accent-gold);   /* warm gold for Base — replaces the old olive/khaki tone */
+      border-color: var(--accent-gold);
+    }
+
+    .tab-btn:hover:not(.active) {
+      border-color: var(--accent-dim);
+      color: var(--text);
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────────────────
+       The main dashboard has a compact, elegant navigation rail on the left.
+       Filters always open as a right-side overlay, so the table never resizes. */
+    :root {
+      --side-nav-width: 112px;
+      --side-nav-gap: 20px;
+    }
+
+    .layout {
+      display: block;
+      margin-left: calc(var(--side-nav-width) + var(--side-nav-gap));
+      min-height: calc(100vh - 56px);
+      transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Redesigned Navigation Sidebar: Minimalist Indicator Rail
+       Transforms block-like enclosures into outline SVG glyphs, spacious uppercase 
+       tracking, and a sharp, scaling emerald blade at the left edge.
+       The width is controlled by --side-nav-width, and elements are
+       balanced as horizontal rectangular cards. */
+    .side-nav {
+      position: fixed;
+      top: 56px;
+      left: 0;
+      bottom: 0;
+      width: var(--side-nav-width);
+      background: #050d0c; /* step darker than main canvas to establish deep visual recession */
+      border-right: 1px solid rgba(52, 211, 153, 0.06); /* razor-thin sub-border outline */
+      z-index: 95;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      padding: 8px 0px;
+      gap: 6px;
+    }
+
+    .side-nav-scroll-area {
+      min-height: 0;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: none;
+      scroll-behavior: smooth;
+    }
+
+    .side-nav-scroll-area::-webkit-scrollbar {
+      display: none;
+    }
+
+    .side-nav-scroll-btn {
+      height: 18px;
+      border: 0;
+      background: transparent;
+      color: var(--accent);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 10px;
+      line-height: 1;
+      padding: 0;
+      transition: color 0.15s, opacity 0.15s;
+      flex-shrink: 0;
+    }
+
+    .side-nav-scroll-btn.visible {
+      display: flex;
+    }
+
+    .side-nav-scroll-btn:disabled {
+      color: #40544f;
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    /* Nav collapse toggle tab — only shown on mobile */
+    .nav-collapse-btn {
+      display: none;
+    }
+
+    /* Elegant, solid ("durchgezogen") separator line with high visibility */
+    .nav-divider {
+      height: 1.5px;
+      background: rgba(52, 211, 153, 0.35); /* Solid visible emerald color */
+      margin: 0px 14px; /* Inset from the sidebar outer edges */
+      flex-shrink: 0;
+    }
+
+    /* Formatting: Fixed vertical cells matching 60px on desktop, while retaining 
+       the 112px desktop layout width. Inner content is perfectly aligned. */
+    .side-nav-link {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      width: 100%;
+      height: 60px; /* Fixed height for desktop cells */
+      color: #4a5e5a; /* Desaturated teal-grey default state */
+      text-decoration: none;
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      line-height: 1.4;
+      gap: 4px;
+      user-select: none;
+      cursor: pointer;
+      transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-sizing: border-box;
+      flex-shrink: 0;
+    }
+
+    .nav-icon {
+      width: 22px;
+      height: 22px;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+      transition: stroke 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+    }
+
+    .nav-icon-hand,
+    .nav-icon-emu,
+    .nav-icon-build {
+      fill: currentColor;
+      stroke: none;
+      transition: fill 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+    }
+
+    .nav-icon-sponsor-endgames text {
+      fill: currentColor;
+      stroke: none;
+      font-family: 'Inter', sans-serif;
+      font-size: 8px;
+      font-weight: 700;
+    }
+
+    .nav-icon-scoring text {
+      fill: currentColor;
+      stroke: none;
+      font-family: 'Inter', sans-serif;
+      font-size: 8px;
+      font-weight: 700;
+    }
+
+    .nav-icon-actions {
+      width: 52px;
+      height: 26px;
+      stroke-width: 1.05;
+    }
+
+    .nav-icon-build {
+      width: 26px;
+      height: 22px;
+      display: inline-block;
+      background: currentColor;
+      -webkit-mask: url('../img/nav-build.png') center / contain no-repeat;
+      mask: url('../img/nav-build.png') center / contain no-repeat;
+    }
+
+    /* Active vertical green glow strip (Expanding Indicator Blade) */
+    .side-nav-link::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--accent);
+      border-radius: 0 4px 4px 0;
+      opacity: 0;
+      transform: scaleY(0.3);
+      transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .side-nav-link.active::before {
+      opacity: 1;
+      transform: scaleY(1);
+    }
+
+    .side-nav-link.active {
+      color: var(--text);
+    }
+
+    .side-nav-link.active .nav-icon {
+      stroke: var(--accent);
+      filter: drop-shadow(0 0 5px rgba(52, 211, 153, 0.3));
+    }
+
+    /* Fluid Micro-interactions */
+    .side-nav-link:hover {
+      color: var(--text);
+      transform: translateY(-2px);
+    }
+
+    .side-nav-link:hover .nav-icon {
+      stroke: var(--accent-bright);
+      filter: drop-shadow(0 0 4px rgba(109, 245, 184, 0.2));
+    }
+
+    .side-nav-link.active .nav-icon-build {
+      background-color: var(--accent);
+      filter: drop-shadow(0 0 5px rgba(52, 211, 153, 0.3));
+    }
+
+    .side-nav-link:hover .nav-icon-build {
+      background-color: var(--accent-bright);
+      filter: drop-shadow(0 0 4px rgba(109, 245, 184, 0.2));
+    }
+
+    .side-nav.nav-collapsed .side-nav-scroll-btn {
+      display: none;
+    }
+
+    /* Filled hand icon: keep it uniform. These rules intentionally come after
+       the generic nav-icon active/hover rules so no stroke flashes on hover. */
+    .side-nav-link .nav-icon-hand,
+    .side-nav-link .nav-icon-emu,
+    .side-nav-link .nav-icon-build,
+    .side-nav-link.active .nav-icon-hand,
+    .side-nav-link.active .nav-icon-emu,
+    .side-nav-link.active .nav-icon-build,
+    .side-nav-link:hover .nav-icon-hand,
+    .side-nav-link:hover .nav-icon-emu,
+    .side-nav-link:hover .nav-icon-build {
+      stroke: none;
+    }
+
+    .side-nav-link.active .nav-icon-hand,
+    .side-nav-link.active .nav-icon-emu,
+    .side-nav-link.active .nav-icon-build,
+    .side-nav-link:hover .nav-icon-hand,
+    .side-nav-link:hover .nav-icon-emu,
+    .side-nav-link:hover .nav-icon-build {
+      color: var(--accent);
+      fill: var(--accent);
+      filter: drop-shadow(0 0 4px rgba(52, 211, 153, 0.22));
+    }
+
+    .nav-label-coming {
+      line-height: 1.2;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────────────
+       Universal right-side overlay. It never participates in layout width. */
+    .sidebar {
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border);
+      padding: 20px 16px;
+      overflow-y: auto;
+      position: fixed;
+      top: 0;
+      right: -280px;
+      left: auto;
+      width: 260px;
+      height: 100vh;
+      z-index: 200;
+      transition: right 0.25s ease;
+      box-shadow: none;
+      /* RTL trick: flips the native scrollbar to the left edge of the panel.
+         Direction is reset back to ltr on every direct child below so text,
+         inputs, and flex ordering all read normally; only the scrollbar
+         track itself stays mirrored. */
+      direction: rtl;
+      /* Firefox: thin width + themed thumb/track colours. */
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-light) transparent;
+    }
+
+    .sidebar > * {
+      direction: ltr;
+    }
+
+    /* Slim, theme-coloured scrollbar for the Filters sidebar (WebKit/Blink). */
+    .sidebar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: var(--border-light);
+      border-radius: 3px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover {
+      background: var(--accent-dim);
+    }
+
+    .sidebar.open { right: 0; box-shadow: -4px 0 24px rgba(0,0,0,0.5); }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .sidebar-title {
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      font-weight: 900;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .reset-btn {
+      font-size: 11px;
+      color: var(--text-muted);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 3px 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .reset-btn:hover {
+      border-color: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    /* Filter groups */
+    .filter-group {
+      margin-bottom: 20px;
+    }
+
+    .filter-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    /* Range inputs */
+    .range-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .range-input {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      padding: 6px 10px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .range-input:focus { border-color: var(--accent-dim); }
+    .range-input::placeholder { color: var(--text-dim); }
+
+    /* Date inputs */
+    .date-input {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      padding: 6px 10px;
+      outline: none;
+      transition: border-color 0.15s;
+      margin-bottom: 6px;
+    }
+
+    .date-input:focus { border-color: var(--accent-dim); }
+
+    .date-input:disabled,
+    .range-input:disabled {
+      opacity: .42;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    .date-input-shell {
+      position: relative;
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .date-input-shell .date-input {
+      margin-bottom: 0;
+      padding-right: 36px;
+    }
+
+    .date-picker-native {
+      position: absolute;
+      right: 4px;
+      width: 28px;
+      height: 28px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .date-picker-btn {
+      position: absolute;
+      right: 4px;
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s;
+    }
+
+    .date-picker-btn:hover {
+      color: var(--accent);
+    }
+
+    .date-picker-btn svg {
+      width: 15px;
+      height: 15px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* Chip toggles (maps, card types) */
+    .chip-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    /* Map chips: fixed uniform size, 5 per row */
+    #mapChips {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 5px;
+    }
+
+    #mapChips .chip {
+      text-align: center;
+      justify-content: center;
+      padding: 5px 4px;
+      font-size: 12px;
+    }
+
+    /* Round chips: fixed uniform size, 6 per row.
+       All active is the default/no-filter state. Any smaller subset triggers
+       a backend round filter and makes in-hand/seen/playrate unavailable. */
+    #roundChips {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 5px;
+    }
+
+    #roundChips .chip {
+      text-align: center;
+      justify-content: center;
+      padding: 5px 4px;
+      font-size: 12px;
+    }
+
+    .chip {
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: 'Inter', sans-serif;
+      position: relative;
+    }
+
+    .chip.active {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .chip:hover:not(.active) {
+      border-color: var(--border-light);
+      color: var(--text);
+    }
+
+    /* Toggle switch */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .toggle-label {
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .toggle input { display: none; }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .toggle input:checked + .toggle-track {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+    }
+
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      left: 2px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 14px;
+      height: 14px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      transition: left 0.2s, background 0.2s;
+    }
+
+    .toggle input:checked + .toggle-track::after {
+      left: 18px;
+      background: var(--accent);
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 16px 0;
+    }
+
+    .filter-action-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* Apply button */
+    .apply-btn {
+      width: 100%;
+      padding: 10px;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: var(--radius);
+      font-family: 'Bitter', serif;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      margin-top: 4px;
+      letter-spacing: 0.02em;
+    }
+
+    .apply-btn:hover { opacity: 0.85; }
+    .apply-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .refresh-data-btn {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent-dim);
+    }
+
+    .refresh-data-btn:hover {
+      background: var(--accent-dim);
+      color: var(--text);
+      opacity: 1;
+    }
+
+    /* ── Main content ──────────────────────────────────────────────────────── */
+    .main {
+      padding: 24px;
+      overflow-x: auto;
+    }
+
+    /* Header above the table: result count on the left, minimum-play and row controls on the right.
+       Card search now lives in the Card table header instead of this control row. */
+    .main-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 24.6667px;
+      margin-bottom: 16px;
+      padding: 0 2px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    /* Maps keeps the same pre-bar header slot as Cards / Opening Hand, so the
+       view switcher sits exactly where the collapsed Attributes bar sits. */
+    .maps-main-header {
+      justify-content: flex-end;
+    }
+
+    .maps-main-header .table-meta {
+      width: 100%;
+    }
+
+    .main-controls {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    /* Minimum plays control, shown above the table next to Rows.
+       Important: this is NOT a backend filter. It filters the currently loaded
+       dataset instantly in applySearch() using n_played, so changing it does not
+       query BigQuery and does not change round/date/map/ELO calculations.
+
+       Desktop/tablet visual tuning is intentionally a little manual:
+       - transform: translateX(-35px) nudges the whole control left.
+       - the input width is 59px after several visual tweaks.
+       - phone layout resets the transform and uses a narrower field below. */
+    .min-plays-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      transform: translateX(-35px);
+    }
+
+    .min-plays-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .min-plays-label-short { display: none; }
+
+    .min-plays-input {
+      width: 59px;
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      padding: 4px 4px;
+      outline: none;
+      text-align: center;
+      transition: border-color 0.15s;
+    }
+
+    .min-plays-input:focus { border-color: var(--accent-dim); }
+
+    /* The empty Minimum plays field displays a custom centred dash.
+       The actual placeholder is a blank space in the HTML; this background line
+       is used instead because it gives finer control over dash width and centring.
+       Current chosen width: 30% of the field. */
+    .min-plays-input:placeholder-shown {
+      background-image: linear-gradient(var(--text-dim), var(--text-dim));
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 30% 1px;
+    }
+
+    .min-plays-input::-webkit-outer-spin-button,
+    .min-plays-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .min-plays-input[type=number] { -moz-appearance: textfield; }
+
+    .table-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .table-meta strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+
+    /* Sponsor Endgames keeps the result-count slot reserved while loading.
+       The count itself still appears only after data has loaded, but the tab
+       bar and table no longer jump when the meta text is inserted. */
+    .sponsor-endgames-main-header {
+      align-items: center;
+    }
+
+    .sponsor-endgames-main-header .sponsor-endgames-mode {
+      height: 24.6667px;
+      margin-left: auto;
+      min-width: 156px;
+    }
+
+    .sponsor-endgames-main-header .table-meta {
+      display: block;
+      height: 24.6667px;
+      min-height: 24.6667px;
+      line-height: 24.6667px;
+      white-space: nowrap;
+    }
+
+    .sponsor-endgames-main-header .table-meta.is-placeholder {
+      visibility: hidden;
+    }
+
+    /* Card-header search.
+       The search input is hidden inside the Card header until the search icon is clicked.
+       Closing it with X also clears the card search so users are not left with a hidden active filter.
+
+       Implementation note: the search button and search overlay stop propagation in JS.
+       That is necessary because the Card <th> itself sorts by card_name when clicked. */
+    .card-search-header { position: relative; }
+
+    .card-header-content {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      width: 100%;
+    }
+
+    .card-search-btn {
+      position: relative;
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 11px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+      transition: color 0.15s, text-shadow 0.15s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    /* Keep the compact glyph while making the target forgiving, especially on
+       its empty left side. The pseudo-element participates in button hit testing. */
+    .card-search-btn::before {
+      content: '';
+      position: absolute;
+      inset: -7px -4px -7px -14px;
+    }
+
+    .card-search-btn:hover,
+    .card-search-btn.search-active {
+      color: var(--accent);
+      text-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    .card-header-search {
+      display: none;
+      position: absolute;
+      inset: 5px 6px;
+      align-items: center;
+      gap: 5px;
+      background: var(--bg-surface);
+      border: 1px solid var(--accent-dim);
+      border-radius: var(--radius);
+      padding: 0 5px;
+      z-index: 120;
+      box-shadow: 0 0 0 2px rgba(45,107,60,0.18);
+    }
+
+    .card-header-search.open { display: flex; }
+
+    .card-header-search-icon {
+      color: var(--text-dim);
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+
+    .card-header-search-input {
+      min-width: 0;
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      outline: none;
+      padding: 3px 0;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .card-header-search-input::placeholder { color: var(--text-dim); }
+
+    .card-search-close {
+      width: 18px;
+      height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+      border-radius: var(--radius);
+      transition: color 0.15s, background 0.15s;
+      flex-shrink: 0;
+    }
+
+    .card-search-close:hover {
+      color: var(--text);
+      background: var(--bg-hover);
+    }
+
+    /* Rows per page */
+    .rpp-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .rpp-select {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      padding: 4px 8px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .map-select-all-none {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .map-toggle-link {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .map-toggle-link:hover {
+      color: var(--accent-bright);
+    }
+
+    /* ── Attributes bar ──────────────────────────────────────────────────────
+       Sits between the main-header (meta/min-plays/rows) and the table.
+       All filtering here is CLIENT-SIDE only, layered into applySearch() exactly
+       like the Type filter. It reads card metadata (species, strength, abilities,
+       etc.) from a separately-loaded cards_attributes.csv, keyed by card_name.
+
+       Structural rule shared by every group below: a group is disabled
+       (visually greyed out, non-interactive, reset to its default/non-filtering
+       state) whenever none of the card Types it can possibly apply to are
+       currently active in the Type filter. E.g. Strength only exists on
+       Sponsors, so it disables itself unless Sponsor is checked in Type. */
+    .attributes-bar {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      margin-bottom: 14px;
+    }
+
+    .attributes-bar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 45px;
+      padding: 0 16px;
+      box-sizing: border-box;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    /* Endgames view switcher.
+       This intentionally behaves like one segmented row, not three separate
+       pills: every tab owns exactly one third of the available width, with
+       centred text and vertical separators between cells. */
+    .endgames-tabs-bar {
+      overflow: hidden;
+    }
+
+    .endgames-tabs-bar .attributes-bar-header {
+      min-height: 45px;
+      padding: 0;
+      cursor: default;
+    }
+
+    .endgames-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: stretch;
+      gap: 0;
+      width: 100%;
+      min-height: 45px;
+    }
+
+    .maps-tabs {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .maps-tabs-bar .maps-tabs-header {
+      display: flex;
+      align-items: stretch;
+      height: 45px;
+      min-height: 45px;
+      overflow: hidden;
+    }
+
+    .maps-tabs-bar .maps-tabs {
+      width: 100%;
+      min-height: 45px;
+      height: 45px;
+    }
+
+    .sponsor-endgames-tabs {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .endgames-tab {
+      width: 100%;
+      min-width: 0;
+      min-height: 45px;
+      padding: 0 12px;
+      border: none;
+      border-right: 1px solid var(--border);
+      border-radius: 0;
+      background: transparent;
+      color: var(--text-muted);
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+      font-size: 13.5px;
+      font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      line-height: 1;
+      text-align: center;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .endgames-tab:last-child {
+      border-right: none;
+    }
+
+    .endgames-tab:hover {
+      background: rgba(52, 211, 153, 0.06);
+      color: var(--accent);
+    }
+
+    .endgames-tab.active {
+      background: rgba(52, 211, 153, 0.1);
+      color: var(--accent-bright);
+    }
+
+    .endgames-tab span:first-child {
+      min-width: 0;
+    }
+
+    .endgames-graph-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 25px;
+      height: 25px;
+      margin-left: 9px;
+      border-radius: var(--radius);
+      color: var(--text-muted);
+      transition: color 0.15s, background 0.15s;
+      flex: 0 0 25px;
+    }
+
+    .endgames-graph-toggle svg {
+      width: 17px;
+      height: 17px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .endgames-graph-toggle:hover,
+    .endgames-graph-toggle.active {
+      background: rgba(52, 211, 153, 0.12);
+      color: var(--accent-bright);
+    }
+
+    .is-hidden {
+      display: none !important;
+    }
+
+    .attributes-bar-title {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      line-height: 1;
+      text-align: center;
+      padding-left: 0;
+    }
+
+    /* Cards / Opening Hand Attributes header: match the Maps/Endgames tab label
+       treatment and keep the title visually centred while Reset/Chevron stay on
+       the right. Endgames/Maps/Sponsor Endgames tab bars override this header. */
+    .attributes-bar:not(.endgames-tabs-bar) .attributes-bar-header {
+      position: relative;
+      justify-content: flex-end;
+    }
+
+    .attributes-bar:not(.endgames-tabs-bar) .attributes-bar-title {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+
+    .attributes-bar:not(.endgames-tabs-bar) .attributes-bar-actions {
+      position: relative;
+      z-index: 1;
+    }
+
+    .attributes-bar-chevron {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      font-size: 0;
+      color: var(--text-dim);
+      line-height: 1;
+    }
+
+    .attributes-bar-chevron::before {
+      content: '▴';
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .attributes-bar-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .attributes-reset-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 24px;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 3px 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .attributes-reset-btn:hover {
+      border-color: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .attributes-bar.collapsed .attributes-reset-btn {
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .attributes-bar.collapsed .attributes-bar-chevron {
+      transform: none;
+    }
+
+    .attributes-bar.collapsed .attributes-bar-chevron::before {
+      content: '▾';
+    }
+
+    .attributes-bar-body {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 16px 22px;
+      padding: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .attributes-bar.collapsed .attributes-bar-body {
+      display: none;
+    }
+
+    /* Each filter group (Species, Habitat, Strength, ...) */
+    .attr-group {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .attr-group-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .attr-group-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .attr-group-actions {
+      font-size: 11px;
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+
+    .attr-separator {
+      width: 2px;
+      flex: 0 0 2px;
+      align-self: stretch;
+      min-height: 42px;
+      background: var(--border-light);
+      opacity: 0.7;
+      margin: 0;
+    }
+
+    /* Disabled state shared by every group type. Disabling resets the group's
+       selection to default underneath (handled in JS), so re-enabling always
+       starts clean rather than restoring a stale prior choice. */
+    .attr-group.disabled,
+    .attributes-bar.attributes-unavailable .attr-group {
+      opacity: 0.38;
+      pointer-events: none;
+    }
+
+    .attr-group.disabled .attr-group-label,
+    .attributes-bar.attributes-unavailable .attr-group-label {
+      color: var(--text-dim);
+    }
+
+    .attributes-bar.attributes-unavailable .attributes-bar-body {
+      pointer-events: none;
+    }
+
+    /* Chip row reuses the existing .chip look for visual consistency with
+       Maps/Round chips in the sidebar. */
+    .attr-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .attr-chip-row .chip {
+      padding: 3px 9px;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    /* Tag buttons open the popup for Species or Habitat. */
+    .attr-tags-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 66px;
+      padding: 3px 12px;
+      line-height: 1;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+      font-family: 'Inter', sans-serif;
+      white-space: nowrap;
+      text-align: center;
+    }
+
+    .attr-tags-btn:hover { border-color: var(--border-light); color: var(--text); }
+
+    .attr-tags-btn.narrowed {
+      border-color: var(--accent-filter);
+      color: var(--accent-filter);
+    }
+
+    .attr-tags-indicator {
+      font-size: 10px;
+      letter-spacing: 1px;
+    }
+
+    /* Tags popup: a modal-style overlay for Species or Habitat. */
+    .tags-popup-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 800;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .tags-popup-overlay.open { display: flex; }
+
+    .tags-popup {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      width: 420px;
+      max-width: calc(100vw - 32px);
+      max-height: calc(100vh - 64px);
+      overflow-y: auto;
+      padding: 18px 20px;
+    }
+
+    .tags-popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .tags-popup-title {
+      font-family: 'Bitter', serif;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .tags-popup-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .tags-popup-section {
+      margin-bottom: 14px;
+    }
+
+    .tags-popup-section:last-child { margin-bottom: 0; }
+
+    .tags-popup-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 7px;
+      display: block;
+    }
+
+    .tags-popup-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .tags-popup-chips .chip {
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    .attribute-icon-chip {
+      width: 42px;
+      height: 42px;
+      padding: 3px;
+      border: 2px solid transparent;
+      border-radius: 50%;
+      background: transparent;
+      cursor: pointer;
+      transition: border-color .15s, filter .15s, opacity .15s, transform .15s;
+    }
+
+    .attribute-icon-chip img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      filter: grayscale(1) saturate(.1);
+      opacity: .3;
+    }
+
+    .attribute-icon-chip.active img {
+      filter: none;
+      opacity: 1;
+    }
+
+    .attribute-icon-chip:hover {
+      border-color: rgba(109, 245, 184, .58);
+      transform: translateY(-1px);
+    }
+
+    .tags-popup-close-btn {
+      width: 100%;
+      padding: 8px;
+      margin-top: 16px;
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      border-radius: var(--radius);
+      font-family: 'Bitter', serif;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .tags-popup-close-btn:hover { opacity: 0.85; }
+
+    /* Reefer / Aviary toggles reuse the existing .toggle switch look */
+    .attr-toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .attr-toggle-label {
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    /* Abilities searchable multi-select dropdown */
+    .abilities-dropdown {
+      position: relative;
+    }
+
+    .abilities-dropdown-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 66px;
+      padding: 3px 12px;
+      line-height: 1;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+      font-family: 'Inter', sans-serif;
+      white-space: nowrap;
+      text-align: center;
+    }
+
+    .abilities-dropdown-btn:hover { border-color: var(--border-light); color: var(--text); }
+
+    .abilities-dropdown-btn.narrowed {
+      border-color: var(--accent-filter);
+      color: var(--accent-filter);
+    }
+
+    .abilities-panel {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      background: var(--bg-deep);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      z-index: 500;
+      width: 260px;
+      max-width: calc(100vw - 32px);
+      padding: 10px;
+    }
+
+    .abilities-panel.open { display: block; }
+
+    .abilities-search-input {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      padding: 6px 9px;
+      outline: none;
+      margin-bottom: 8px;
+    }
+
+    .abilities-search-input:focus { border-color: var(--accent-dim); }
+
+    .abilities-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      padding-left: 6px;
+    }
+
+    .abilities-list {
+      height: min(220px, calc(100vh - 210px));
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .abilities-list-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 6px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text);
+      transition: background 0.1s;
+    }
+
+    .abilities-list-item:hover { background: var(--bg-hover); }
+
+    .abilities-list-item input { accent-color: var(--accent); cursor: pointer; }
+
+    .abilities-list-empty {
+      font-size: 12px;
+      color: var(--text-dim);
+      padding: 10px 6px;
+      text-align: center;
+    }
+
+    @media (max-width: 768px) {
+      .attributes-bar-body { gap: 14px 18px; }
+    }
+
+    /* ── Type column filter ───────────────────────────────────────────────────
+       The Type column is the far-right table column, but its header also contains
+       the Animal/Sponsor/Project filter popup. This filter is CLIENT-SIDE only:
+       it filters already-loaded data and does not re-query BigQuery. */
+    .type-filter-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 10px;
+      cursor: pointer;
+      padding: 0 2px;
+      margin-left: 3px;
+      vertical-align: middle;
+      transition: color 0.15s;
+      font-family: 'Inter', sans-serif;
+      line-height: 1;
+    }
+
+    .type-filter-btn:hover,
+    .type-filter-btn.active { color: var(--accent); }
+
+    /* Active Type filter indicator.
+       Default = all three card types selected, so the header shows a compact filter icon.
+       Filtered = only one or two card types selected, so the header turns warm moss green
+       and the arrow is replaced by one/two dots. This is deliberately warmer/more muted
+       than the brighter green used by the sorted-column state. */
+    .type-filter-label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: color 0.15s, text-shadow 0.15s;
+    }
+
+    .type-filter-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 13px;
+      height: 12px;
+      color: inherit;
+      font-size: 10px;
+      letter-spacing: 1px;
+      line-height: 1;
+      vertical-align: -1px;
+    }
+
+    .type-filter-indicator.type-filter-icon {
+      width: 12px;
+      height: 12px;
+      min-width: 12px;
+      font-size: 0;
+      letter-spacing: 0;
+      background-color: currentColor;
+      -webkit-mask: url('../img/type-filter-icon.png') center / contain no-repeat;
+      mask: url('../img/type-filter-icon.png') center / contain no-repeat;
+      opacity: 0.95;
+    }
+
+    #statsTable thead th.type-filter-header.type-filter-active .type-filter-label {
+      color: var(--accent-filter);
+      text-shadow: 0 0 8px rgba(108,138,130,0.35);
+    }
+
+    #statsTable thead th.type-filter-header.type-filter-active {
+      box-shadow: inset 0 -2px 0 rgba(108,138,130,0.55);
+    }
+
+    #statsTable.combinations-table thead th.type-filter-header.type-filter-active {
+      box-shadow: none;
+    }
+
+    .type-filter-popup {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      background: var(--bg-deep);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      padding: 10px;
+      box-shadow: var(--shadow);
+      z-index: 1400;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 110px;
+      max-width: calc(100vw - 16px);
+    }
+
+    .type-filter-popup.open { display: flex; }
+
+    /* The th that contains the popup needs relative positioning on desktop.
+       On phones it is overridden back to sticky, because all header cells must
+       stay aligned during horizontal table scrolling. */
+    #statsTable thead th.type-filter-header { position: relative; }
+
+    /* ── Column header tooltips ─────────────────────────────────────────────── */
+    .col-tip {
+      display: inline;
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--text-dim);
+      cursor: help;
+      vertical-align: super;
+      line-height: 0;
+      margin-left: 1px;
+      margin-right: 3px;
+      transition: color 0.15s;
+      font-style: normal;
+      position: relative;
+    }
+
+    th:hover .col-tip { color: var(--text-muted); }
+
+    #col-tooltip {
+      position: fixed;
+      background: var(--bg-deep);
+      border: 1px solid var(--border-light);
+      color: var(--text);
+      font-size: 11px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      padding: 7px 11px;
+      border-radius: var(--radius);
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 9999;
+      display: none;
+      box-shadow: var(--shadow);
+      max-width: 260px;
+      white-space: normal;
+      line-height: 1.5;
+    }
+
+    #col-tooltip .tip-fraction {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    #col-tooltip .tip-fraction .tip-num {
+      border-bottom: 1px solid var(--text-muted);
+      padding-bottom: 2px;
+      margin-bottom: 2px;
+    }
+
+    /* ── Table ───────────────────────────────────────────────────────────────
+       Desktop/tablet use percentage widths from the <th style="width:..."> values.
+       Phones override those widths with fixed px values and horizontal scrolling. */
+    .table-wrap {
+      background: var(--bg-panel);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      table-layout: fixed;
+    }
+
+    /* A single shared canvas keeps every full-width statistics table aligned.
+       The three compact, side-by-side layouts do not use .table-wrap and are
+       intentionally allowed to shrink with their grid panels. */
+    .table-wrap .table-scroll > table {
+      width: 100%;
+      min-width: 900px;
+    }
+
+    thead {
+      background: var(--bg-surface);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    th {
+      padding: 11px 14px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+      transition: color 0.15s;
+    }
+
+    th:last-child { border-right: none; }
+
+    th:hover { color: var(--text); }
+
+    th.sorted { color: var(--accent); }
+
+    .sort-arrow {
+      display: inline-block;
+      margin-left: 4px;
+      opacity: 0.5;
+      font-size: 10px;
+    }
+
+    th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+
+    td {
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+    }
+
+    td:last-child { border-right: none; }
+
+    tr:last-child td { border-bottom: none; }
+
+    tbody tr {
+      transition: background 0.1s;
+    }
+
+    tbody tr:hover { background: var(--bg-hover); }
+
+    /* Type badge */
+    .type-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    .type-animal   { background: #2e2a1a; color: #c4a84a; border: 1px solid #5a4e20; }
+    .type-sponsor  { background: #211f3f; color: #8ea2f2; border: 1px solid #3f4d8a; }
+    .type-project  { background: #1a3a1e; color: #6fc97a; border: 1px solid #2d5e33; }
+
+    /* Card name */
+    .card-name {
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    /* Delta cells */
+    .delta {
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .delta-ci-cell {
+      cursor: default;
+    }
+
+
+    /* Shared insufficient-data style for low-observation delta cells.
+       The class name is historic, but the rule is intentionally global so
+       newer non-sponsor tables (Build Hexes, Actions map tables, Predictors)
+       match the existing Sponsor Endgames/Icons visual treatment. */
+    .sponsor-delta-insufficient {
+      color: var(--text-dim) !important;
+      cursor: default;
+      font-weight: 400;
+      opacity: 0.7;
+    }
+
+    #col-tooltip .ci-tooltip-title {
+      font-weight: 600;
+      text-align: center;
+    }
+
+    #col-tooltip .ci-tooltip-visual {
+      width: 176px;
+      margin-top: 8px;
+    }
+
+    #col-tooltip .ci-tooltip-line {
+      width: 100%;
+      height: 7px;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        var(--ci-low-color),
+        var(--ci-high-color)
+      );
+      box-shadow: 0 0 8px color-mix(in srgb, var(--ci-high-color) 24%, transparent);
+    }
+
+    #col-tooltip .ci-tooltip-bounds {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      margin-top: 4px;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+
+    /* Playrate bar */
+    .playrate-cell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 90px;
+    }
+
+    .playrate-bar-wrap {
+      flex: 1;
+      height: 6px;
+      background: var(--bg-surface);
+      border-radius: 3px;
+      overflow: hidden;
+      min-width: 40px;
+    }
+
+    .playrate-bar {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    .playrate-val {
+      flex: 0 0 54px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 500;
+      font-size: 12px;
+      min-width: 54px;
+      width: 54px;
+      text-align: right;
+    }
+
+    .endgames-table .playrate-cell {
+      gap: 6px;
+      min-width: 78px;
+    }
+
+    .endgames-table .playrate-val {
+      flex-basis: 48px;
+      min-width: 48px;
+      width: 48px;
+    }
+
+    /* rank + n columns */
+    .rank-cell {
+      padding-left: 4px;
+      padding-right: 4px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .n-cell {
+      font-variant-numeric: tabular-nums;
+      color: var(--text-muted);
+    }
+
+    .endgames-table.cp-by-map-view {
+      /* Avoid tiny rounding/content overflow on narrow desktop viewports while keeping the full table visible. */
+      width: calc(100% - 2px);
+      max-width: calc(100% - 2px);
+      min-width: 900px;
+    }
+
+    .endgames-table.cp-by-map-view th,
+    .endgames-table.cp-by-map-view td {
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+
+    .endgames-table.cp-by-map-view tbody td {
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .maps-table tbody td {
+      font-size: 12px;
+      font-weight: 400;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.35;
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+
+    .maps-metrics-table tbody td {
+      padding-left: 4px;
+      padding-right: 4px;
+      white-space: nowrap;
+    }
+
+    .maps-table {
+      border-collapse: separate;
+      border-spacing: 0;
+    }
+
+    .maps-table thead {
+      position: sticky;
+      top: 0;
+      z-index: 12;
+    }
+
+    .maps-table-wrap {
+      max-height: calc(100vh - 212px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .maps-table-wrap .table-scroll {
+      max-height: calc(100vh - 212px);
+      overflow-y: auto;
+    }
+
+    .maps-table .maps-metric-cell {
+      color: var(--text);
+      font-weight: 500;
+      cursor: pointer;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .maps-table .maps-value-cell {
+      font-weight: 400;
+    }
+
+    .maps-table .maps-active-sort-row .maps-metric-cell {
+      color: var(--accent);
+    }
+
+    .maps-sort-indicator {
+      margin-left: 5px;
+      color: var(--accent);
+      font-size: 10px;
+    }
+
+    .maps-table tfoot {
+      position: sticky;
+      bottom: 0;
+      z-index: 9;
+      background: #0b1916;
+    }
+
+    .maps-table tfoot td {
+      border-top: 3px double var(--border-light);
+      color: var(--text-dim);
+      background: #0b1916;
+      font-size: 12px;
+      font-weight: 400;
+      padding: 9px 8px;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.35;
+    }
+
+    .maps-table .maps-games-row .maps-metric-cell,
+    .maps-table .maps-games-cell {
+      color: var(--text-dim);
+    }
+
+    .maps-metrics-options {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 24px;
+    }
+
+    .maps-metrics-reset-btn {
+      margin-left: auto;
+      min-height: 24.6667px;
+      padding: 4px 12px;
+      font-size: 13px;
+      line-height: 1;
+    }
+
+    .maps-metrics-option {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--text-muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .maps-metrics-option .toggle {
+      margin-left: 2px;
+    }
+
+    .maps-visibility-control {
+      display: inline-grid;
+      grid-template-columns: repeat(3, 25px);
+      overflow: hidden;
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      background: rgba(4, 17, 14, 0.65);
+    }
+
+    .maps-visibility-control button {
+      width: 25px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      border-right: 1px solid var(--border-light);
+      background: transparent;
+      color: var(--text-muted);
+      font: 500 12px/1 Inter, sans-serif;
+      cursor: pointer;
+    }
+
+    .maps-visibility-control button:last-child {
+      border-right: 0;
+    }
+
+    .maps-visibility-control button:hover {
+      color: var(--text);
+      background: rgba(52, 211, 153, 0.08);
+    }
+
+    .maps-visibility-control button.active {
+      color: var(--accent-bright);
+      background: rgba(52, 211, 153, 0.18);
+    }
+
+    .side-nav-link.nav-placeholder {
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      font-family: inherit;
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+       HOME PAGE — Population-row layout
+       Two rows × 6 columns.
+       Col 1 = hero tile (Games Indexed / Games Logged).
+       Cols 2-6 = 5 stat tiles belonging to that population.
+       Hero columns deliberately contrast with the stat rows; the stats then
+       move through a softer family gradient.
+       ══════════════════════════════════════════════════════════════ */
+
+    /* Home is the one page that should fit inside the viewport. The normal
+       .main padding is reduced here so calc(100dvh - topbar - padding) does
+       not create the tiny page scroll that appears on short laptop screens. */
+    .main:has(.home-wrap) {
+      padding: 8px 18px;
+      overflow: hidden;
+    }
+
+    .home-wrap {
+      height: calc(100dvh - 56px - 16px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: clamp(24px, 3.2vh, 40px);
+      /* Use viewport-based padding here. Percent vertical padding is based on
+         the container width, which created too much empty space above/below the tiles. */
+      padding: clamp(12px, 2vh, 28px) 0;
+      box-sizing: border-box;
+    }
+
+    .home-state { grid-column: 1 / -1; }
+
+    /* Each population row: 6 columns, hero stays slightly wider without stealing too much room.
+       flex: 1 1 0 lets the two rows share the available height equally after padding and gap
+       are accounted for. The gap here controls visible space between tiles within a row. */
+    .home-pop-row {
+      display: grid;
+      grid-template-columns: 1.14fr repeat(5, minmax(0, 1fr));
+      gap: clamp(20px, 1.75vw, 30px);
+      flex: 1 1 0;
+      min-height: 0;
+    }
+
+    /* ── Tile base ── */
+    .ht {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 13px 15px 14px 22px;
+      border-radius: 8px;
+      background: #0f201d;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      min-height: 0;
+      transition: border-color 0.18s, background 0.18s, transform 0.18s;
+    }
+
+    .ht:hover {
+      border-color: var(--border-light);
+      background: #122420;
+      transform: translateY(-1px);
+    }
+
+    /* Left accent blade */
+    .ht::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 16%;
+      bottom: 16%;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+    }
+
+    /* Corner glow — off by default, fades in on hover */
+    .ht::after {
+      content: '';
+      position: absolute;
+      top: -52px;
+      right: -52px;
+      width: 138px;
+      height: 138px;
+      border-radius: 50%;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.28s;
+    }
+
+    .ht:hover::after { opacity: 1; }
+
+    /* ── Hero tile ── */
+    .ht--hero {
+      padding: 14px 16px 15px 23px;
+      border-color: rgba(132, 173, 163, 0.22);
+    }
+
+    .ht--idx-hero {
+      background:
+        linear-gradient(135deg, rgba(155, 135, 245, 0.085), transparent 55%),
+        #101d21;
+    }
+
+    .ht--log-hero {
+      background:
+        linear-gradient(135deg, rgba(232, 173, 79, 0.09), transparent 55%),
+        #171b15;
+    }
+
+    .ht--idx-hero:hover {
+      background:
+        linear-gradient(135deg, rgba(155, 135, 245, 0.12), transparent 58%),
+        #132127;
+    }
+
+    .ht--log-hero:hover {
+      background:
+        linear-gradient(135deg, rgba(232, 173, 79, 0.13), transparent 58%),
+        #1d2018;
+    }
+
+    /* Hero glow is always on at low opacity — the "main event" warmth */
+    .ht--hero::after {
+      width: 195px;
+      height: 195px;
+      top: -70px;
+      right: -70px;
+      opacity: 0.36;
+    }
+
+    .ht--hero:hover::after { opacity: 0.78; }
+
+    /* ── Indexed family: violet hero, then clear jump into marine blue/teal ── */
+    .ht--idx-hero::before { background: #9b87f5; }
+    .ht--idx-hero::after  { background: radial-gradient(circle, rgba(155,135,245,0.23) 0%, transparent 70%); }
+
+    .ht--idx-a::before { background: #4a9fd4; }
+    .ht--idx-a::after  { background: radial-gradient(circle, rgba(74,159,212,0.16) 0%, transparent 70%); }
+
+    .ht--idx-b::before { background: #4aaed0; }
+    .ht--idx-b::after  { background: radial-gradient(circle, rgba(74,174,208,0.15) 0%, transparent 70%); }
+
+    .ht--idx-c::before { background: #4ab8cc; }
+    .ht--idx-c::after  { background: radial-gradient(circle, rgba(74,184,204,0.15) 0%, transparent 70%); }
+
+    .ht--idx-d::before { background: #4ac2c6; }
+    .ht--idx-d::after  { background: radial-gradient(circle, rgba(74,194,198,0.15) 0%, transparent 70%); }
+
+    .ht--idx-e::before { background: #4acfc0; }
+    .ht--idx-e::after  { background: radial-gradient(circle, rgba(74,207,192,0.15) 0%, transparent 70%); }
+
+    /* ── Logged family: gold hero, then clear jump into orange → red ── */
+    .ht--log-hero::before { background: #e8ad4f; }
+    .ht--log-hero::after  { background: radial-gradient(circle, rgba(232,173,79,0.23) 0%, transparent 70%); }
+
+    .ht--log-a::before { background: #df8237; }
+    .ht--log-a::after  { background: radial-gradient(circle, rgba(223,130,55,0.16) 0%, transparent 70%); }
+
+    .ht--log-b::before { background: #d87334; }
+    .ht--log-b::after  { background: radial-gradient(circle, rgba(216,115,52,0.15) 0%, transparent 70%); }
+
+    .ht--log-c::before { background: #cf6532; }
+    .ht--log-c::after  { background: radial-gradient(circle, rgba(207,101,50,0.15) 0%, transparent 70%); }
+
+    .ht--log-d::before { background: #c65735; }
+    .ht--log-d::after  { background: radial-gradient(circle, rgba(198,87,53,0.15) 0%, transparent 70%); }
+
+    .ht--log-e::before { background: #bd4938; }
+    .ht--log-e::after  { background: radial-gradient(circle, rgba(189,73,56,0.15) 0%, transparent 70%); }
+
+    /* ── Tile label ── */
+    .ht__label {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      min-height: 2.5em;
+      font-family: 'Inter', sans-serif;
+      font-size: clamp(10px, 0.72vw, 11.5px);
+      font-weight: 600;
+      letter-spacing: 0.095em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      line-height: 1.25;
+      position: relative;
+      z-index: 1;
+    }
+
+    .ht__label span {
+      display: block;
+      white-space: nowrap;
+    }
+
+    /* Hero labels keep the same quiet label voice, with only a subtle family tint. */
+    .ht--idx-hero .ht__label { color: #a89fd2; }
+    .ht--log-hero .ht__label { color: #bca06f; }
+
+    /* ── Tile value ── */
+    .ht__value {
+      font-family: 'Space Grotesk', 'Inter', sans-serif;
+      font-size: clamp(19px, 1.55vw, 24px);
+      font-weight: 300;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.08;
+      color: var(--text);
+      margin-top: 10px;
+      position: relative;
+      z-index: 1;
+      letter-spacing: 0.02em;
+    }
+
+    .ht--hero .ht__value {
+      font-size: clamp(26px, 2.1vw, 33px);
+      font-weight: 300;
+      letter-spacing: 0.01em;
+    }
+
+    /* Hero values pick up their family's anchor color and are the main visual hierarchy cue. */
+    .ht--idx-hero .ht__value { color: #c4b5fd; }
+    .ht--log-hero .ht__value { color: #f0c870; }
+
+    #mapChips:has(.home-map-group) {
+      display: block;
+    }
+
+    .home-map-group {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .home-map-group + .home-map-group {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .sponsor-endgames-table .sponsor-name-cell {
+      color: var(--text);
+      font-weight: 500;
+      text-align: center;
+    }
+
+    .sponsor-endgames-table .sponsor-avg-cell {
+      font-weight: 600;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sponsor-endgames-table .elo-cell {
+      font-weight: 400;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sponsor-endgames-table .delta {
+      font-weight: 400;
+    }
+
+    .sponsor-endgames-table .sponsor-frequency-cell {
+      cursor: default;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+    }
+
+    .sponsor-endgames-table .sponsor-delta-insufficient {
+      color: var(--text-dim);
+      cursor: default;
+      font-weight: 400;
+      opacity: 0.7;
+    }
+
+    .icons-filter-bar {
+      min-height: 45px;
+      height: 45px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 14px;
+      box-sizing: border-box;
+    }
+
+    .icons-filter-scroll {
+      min-width: 0;
+      flex: 1 1 auto;
+      overflow-x: hidden;
+      scrollbar-width: none;
+    }
+
+    .icons-filter-scroll::-webkit-scrollbar {
+      display: none;
+    }
+
+    .icons-filter-controls,
+    .icons-filter-groups,
+    .icons-filter-group,
+    .icons-group-items {
+      display: flex;
+      align-items: center;
+    }
+
+    .icons-filter-controls {
+      width: 100%;
+      min-width: 0;
+      gap: 0;
+      justify-content: center;
+    }
+
+    .icons-filter-groups {
+      width: auto;
+      min-width: 0;
+      flex: 0 1 auto;
+      justify-content: center;
+      gap: 0;
+    }
+
+    .icons-filter-group {
+      gap: 10px;
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+
+    .icons-group-button {
+      height: 27px;
+      padding: 0 12px;
+      border: 1px solid rgba(52, 211, 153, 0.55);
+      border-radius: 15px;
+      background: rgba(15, 63, 50, 0.7);
+      color: var(--text-muted);
+      font: 500 11px/1 Inter, sans-serif;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .icons-group-button:hover,
+    .icons-group-button.active {
+      color: var(--text);
+      border-color: var(--accent);
+      background: rgba(26, 107, 81, 0.75);
+    }
+
+    .icons-group-items {
+      gap: 6px;
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+
+    .icons-image-chip {
+      width: 30px;
+      height: 30px;
+      padding: 1px;
+      border: 2px solid transparent;
+      border-radius: 50%;
+      background: transparent;
+      cursor: pointer;
+      transition: opacity .15s, filter .15s, transform .15s, border-color .15s;
+    }
+
+    .icons-image-chip img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+      filter: grayscale(1) saturate(0.1);
+      opacity: 0.28;
+    }
+
+    .icons-image-chip.active img {
+      filter: none;
+      opacity: 1;
+    }
+
+    .icons-image-chip:hover {
+      transform: translateY(-1px);
+      border-color: rgba(109, 245, 184, 0.58);
+    }
+
+    .icons-group-separator {
+      width: 2px;
+      flex: 0 0 2px;
+      height: 31px;
+      margin: 0 18px;
+      background: var(--border-light);
+    }
+
+    .icons-graph-toggle {
+      flex: 0 0 32px;
+      width: 32px;
+      height: 32px;
+      margin-left: 0;
+      border: 0;
+      border-radius: var(--radius);
+      background: transparent;
+      padding: 3px;
+      cursor: pointer;
+    }
+
+    .icons-graph-zone {
+      align-self: stretch;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1 1 32px;
+      min-width: 32px;
+    }
+
+    .icons-graph-toggle svg {
+      width: 28px;
+      height: 28px;
+    }
+
+    .icons-table {
+      min-width: 900px;
+    }
+
+    .icons-table .icons-value-tooltip {
+      cursor: default;
+    }
+
+    .icons-table.icons-graph-view thead {
+      display: none;
+    }
+
+    .icons-table.icons-graph-view tbody td {
+      padding: 0;
+      border: 0;
+    }
+
+    .icons-chart-zero {
+      stroke: rgba(210, 230, 221, 0.45);
+      stroke-width: 1.2;
+      stroke-dasharray: 4 4;
+    }
+
+    .icons-chart-legend-item img {
+      width: 18px;
+      height: 18px;
+      object-fit: contain;
+      flex: 0 0 auto;
+    }
+
+    @media (max-width: 600px) {
+      .icons-filter-bar { gap: 0; padding-inline: 8px; }
+      .icons-filter-controls,
+      .icons-filter-groups { gap: 0; }
+      .icons-filter-group { gap: 12px; }
+      .icons-group-items { gap: 6px; }
+      .icons-group-separator { margin-inline: 14px; }
+      .icons-image-chip { width: 30px; height: 30px; }
+      .icons-group-button { padding: 0 8px; }
+      .icons-graph-toggle { width: 38px; height: 38px; flex-basis: 38px; padding: 3px; }
+      .icons-graph-toggle svg { width: 32px; height: 32px; }
+    }
+
+    .maps-h2h-filter-note {
+      display: none;
+      margin: 0 0 18px;
+      padding: 10px 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(21, 44, 40, 0.62);
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .maps-h2h-meta {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .maps-h2h-mode {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      min-width: 142px;
+      height: 30px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-surface);
+    }
+
+    .maps-main-header .maps-h2h-mode {
+      height: 24.6667px;
+    }
+
+    .maps-h2h-mode button {
+      border: 0;
+      border-right: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      cursor: pointer;
+    }
+
+    .maps-h2h-mode button:last-child {
+      border-right: 0;
+    }
+
+    .maps-h2h-mode button.active {
+      background: rgba(132, 173, 163, 0.16);
+      color: var(--text);
+    }
+
+    .maps-h2h-table {
+      width: 100%;
+      min-width: 900px;
+    }
+
+    .maps-h2h-table th,
+    .maps-h2h-table td {
+      padding: 5px 4px;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    .maps-h2h-table thead th {
+      padding-top: 11px;
+      padding-bottom: 11px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      line-height: 1.2;
+    }
+
+    .maps-h2h-table tbody td {
+      font-size: 11px;
+      padding: 4px 3px;
+    }
+
+    .maps-h2h-corner {
+      width: 8%;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .maps-h2h-map-head {
+      width: 5.6%;
+      color: var(--text-muted);
+      white-space: nowrap;
+      cursor: default;
+    }
+
+    .maps-h2h-row-head {
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      line-height: 1.2;
+      white-space: nowrap;
+      background: rgba(14, 31, 28, 0.75);
+    }
+
+    .maps-h2h-cell {
+      min-width: 50px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Row height = 80% of the actual rendered map-column width. aspect-ratio
+       doesn't reliably apply to cells inside auto table layout, so this is
+       computed in JS (syncH2hRowHeight in maps.js) and written here as a CSS
+       variable on #statsTable; --h2h-row-height falls back to a sane default
+       until the first measurement runs. Only the 15 regular map-column cells
+       get it directly — the row-head and Overall columns are intentionally
+       wider than the row is tall, so they just stretch to match. */
+    .maps-h2h-cell:not(.maps-h2h-overall-cell) {
+      height: var(--h2h-row-height, 44px);
+    }
+
+    .maps-h2h-main {
+      font-weight: 400 !important;
+      font-size: 12px;
+      line-height: 1.1;
+    }
+
+    /* Overall column reads as a summary figure, so its main value is bold. */
+    .maps-h2h-overall-cell .maps-h2h-main {
+      font-weight: 700 !important;
+    }
+
+    .maps-h2h-sub {
+      margin-top: 2px;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 400;
+      line-height: 1.1;
+    }
+
+    .maps-h2h-empty {
+      color: var(--text-dim);
+      background: rgba(7, 17, 16, 0.26);
+      font-weight: 700;
+    }
+
+    .maps-h2h-overall-head,
+    .maps-h2h-overall-cell {
+      width: 8%;
+      border-left: 3px double var(--border-light) !important;
+    }
+
+    @media (max-width: 980px) {
+      .maps-metrics-options {
+        gap: 10px;
+      }
+
+      .maps-metrics-option {
+        gap: 5px;
+        font-size: 11px;
+      }
+
+      .maps-metrics-reset-btn {
+        padding-left: 10px;
+        padding-right: 10px;
+        font-size: 12px;
+      }
+    }
+
+    .endgames-table.endgames-graph-view tbody td {
+      padding: 0;
+      border-right: none;
+    }
+
+    .endgames-table.endgames-graph-view thead {
+      display: none;
+    }
+
+    .chart-host-cell {
+      background: var(--bg-panel);
+    }
+
+    .cp-dist-chart-wrap {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 18px;
+      padding: 18px;
+      min-height: 470px;
+    }
+
+    .cp-dist-chart {
+      position: relative;
+      min-width: 0;
+      background: rgba(7, 17, 16, 0.28);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px;
+    }
+
+    .cp-dist-chart svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 430px;
+    }
+
+    .cp-dist-axis,
+    .cp-dist-grid {
+      stroke: var(--border-light);
+      stroke-width: 1;
+    }
+
+    .cp-dist-grid {
+      opacity: 0.35;
+    }
+
+    .cp-dist-axis-label {
+      fill: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: none;
+    }
+
+    .cp-dist-line {
+      fill: none;
+      stroke-width: 2.1;
+      opacity: 0.72;
+      cursor: pointer;
+      transition: opacity 0.15s, stroke-width 0.15s;
+    }
+
+    .cp-dist-line.highlighted {
+      opacity: 1;
+      stroke-width: 3.4;
+    }
+
+    .cp-dist-line.dimmed {
+      opacity: 0.16;
+    }
+
+    .cp-dist-line.deselected {
+      stroke: #66736c;
+      opacity: 0.2;
+    }
+
+    .cp-dist-line.deselected.highlighted {
+      opacity: 0.38;
+    }
+
+    .cp-dist-dot {
+      opacity: 0.82;
+      pointer-events: auto;
+    }
+
+    .cp-dist-dot.deselected {
+      fill: #66736c;
+      opacity: 0.28;
+    }
+
+    .cp-dist-hover-line {
+      stroke: var(--text-muted);
+      stroke-width: 1;
+      stroke-dasharray: 4 4;
+      opacity: 0.55;
+      pointer-events: none;
+    }
+
+    .cp-dist-legend {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(7, 17, 16, 0.28);
+      padding: 8px;
+      overflow-y: auto;
+      height: 470px;
+      max-height: 470px;
+      box-sizing: border-box;
+      overflow-y: scroll;
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-light) transparent;
+    }
+
+    .cp-map-comparison {
+      font-size: calc(1em - 1px);
+    }
+
+    .build-tabs .endgames-tab {
+      flex: 1 1 50%;
+    }
+
+    .build-tabs {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .predictors-tabs {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .actions-tabs {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .actions-header-left {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      min-height: 24.6667px;
+    }
+
+    .actions-transpose-btn {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 24.6667px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .actions-transpose-btn:hover,
+    .actions-transpose-btn:focus-visible,
+    .actions-transpose-btn[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: rgba(132, 173, 163, 0.16);
+      color: var(--text);
+      outline: none;
+    }
+
+    .actions-transpose-btn svg {
+      width: 17px;
+      height: 17px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .actions-order-transposed {
+      table-layout: fixed;
+    }
+
+    .actions-order-transposed th,
+    .actions-order-transposed td {
+      width: 16.6667%;
+    }
+
+    .actions-upgrades-combined {
+      table-layout: fixed;
+    }
+
+.actions-upgrades-combined th,
+.actions-upgrades-combined td {
+    width: 33.3333%;
+}
+
+/* Conservation uses the same compact table language as Actions and Endgames,
+   while keeping three independent switch groups aligned in the shared header. */
+.conservation-switches {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    min-height: 24.6667px;
+}
+
+.conservation-switches .maps-h2h-mode {
+    height: 24.6667px;
+}
+
+.conservation-switches.is-projects .conservation-subject,
+.conservation-switches.is-projects .conservation-compare,
+.conservation-switches.is-projects .conservation-mode {
+    min-width: 166px;
+}
+
+.conservation-switches.is-cp-rewards {
+    gap: 18px;
+}
+
+.conservation-switches.is-cp-rewards .conservation-scope {
+    grid-template-columns: repeat(3, 1fr);
+    min-width: 276px;
+}
+
+.conservation-switches.is-cp-rewards .conservation-compare,
+.conservation-switches.is-cp-rewards .conservation-mode {
+    min-width: 192px;
+}
+
+.conservation-switches .is-hidden,
+.conservation-completed-filter.is-hidden,
+.conservation-completed-divider.is-hidden,
+.conservation-map-filter.is-hidden,
+.conservation-map-divider.is-hidden {
+    display: none !important;
+}
+
+.conservation-projects-table {
+    table-layout: fixed;
+    min-width: 900px;
+}
+
+.conservation-rewards-table,
+.conservation-cp-table {
+    table-layout: fixed;
+    width: 100%;
+}
+
+.conservation-rewards-table {
+    min-width: 900px;
+}
+
+.conservation-projects-table th,
+.conservation-rewards-table th,
+.conservation-cp-table th {
+    text-align: center;
+}
+
+.conservation-rewards-table th,
+.conservation-cp-table th {
+    cursor: pointer;
+}
+
+.conservation-rewards-table tbody td.conservation-overall-cell,
+.conservation-cp-table tbody td.conservation-overall-cell {
+    font-weight: 700;
+}
+
+/* CP Rewards AVG is a reference column, but it is not a bold label column. */
+.conservation-cp-table tbody td.conservation-overall-cell {
+    font-weight: 400;
+}
+
+.conservation-cp-table th.conservation-avg-header {
+    padding-left: 2px;
+    padding-right: 2px;
+    white-space: nowrap;
+}
+
+.conservation-avg-header-content {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    white-space: nowrap;
+}
+
+.conservation-avg-header-content .sort-arrow {
+    margin-left: 0;
+}
+
+.conservation-projects-table.conservation-frequency-table tbody td:not(.sponsor-name-cell),
+.conservation-cp-table.conservation-frequency-table tbody td:not(.sponsor-name-cell) {
+    font-size: 11px;
+}
+
+.conservation-cp-table {
+    min-width: 900px;
+}
+
+.conservation-group-separator td {
+    border-top: 3px double var(--border-strong, #315b53) !important;
+}
+
+/* Scoring reuses the Hexes distribution grid: four equal tabs, the standard
+   compact control slot, and an attached expand control only on bucketed views. */
+.scoring-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.scoring-switches .maps-h2h-mode {
+    min-width: 192px;
+    height: 24.6667px;
+}
+
+.scoring-table-shell:not(.is-expandable) {
+    padding-bottom: 0;
+}
+
+.scoring-table th,
+.scoring-table td {
+    text-align: center;
+}
+
+@media (max-width: 700px) {
+    .conservation-main-header {
+        align-items: flex-start;
+    }
+
+    .conservation-switches {
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .conservation-switches.is-cp-rewards {
+        gap: 6px;
+    }
+
+    .conservation-switches.is-cp-rewards .conservation-scope,
+    .conservation-switches.is-cp-rewards .conservation-compare,
+    .conservation-switches.is-cp-rewards .conservation-mode,
+    .conservation-switches.is-projects .conservation-subject,
+    .conservation-switches.is-projects .conservation-compare,
+    .conservation-switches.is-projects .conservation-mode {
+        min-width: 0;
+    }
+
+    .conservation-switches .maps-h2h-mode button {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+}
+
+    .build-switches {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-left: auto;
+      min-height: 24.6667px;
+    }
+
+    /* Keep route-specific segmented controls inside the same header slot as
+       pages whose controls are hidden. This prevents a small vertical jump
+       when switching between views. */
+.build-switches .maps-h2h-mode,
+.cp-map-mode {
+  height: 24.6667px !important;
+  min-height: 24.6667px !important;
+}
+
+.main-header:has(.build-switches),
+.main-header:has(.cp-map-mode),
+.main-header:has(.conservation-switches) {
+  height: 24.6667px;
+  min-height: 24.6667px;
+}
+
+.main-header:has(.build-switches) .build-switches,
+.main-header:has(.cp-map-mode) .cp-map-mode,
+.main-header:has(.conservation-switches) .conservation-switches {
+  height: 24.6667px !important;
+  min-height: 24.6667px !important;
+}
+
+    .build-tables {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    .build-table-panel {
+      min-width: 0;
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: var(--bg-panel);
+    }
+
+    .build-table-title {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-light);
+      color: var(--text);
+      font-family: 'Bitter', serif;
+      font-size: 14px;
+      font-weight: 600;
+      text-align: center;
+    }
+
+    .build-table {
+      width: 100%;
+      min-width: 0;
+      table-layout: fixed;
+    }
+
+    .build-table-panel .table-scroll {
+      overflow-x: hidden;
+    }
+
+    .build-standard-enclosures-table th:first-child,
+    .build-standard-enclosures-table td:first-child {
+      width: 10%;
+    }
+
+    .build-standard-enclosures-table th:not(:first-child),
+    .build-standard-enclosures-table td:not(:first-child) {
+      width: 15%;
+    }
+
+    .build-unique-enclosures-table th:first-child,
+    .build-unique-enclosures-table td:first-child {
+      width: 40%;
+    }
+
+    .build-unique-enclosures-table th:not(:first-child),
+    .build-unique-enclosures-table td:not(:first-child) {
+      width: 20%;
+    }
+
+    .build-hexes-table,
+    .actions-map-table {
+      table-layout: fixed;
+      width: 100%;
+      min-width: 900px;
+    }
+
+    .actions-tables {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    .actions-upgrade-tables {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .actions-table {
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    .actions-double-separator td {
+      border-top: 3px double var(--border-light);
+    }
+
+
+    /* Header-centering override for compact newer table modules. */
+    .actions-table thead th,
+    .actions-map-table thead th,
+    .predictors-table thead th,
+    .build-table thead th,
+    .build-hexes-table thead th {
+      text-align: center;
+    }
+
+    /* Build > Hexes first column: narrower padding avoids optical off-centering
+       in the compact Empty hexes bucket column without affecting map columns. */
+    .build-hexes-bucket-header,
+    .build-hexes-bucket-cell {
+      text-align: center;
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+
+    .build-hexes-bucket-header {
+      cursor: default;
+    }
+
+    /* Build > Hexes frequency view: frequency values are visually dense, so
+       only the body value cells are reduced by 1px. The bucket-label column
+       keeps the standard table size for readability. */
+    .build-hexes-table.build-hexes-frequency tbody td:not(.build-hexes-bucket-cell) {
+      font-size: 11px;
+    }
+
+    .build-hexes-shell {
+      position: relative;
+      width: 100%;
+      padding-bottom: 17px;
+      overflow: visible;
+    }
+
+    .build-hexes-wrap {
+      width: 100%;
+    }
+
+    .build-hexes-wrap .table-scroll {
+      width: 100%;
+    }
+
+    .build-expand-btn {
+      position: absolute;
+      left: 50%;
+      bottom: 0;
+      z-index: 2;
+      width: 44px;
+      height: 18px;
+      margin: 0;
+      transform: translateX(-50%);
+      border: 1px solid var(--border-light);
+      border-top: 0;
+      border-radius: 0 0 5px 5px;
+      background: var(--bg-panel);
+      color: var(--accent);
+      cursor: pointer;
+      font: inherit;
+      font-size: 11px;
+      line-height: 1;
+      padding: 0;
+      transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+
+    .hexes-expanded-row {
+      animation: hexes-row-reveal 180ms ease-out both;
+    }
+
+    @keyframes hexes-row-reveal {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .build-expand-btn:hover,
+    .build-expand-btn:focus-visible {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+
+    /* Actions > Upgrades by map frequency values are similarly dense; reduce
+       only the body value cells by 1px while leaving the upgrade labels intact. */
+    .actions-map-table.actions-map-frequency tbody td:not(.sponsor-name-cell) {
+      font-size: 11px;
+    }
+
+    .workers-map-table.workers-frequency-table tbody td:not(.sponsor-name-cell) {
+      font-size: 11px;
+    }
+
+    .workers-tabs {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .players-tabs {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    /* Players keeps the same 24.6667px header slot as the other pages. The
+       Arena season selector must fit inside that slot so entering/leaving the
+       static Top 100 view cannot move the tabs or table vertically. */
+    .players-main-header {
+      height: 24.6667px;
+      min-height: 24.6667px;
+      flex-wrap: nowrap;
+      gap: 12px;
+    }
+
+    .players-main-header .table-meta {
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .players-main-header .table-meta:empty {
+      display: none;
+    }
+
+    .players-main-header .players-arena-season-control {
+      margin-left: auto;
+      height: 24.6667px;
+      min-height: 24.6667px;
+      box-sizing: border-box;
+    }
+
+    .players-main-header .players-arena-season-control select {
+      height: 24.6667px;
+      min-height: 24.6667px;
+      box-sizing: border-box;
+    }
+
+    .players-arena-day-control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 24.6667px;
+      min-height: 24.6667px;
+      color: var(--text-muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .players-arena-day-control input {
+      width: 38px;
+      height: 22px;
+      box-sizing: border-box;
+      padding: 2px 3px;
+      border: 1px solid var(--border-light);
+      border-radius: 5px;
+      background: var(--bg-surface);
+      color: var(--text);
+      font: 600 11px Inter, sans-serif;
+      text-align: center;
+    }
+
+    .players-table-wrap {
+      max-height: calc(100vh - 212px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .players-table-wrap .table-scroll {
+      max-height: calc(100vh - 212px);
+      overflow-x: auto;
+      overflow-y: auto;
+    }
+
+    .players-table {
+      min-width: 900px;
+      table-layout: fixed;
+    }
+
+    .players-table thead th {
+      text-align: center;
+      box-sizing: border-box;
+      height: 40px;
+      padding: 7px 6px;
+    }
+
+    .players-table .players-value-cell {
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .players-player-header {
+      position: relative;
+      overflow: visible;
+    }
+
+    .players-search-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .players-search-icon {
+      position: absolute;
+      left: 8px;
+      z-index: 1;
+      color: var(--text-muted);
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .players-search-wrap input {
+      width: 100%;
+      min-width: 0;
+      height: 25px;
+      padding: 3px 25px 3px 38px;
+      border: 1px solid var(--border-light);
+      border-radius: 6px;
+      background: var(--bg-panel);
+      color: var(--text);
+      font: 500 12px/1.2 Inter, sans-serif;
+    }
+
+    .players-search-wrap input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .players-search-wrap input:disabled {
+      opacity: .72;
+      cursor: wait;
+    }
+
+    .players-search-wrap input::-webkit-search-cancel-button {
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .players-search-clear,
+    .players-search-retry {
+      position: absolute;
+      right: 5px;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .players-search-retry {
+      color: var(--accent);
+      font-size: 15px;
+    }
+
+    .players-suggestions {
+      position: fixed;
+      z-index: 1000;
+      display: none;
+      max-height: 220px;
+      overflow-y: auto;
+      padding: 4px;
+      border: 1px solid var(--border-light);
+      border-radius: 7px;
+      background: var(--bg-panel);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, .28);
+    }
+
+    .players-suggestions.open {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .players-suggestions button {
+      padding: 5px 7px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+      font: 400 12px/1.2 Inter, sans-serif;
+    }
+
+    .players-suggestions button:hover,
+    .players-suggestions button:focus-visible {
+      background: var(--bg-hover);
+      color: var(--accent);
+    }
+
+    .players-placeholder {
+      min-height: 260px;
+    }
+
+    .players-arena-season-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .players-arena-season-control select {
+      min-width: 82px;
+      height: 30px;
+      padding: 0 25px 0 9px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      background: var(--bg-panel);
+      color: var(--text);
+      font: 600 12px Inter, sans-serif;
+    }
+
+    .players-arena-tab {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .players-arena-filter .toggle-row {
+      margin-bottom: 0;
+    }
+
+    .players-arena-season-filter {
+      margin-top: 12px;
+    }
+
+    .players-arena-season-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .players-arena-season-heading .filter-label {
+      margin-bottom: 0;
+    }
+
+    .players-arena-season-chips {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .players-arena-season-chips .chip {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      padding: 5px 4px;
+      text-align: center;
+    }
+
+    .players-arena-season-chips .arena-season-incompatible {
+      opacity: .3;
+      filter: saturate(.25);
+      cursor: not-allowed;
+    }
+
+    .players-arena-filter-state {
+      grid-column: 1 / -1;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .players-arena-table-wrap {
+      max-height: calc(100vh - 212px);
+    }
+
+    .players-arena-table-wrap .table-scroll {
+      max-height: calc(100vh - 212px);
+      overflow: auto;
+    }
+
+    /* Records uses the same framed table, header slot, tabs, and pagination
+       geometry as the rest of the dashboard. */
+    .records-main-header {
+      min-height: 24.6667px;
+      align-items: center;
+    }
+
+    .records-full-leaderboard-link,
+    .records-full-leaderboard-link:link,
+    .records-full-leaderboard-link:visited,
+    .records-full-leaderboard-link:hover,
+    .records-full-leaderboard-link:active,
+    .records-full-leaderboard-link:focus {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .records-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .records-tabs .endgames-tab { flex: 1 1 20%; min-width: 0; text-align: center; }
+    .records-table-wrap { max-height: calc(100vh - 185px); display: flex; flex-direction: column; }
+    .records-table-wrap .table-scroll { max-height: calc(100vh - 230px); overflow: auto; }
+    .records-table { width: 100%; min-width: 900px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+    .records-table.records-biggest-turns-table { min-width: 900px; }
+    .records-table thead { position: sticky; top: 0; z-index: 12; }
+    .records-table th, .records-table td { box-sizing: border-box; text-align: center; }
+    /* Standard data-table headers render at 40px (11px text at the global
+       1.5 line-height plus 11px vertical padding). Search controls need less
+       padding around their 25px input, but the resulting row must be identical. */
+    .records-table th { height: 40px; padding: 7px 6px; font-size: 11px; line-height: 1.2; vertical-align: middle; }
+    .records-table td { height: 43px; padding: 8px; }
+    .records-table td { white-space: nowrap; font-size: 13px; }
+    .records-table a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+    .records-country-cell { text-align: center; }
+    .records-flag-img { width: 24px; height: 18px; display: inline-block; vertical-align: middle; border-radius: 2px; object-fit: cover; }
+    .records-table .records-icon-cell img { width: 21px; height: 21px; object-fit: contain; vertical-align: middle; }
+    .records-map-filter { display: flex; flex-direction: column; gap: 14px; }
+    .records-map-group { margin: 0; }
+    .records-filter-heading { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+    .records-map-chips { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+    .records-map-chip { min-width: 0; padding: 5px 4px; justify-content: center; text-align: center; font-size: 12px; }
+    .records-player-header { position: relative; overflow: visible; }
+    .records-player-header-content { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 27px; }
+    .records-player-header-title { display: block; text-align: center; }
+    .records-player-search-toggle { position: absolute; left: 0; top: 0; display: inline-flex; align-items: center; justify-content: center; width: 27px; height: 27px; padding: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 14px; }
+    .records-player-search-toggle:hover, .records-player-search-toggle:focus-visible { border-color: var(--border-light); color: var(--accent); background: var(--bg-surface); }
+    .records-player-search { position: relative; display: flex; align-items: center; min-width: 0; width: 100%; }
+    .records-player-search input { width: 100%; min-width: 0; height: 25px; box-sizing: border-box; padding: 3px 29px; border: 1px solid var(--border-light); border-radius: 7px; background: var(--bg-panel); color: var(--text); font: 500 12px/1.2 Inter, sans-serif; text-align: center; text-transform: none; letter-spacing: 0; }
+    /* Keep the dashboard's custom clear button as the only search affordance. */
+    .records-player-search input::-webkit-search-cancel-button,
+    .records-player-search input::-webkit-search-decoration {
+      -webkit-appearance: none;
+      appearance: none;
+      display: none;
+    }
+    .records-player-search input::-ms-clear { display: none; }
+    .records-search-icon { position: absolute; left: 9px; color: var(--text-muted); font-size: 0; pointer-events: none; z-index: 1; }
+    .records-search-icon::before { content: "\1F50D"; font-size: 15px; }
+    .records-search-clear { position: absolute; right: 5px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 0; line-height: 1; }
+    .records-search-clear::before { content: "\00D7"; font-size: 17px; }
+    .records-player-suggestions { position: fixed; display: none; z-index: 1000; max-height: min(320px, 45vh); overflow-y: auto; padding: 4px; border: 1px solid var(--border-light); border-radius: 8px; background: var(--bg-panel); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .records-player-suggestions.visible { display: block; }
+    .records-player-suggestions button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+    .records-player-suggestions button:hover { background: var(--bg-surface); color: var(--accent); }
+    .records-suggestion-state { padding: 10px; color: var(--text-muted); font-size: 12px; }
+    .records-mode-filters { display: flex; flex-direction: column; gap: 12px; }
+    .records-icon-filter-wrap { position: relative; display: inline-flex; justify-content: center; }
+    .records-icon-filter-button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 4px; border: 0; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
+    .records-icon-filter-button.active { color: var(--accent-filter); }
+    .records-type-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 38px; height: 20px; padding: 0 6px; border: 1px solid var(--accent-filter); border-radius: 9px; color: var(--accent-filter); font-size: 10px; font-weight: 600; line-height: 1; white-space: nowrap; box-sizing: border-box; }
+    .records-icon-filter-button { text-transform: uppercase; letter-spacing: .07em; white-space: nowrap; }
+    .records-icon-filter-popup { display: none; position: fixed; z-index: 1400; box-sizing: border-box; min-width: 220px; max-width: min(310px, calc(100vw - 16px)); padding: 10px; border: 1px solid var(--border-light); border-radius: var(--radius); background: var(--bg-panel); box-shadow: var(--shadow); }
+    .records-icon-filter-popup.open { display: flex; flex-direction: column; gap: 8px; }
+    .records-icon-filter-actions { align-self: flex-end; font-size: 11px; }
+    .records-icon-filter-icons { display: grid; grid-template-columns: repeat(6, 34px); justify-content: space-between; align-items: center; gap: 5px; }
+    .records-icon-filter-chip { width: 34px; height: 34px; padding: 2px; }
+    .records-icon-filter-chip img { width: 100%; height: 100%; object-fit: contain; }
+
+    @media (max-width: 600px) {
+      .records-table-wrap, .records-table-wrap .table-scroll { max-height: calc(100vh - 155px); }
+      .records-table { min-width: 900px; }
+      .records-table.records-biggest-turns-table { min-width: 900px; }
+      .records-tabs .endgames-tab { font-size: 9px; padding-inline: 4px; }
+    }
+
+    .players-arena-table {
+      width: 100%;
+      min-width: 900px;
+      table-layout: fixed;
+      border-collapse: collapse;
+    }
+
+    .players-arena-table th,
+    .players-arena-table td {
+      height: 43px;
+      padding: 6px 4px;
+      border-right: 1px solid var(--border-light);
+      border-bottom: 1px solid var(--border-light);
+      text-align: center;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .players-arena-table th {
+      height: 40px;
+    }
+
+    .players-arena-table th.sortable {
+      padding-left: 2px;
+      padding-right: 2px;
+      cursor: pointer;
+    }
+
+    .players-arena-table th.sortable .sort-arrow {
+      margin-left: 2px;
+      font-size: 9px;
+    }
+
+    .players-arena-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--bg-header);
+      color: var(--text-muted);
+      font-size: 12px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .players-arena-table thead th.sorted,
+    .players-arena-table thead th.sorted .col-tip {
+      color: var(--accent);
+    }
+
+    .players-arena-table .players-arena-name {
+      padding-left: 12px;
+      overflow: hidden;
+      text-align: center;
+      text-overflow: ellipsis;
+    }
+
+    .players-arena-graph-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 255px;
+      height: min(480px, calc(100vh - 220px));
+      min-height: 0;
+      overflow: hidden;
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--bg-panel);
+    }
+
+    .players-arena-chart {
+      position: relative;
+      display: flex;
+      min-height: 0;
+      min-width: 0;
+      flex-direction: column;
+      padding: 8px;
+    }
+
+    .players-arena-chart svg {
+      display: block;
+      flex: 1 1 auto;
+      width: 100%;
+      height: auto;
+      min-height: 0;
+    }
+
+    .players-arena-grid line {
+      stroke: var(--border-light);
+      stroke-width: 1;
+      opacity: .65;
+    }
+
+    .players-arena-grid text,
+    .players-arena-axis-title {
+      fill: var(--text-muted);
+      font: 11px Inter, sans-serif;
+    }
+
+    .players-arena-axis {
+      stroke: var(--text-muted);
+      stroke-width: 1.2;
+    }
+
+    .players-arena-rating-line {
+      fill: none;
+      stroke-width: 2.4;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      cursor: crosshair;
+      pointer-events: stroke;
+      transition: stroke-width .12s, opacity .12s;
+    }
+
+    .players-arena-rating-line:hover {
+      stroke-width: 3.8;
+    }
+
+    .players-arena-graph-tooltip {
+      position: absolute;
+      z-index: 3;
+      display: none;
+      padding: 3px 6px;
+      border: 1px solid var(--border-light);
+      border-radius: 6px;
+      background: var(--bg-header);
+      color: var(--text);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, .24);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    .players-arena-graph-tooltip.visible {
+      display: block;
+    }
+
+    .players-arena-empty-chart {
+      position: absolute;
+      inset: 45% 10px auto;
+      color: var(--text-muted);
+      text-align: center;
+      font-size: 12px;
+    }
+
+    .players-arena-legend {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      padding: 12px;
+      border-left: 1px solid var(--border-light);
+      background: var(--bg-header);
+    }
+
+    .players-arena-legend > input {
+      height: 30px;
+      padding: 4px 8px;
+      border: 1px solid var(--border-light);
+      border-radius: 6px;
+      background: var(--bg-panel);
+      color: var(--text);
+      font: 500 12px Inter, sans-serif;
+    }
+
+    .players-arena-legend-actions {
+      display: flex;
+      gap: 7px;
+      margin: 8px 0 4px;
+    }
+
+    .players-arena-legend-actions button {
+      padding: 3px 8px;
+      border: 1px solid var(--border-light);
+      border-radius: 5px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      font: 600 11px Inter, sans-serif;
+    }
+
+    .players-arena-limit {
+      margin-bottom: 6px;
+      color: var(--text-muted);
+      font-size: 10px;
+      transition: color .15s, transform .15s;
+    }
+
+    .players-arena-limit.limit-pulse {
+      color: #ff6b4a;
+      transform: scale(1.03);
+    }
+
+    .players-arena-legend-list {
+      display: flex;
+      min-height: 0;
+      flex: 1;
+      flex-direction: column;
+      gap: 2px;
+      overflow-y: auto;
+    }
+
+    .players-arena-legend-item {
+      display: grid;
+      grid-template-columns: 9px 24px minmax(0, 1fr);
+      align-items: center;
+      gap: 5px;
+      padding: 5px 4px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      text-align: left;
+      font: 500 11px Inter, sans-serif;
+    }
+
+    .players-arena-legend-item:hover,
+    .players-arena-legend-item.active {
+      background: var(--bg-hover);
+      color: var(--text);
+    }
+
+    .players-arena-legend-item:disabled {
+      opacity: .38;
+      cursor: not-allowed;
+    }
+
+    .players-arena-legend-swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .players-arena-legend-rank {
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .workers-last-worker {
+      font-style: normal;
+      white-space: nowrap;
+    }
+
+    .workers-header-single {
+      text-decoration-line: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      text-decoration-skip-ink: none;
+    }
+
+    .workers-header-double,
+    .workers-double-underline {
+      text-decoration-line: underline;
+      text-decoration-style: double;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      text-decoration-skip-ink: none;
+    }
+
+    .workers-map-table thead th {
+      padding-left: 4px;
+      padding-right: 4px;
+      white-space: nowrap;
+    }
+
+    .workers-average-row td {
+      border-top: 3px double var(--border-light);
+    }
+
+    .workers-average-row .worker-average-cell {
+      font-variant-numeric: tabular-nums;
+      font-weight: 400;
+    }
+
+    .workers-average-row .worker-average-avg {
+      color: #c4a9e8;
+    }
+
+    .workers-map-table.workers-frequency-table .workers-average-row td:not(.sponsor-name-cell) {
+      font-size: calc(1em + 1px);
+    }
+
+    /* All map-chip filters use the same five-column geometry as Cards. */
+    #playersMapChips,
+    #conservationMapChips {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #playersMapChips .chip,
+    #conservationMapChips .chip {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      padding: 5px 4px;
+      justify-content: center;
+      text-align: center;
+      font-size: 12px;
+    }
+
+    .build-placeholder {
+      min-height: 330px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-panel);
+    }
+
+    @media (max-width: 900px) {
+      .build-tables {
+        grid-template-columns: 1fr;
+        gap: 18px;
+      }
+
+      .actions-tables,
+      .actions-upgrade-tables {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+    }
+
+    .cp-dist-legend-controls {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 4px 5px 8px;
+      margin-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .cp-dist-legend-controls button {
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      font: inherit;
+      letter-spacing: 0;
+      text-transform: none;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    .cp-dist-legend-controls button:hover {
+      color: var(--accent);
+    }
+
+    .cp-dist-legend-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .cp-dist-legend-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      line-height: 1.25;
+      text-align: left;
+      padding: 6px 5px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s, opacity 0.15s;
+    }
+
+    .cp-dist-legend-item:hover,
+    .cp-dist-legend-item.highlighted {
+      background: rgba(52, 211, 153, 0.08);
+      color: var(--text);
+    }
+
+    .cp-dist-legend-item.dimmed {
+      opacity: 0.35;
+    }
+
+    .cp-dist-legend-item.deselected {
+      color: #66736c;
+      opacity: 0.65;
+    }
+
+    .cp-dist-legend-item.deselected .cp-dist-legend-swatch {
+      background: #66736c !important;
+    }
+
+    .cp-dist-legend-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      flex: 0 0 10px;
+    }
+
+    .cp-dist-tooltip {
+      position: absolute;
+      display: none;
+      min-width: 175px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      background: var(--bg-deep);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      pointer-events: none;
+      z-index: 20;
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .cp-dist-tooltip strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .cp-dist-tooltip div {
+      display: grid;
+      grid-template-columns: repeat(5, auto);
+      gap: 7px;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Round-filter-only unavailable stats.
+       When filtering by played round, in-hand delta, playrate, and seen count
+       are not meaningful because the log does not say in which round a card
+       was drawn or appeared on display. Keep the columns in place, but dim them. */
+    .unavailable-cell {
+      color: #646d67; /* almost grey, with only a faint green tint */
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+    }
+
+    #statsTable.cards-round-filter-active thead th:nth-child(4),
+    #statsTable.cards-round-filter-active thead th:nth-child(6),
+    #statsTable.cards-round-filter-active thead th:nth-child(8) {
+      color: #4f5a53;
+      cursor: not-allowed;
+    }
+
+    #statsTable.cards-round-filter-active thead th:nth-child(4):hover,
+    #statsTable.cards-round-filter-active thead th:nth-child(6):hover,
+    #statsTable.cards-round-filter-active thead th:nth-child(8):hover {
+      color: #4f5a53;
+    }
+
+    #statsTable.cards-round-filter-active thead th:nth-child(4) .sort-arrow,
+    #statsTable.cards-round-filter-active thead th:nth-child(6) .sort-arrow,
+    #statsTable.cards-round-filter-active thead th:nth-child(8) .sort-arrow,
+    #statsTable.cards-round-filter-active thead th:nth-child(4) .col-tip,
+    #statsTable.cards-round-filter-active thead th:nth-child(6) .col-tip,
+    #statsTable.cards-round-filter-active thead th:nth-child(8) .col-tip {
+      opacity: 0.22;
+    }
+
+    /* ── Loading & error states ─────────────────────────────────────────────── */
+    .state-overlay {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 24px;
+      gap: 16px;
+      color: var(--text-muted);
+    }
+
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .state-title {
+      font-family: 'Bitter', serif;
+      font-size: 16px;
+      color: var(--text);
+    }
+
+    .state-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: center;
+      max-width: 300px;
+    }
+
+    .error-icon { font-size: 32px; }
+
+    /* ── Pagination ─────────────────────────────────────────────────────────── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      padding: 14px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-panel);
+    }
+
+    .page-btn {
+      padding: 5px 10px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .page-btn:hover:not(:disabled) {
+      border-color: var(--accent-dim);
+      color: var(--text);
+    }
+
+    .page-btn.active {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .page-info {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 0 6px;
+    }
+
+    /* ── Tooltip for map chips ──────────────────────────────────────────────── */
+    #map-tooltip {
+      position: fixed;
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 11px;
+      font-family: 'Inter', sans-serif;
+      padding: 4px 9px;
+      border-radius: var(--radius);
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 9999;
+      display: none;
+      box-shadow: var(--shadow);
+    }
+
+    /* ── Mobile ─────────────────────────────────────────────────────────────── */
+    .mobile-filter-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .mobile-filter-btn:hover {
+      border-color: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    #col-tooltip .tip-combo {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      white-space: nowrap;
+    }
+
+    #col-tooltip .tip-note {
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    /* Combinations page */
+    .combinations-tabs {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      width: 100%;
+    }
+
+    .combo-meta-short {
+      display: none;
+    }
+    .combinations-tabs .endgames-tab {
+      width: auto;
+      min-width: 0;
+      text-align: center;
+      justify-content: center;
+    }
+    .combinations-table {
+      table-layout: fixed;
+      font-family: 'Inter', sans-serif;
+    }
+    .combinations-pair-table {
+      width: 100%;
+      min-width: 900px;
+    }
+    .combinations-map-table {
+      width: 100%;
+      min-width: 900px;
+    }
+    .combinations-table th,
+    .combinations-table td { text-align: center; }
+    .combinations-pair-table thead th:nth-child(n+4):nth-child(-n+8) {
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+    .combinations-pair-table thead th:nth-child(n+4):nth-child(-n+8) .col-tip {
+      margin-right: 1px;
+    }
+    .combinations-pair-table .combo-card-card-metric-header {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .combinations-pair-table .combo-card-card-metric-header .col-tip,
+    .combinations-pair-table .combo-card-card-metric-header .sort-arrow {
+      margin-left: 0;
+      margin-right: 0;
+    }
+    .combinations-pair-table tbody td {
+      padding-top: 9px;
+      padding-bottom: 9px;
+    }
+    .combinations-table .combination-card-cell {
+      color: var(--text);
+      font-weight: 500;
+    }
+    .combination-card-with-delta { white-space: nowrap; }
+    .combination-card-name {
+      display: block;
+      font: inherit;
+      font-size: 11.5px;
+      font-weight: inherit;
+      white-space: nowrap;
+    }
+
+    /* Preserve readable headers on narrower desktop/tablet viewports. The
+       phone #statsTable rule below remains authoritative at the mobile breakpoint. */
+    .cards-stats-table {
+      min-width: 900px;
+    }
+
+    .endgames-table {
+      min-width: 900px;
+    }
+    .combination-card-delta {
+      display: block;
+      margin-top: 2px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+    }
+    .combinations-table .combination-interaction { font-weight: 700; }
+    .combinations-table .elo-cell {
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 400;
+      font-variant-numeric: tabular-nums;
+      line-height: inherit;
+    }
+    .combination-card-filter-header { cursor: default; }
+    .combination-type-header,
+    .combination-map-filter-header,
+    .combination-round-filter-header { cursor: pointer; }
+    .combination-map-filter-header { cursor: default; }
+
+    .combination-type-header .type-filter-indicator:not(.type-filter-icon) {
+      width: 17px;
+      min-width: 17px;
+      height: 17px;
+    }
+
+    .combination-type-dots {
+      position: relative;
+      display: block;
+      width: 17px;
+      height: 17px;
+    }
+
+    .combination-type-dot {
+      position: absolute;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .combination-type-dots.count-1 .combination-type-dot:nth-child(1) { left: 7px; top: 7px; }
+
+    .combination-type-dots.count-2 .combination-type-dot:nth-child(1) { left: 4px; top: 7px; }
+    .combination-type-dots.count-2 .combination-type-dot:nth-child(2) { left: 10px; top: 7px; }
+
+    .combination-type-dots.count-3 .combination-type-dot:nth-child(1) { left: 1px; top: 7px; }
+    .combination-type-dots.count-3 .combination-type-dot:nth-child(2) { left: 7px; top: 7px; }
+    .combination-type-dots.count-3 .combination-type-dot:nth-child(3) { left: 13px; top: 7px; }
+
+    .combination-type-dots.count-4 .combination-type-dot:nth-child(1),
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(1) { left: 3px; top: 3px; }
+    .combination-type-dots.count-4 .combination-type-dot:nth-child(2),
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(2) { left: 11px; top: 3px; }
+    .combination-type-dots.count-4 .combination-type-dot:nth-child(3),
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(3) { left: 3px; top: 11px; }
+    .combination-type-dots.count-4 .combination-type-dot:nth-child(4),
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(4) { left: 11px; top: 11px; }
+    .combination-type-dots.count-5 .combination-type-dot:nth-child(5) { left: 7px; top: 7px; }
+    .combinations-map-table .combination-context-filter-header {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      line-height: 1;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    .combinations-map-table .combination-context-filter-title {
+      display: inline-flex;
+      align-items: center;
+      line-height: 1;
+    }
+    .combinations-map-table .combination-context-filter-header .combination-map-filter-btn,
+    .combinations-map-table .combination-context-filter-header .sort-arrow {
+      margin-left: 0;
+      flex: 0 0 auto;
+    }
+    .combination-filter-active {
+      color: var(--accent);
+      text-shadow: 0 0 8px var(--accent-glow);
+    }
+    .combination-card-filter-header .card-header-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .card-search-btn.combination-filter-clear {
+      color: #b87970;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .card-search-btn.combination-filter-clear:hover { color: #cf8c82; }
+    .combination-card-filter-header .card-search-btn {
+      width: 22px;
+      height: 22px;
+      margin-left: 0;
+      padding: 2px;
+    }
+    .combination-map-filter-btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      min-height: 18px;
+      margin-left: 3px;
+      padding: 0;
+      border: 0;
+      color: var(--text-dim);
+      background: transparent;
+      cursor: pointer;
+    }
+    .combination-map-filter-btn.search-active { color: var(--accent); }
+    .combination-header-filter-active .combination-context-filter-title,
+    .combination-header-filter-active .combination-map-filter-btn {
+      color: var(--accent-filter);
+      text-shadow: none;
+    }
+    .combination-filter-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 38px;
+      height: 20px;
+      padding: 0 6px;
+      border: 1px solid var(--accent-filter);
+      border-radius: 9px;
+      color: var(--accent-filter);
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1;
+      white-space: nowrap;
+      box-sizing: border-box;
+    }
+    .combination-header-popup {
+      display: none;
+      position: fixed;
+      z-index: 1500;
+      width: 280px;
+      padding: 10px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      background: var(--bg-deep);
+      box-shadow: var(--shadow);
+      text-align: left;
+    }
+    .combination-header-popup.open { display: block; }
+    .combination-card-popup .abilities-search-input {
+      width: 100%;
+      margin-bottom: 8px;
+    }
+    .combination-card-choice-list {
+      max-height: 260px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+    }
+    .combination-card-choice {
+      display: block;
+      width: 100%;
+      padding: 5px 6px;
+      border: 0;
+      border-radius: var(--radius);
+      color: var(--text);
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.35;
+      letter-spacing: 0;
+      text-transform: none;
+      text-align: left;
+      cursor: pointer;
+    }
+    .combination-card-choice:hover { background: var(--bg-hover); }
+    .combination-map-popup { width: 250px; }
+    .combination-popup-actions {
+      margin-bottom: 8px;
+      color: var(--text-muted);
+      font-size: 11px;
+      text-align: right;
+      text-transform: none;
+      font-family: 'Inter', sans-serif;
+      font-weight: 400;
+      letter-spacing: 0;
+    }
+    .combination-map-choice-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 5px;
+    }
+    .combination-map-popup [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 6px);
+      z-index: 3;
+      width: max-content;
+      max-width: 210px;
+      padding: 5px 8px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius);
+      background: var(--bg-deep);
+      box-shadow: var(--shadow);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1.25;
+      letter-spacing: 0;
+      text-align: center;
+      text-transform: none;
+      white-space: normal;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-50%);
+      transition: opacity 0.1s;
+    }
+    .combination-map-popup [data-tooltip]:hover::after { opacity: 1; }
+    .combination-round-choice-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    .combination-type-popup {
+      width: 172px;
+      padding: 8px;
+    }
+    .combination-single-type-popup {
+      width: auto;
+      min-width: 110px;
+      box-sizing: border-box;
+    }
+    .combination-type-popup .chip { padding-left: 9px; padding-right: 9px; }
+    .combination-type-popup.open { display: grid; gap: 5px; }
+    .combination-type-popup .combination-popup-actions {
+      justify-content: flex-start;
+      padding: 0 2px 2px;
+    }
+    .combinations-pair-table tbody td:nth-child(9) {
+      padding-left: 6px;
+      padding-right: 6px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    .combination-type-badge {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-width: 70px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1.08;
+      letter-spacing: 0;
+      box-sizing: border-box;
+    }
+    .combination-type-part {
+      display: block;
+      width: 100%;
+      padding: 3px 3px;
+      border: 0;
+      border-radius: 0;
+      text-align: center;
+      box-sizing: border-box;
+    }
+    .combination-type-separator {
+      display: block;
+      width: 100%;
+      border-top: 1px solid rgba(238, 246, 241, 0.28);
+      flex: 0 0 auto;
+    }
+
+
+    .filter-btn-icon {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+      display: block;
+      fill: currentColor;
+    }
+
+    /* Sidebar close button (X) */
+    .sidebar-close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: var(--radius);
+      transition: color 0.15s, background 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .sidebar-close-btn:hover {
+      color: var(--text);
+      background: var(--bg-hover);
+    }
+
+    /* Lighter green highlight for the Filters toggle button */
+    .filter-toggle-highlight {
+      border-color: var(--accent-dim);
+      color: var(--accent);
+    }
+
+    .filter-toggle-highlight:hover {
+      background: var(--accent-dim);
+      color: var(--text);
+    }
+
+    @media (max-width: 768px) {
+      .topbar { padding: 0 16px; }
+      .wm-ark, .wm-nova { font-size: 17px; }
+      .wm-rhino svg { width: 18px; height: 21px; }
+      .wm-stats { font-size: 7px; letter-spacing: 0.28em; }
+      .main { padding: 12px; overflow-x: hidden; }
+      th, td { padding: 8px 6px; font-size: 12px; }
+      .main:has(.home-wrap) {
+        padding: 10px;
+        overflow: visible;
+      }
+      .home-wrap {
+        height: auto;
+        justify-content: flex-start;
+        padding: 0;
+        gap: 8px;
+      }
+      .home-pop-row {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto auto auto;
+        gap: 8px;
+        flex: none;
+        height: auto;
+      }
+      /* On mobile, hero spans full width at top of each population block */
+      .home-pop-row .ht--hero {
+        grid-column: 1 / -1;
+      }
+      .ht__value { font-size: 16px; }
+      /* Tablets keep the same percentage-based column widths as desktop. */
+    }
+
+    /* Phone-only refinements: keep tablet/desktop layout unchanged.
+       IMPORTANT: This breakpoint is where the phone table becomes horizontally scrollable.
+       Tablet deliberately keeps desktop-like percentage widths. */
+    @media (max-width: 600px) {
+      :root {
+        --side-nav-width: 84px; /* Mobile nav rail width */
+        --side-nav-gap: 10px;   /* Phone gap between nav rail and main content */
+      }
+
+      .topbar {
+        height: 52px;
+        padding: 0 10px;
+        gap: 8px;
+      }
+
+      .side-nav {
+        top: 52px;
+        width: var(--side-nav-width);
+        padding: 0px 0px; /* Completely removed top padding on mobile */
+        gap: 0px;
+        transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: visible; /* allow the toggle tab to poke out */
+        z-index: 180;
+      }
+
+      /* Phone navigation overlays the page like the filter drawer; opening it
+         must not resize or shift the table underneath. */
+      .layout { margin-left: 0; }
+
+      /* Exception: Home keeps the rail permanently expanded (see
+         .nav-home-locked), so it can no longer act like a temporary overlay
+         there — content must actually make room for it instead of sitting
+         underneath it. */
+      .side-nav.nav-home-locked ~ .layout {
+        margin-left: calc(var(--side-nav-width) + var(--side-nav-gap));
+      }
+
+      .side-nav-scroll-area {
+        gap: 0;
+      }
+
+      .side-nav-scroll-btn {
+        height: 16px;
+      }
+
+      /* Toggle tab that sticks out from the right edge of the nav */
+      .nav-collapse-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        right: -21px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 21px;
+        height: 60px;
+        background: #050d0c;
+        border: 1px solid rgba(52, 211, 153, 0.25);
+        border-left: none;
+        border-radius: 0 6px 6px 0;
+        color: var(--accent);
+        font-size: 15px;
+        cursor: pointer;
+        z-index: 96;
+        transition: background 0.15s, color 0.15s;
+        line-height: 1;
+        padding: 0;
+      }
+
+      .nav-collapse-btn:hover {
+        background: var(--bg-hover);
+        color: var(--accent-bright);
+      }
+
+      /* Home page: nav rail stays fully expanded and non-collapsible, so the
+         toggle tab that opens/closes it is hidden entirely on mobile. */
+      .side-nav.nav-home-locked .nav-collapse-btn {
+        display: none;
+      }
+
+      .nav-divider {
+        margin: 0px 10px; /* Slightly tighter inset margins on mobile */
+      }
+
+      /* Collapsed nav: fully hidden, only the toggle tab remains */
+      .side-nav.nav-collapsed {
+        width: 0;
+      }
+
+      .side-nav.nav-collapsed .nav-divider,
+      .side-nav.nav-collapsed .side-nav-link {
+        display: none;
+      }
+
+      /* Compact horizontal rectangular element configuration on mobile */
+      .side-nav-link {
+        height: 50px; /* Locked height of rectangular mobile cells */
+        font-size: 8px; /* Micro text scale */
+        letter-spacing: 0.05em;
+        gap: 4px; /* Reduced layout spacing to maximize vertical breathing room */
+        line-height: 1.25;
+      }
+
+      .nav-icon {
+        width: 16px; /* Scaled icon optimized for the 50px mobile height boundary */
+        height: 16px;
+      }
+
+      .nav-icon-actions {
+        width: 38px;
+        height: 18px;
+        stroke-width: 1;
+      }
+
+      .nav-icon-build {
+        width: 20px;
+        height: 17px;
+      }
+
+      .wm-ark, .wm-nova { font-size: 14px; }
+
+      .wm-rhino { margin: 0 3px; }
+
+      .wm-rhino svg { width: 15px; height: 18px; }
+
+      .wm-stats { font-size: 6px; letter-spacing: 0.24em; }
+
+      .topbar-left {
+        gap: 6px;
+      }
+
+
+      /* Compact MW/Base segmented switch for narrow phone screens. */
+      .tabs {
+        width: 88px;
+        height: 30px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2px;
+        padding: 2px;
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        flex-shrink: 0;
+      }
+
+      .tab-btn {
+        height: 24px;
+        min-width: 0;
+        padding: 0;
+        border: none;
+        border-radius: 999px;
+        background: transparent;
+        font-size: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .tab-btn::after {
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+      }
+
+      .tab-mw::after { content: 'MW'; }
+      .tab-base::after { content: 'Base'; }
+
+      .mobile-filter-btn {
+        padding: 6px 9px;
+        gap: 4px;
+        font-size: 12px;
+        flex-shrink: 0;
+      }
+
+      .main { padding: 12px 10px; }
+
+      /* Phone-only main controls: compact single row with result count, minimum plays, and rows selector.
+         Search stays in the Card table header on all screen sizes. */
+      .main-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: nowrap;
+        gap: 8px;
+        margin-bottom: 14px;
+        padding: 0;
+      }
+
+      .main-header > .table-meta {
+        min-width: 0;
+        flex: 1 1 auto;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .main-header .meta-prefix { display: none; }
+      .combo-meta-full { display: none; }
+      .combo-meta-short { display: inline; }
+
+      .main-header > .main-controls {
+        display: flex !important;
+        align-items: center;
+        justify-content: flex-end;
+        flex: 0 0 auto;
+        gap: 9px;
+        flex-wrap: nowrap;
+      }
+
+      /* Phone override for Minimum plays.
+         Keep this separate from desktop/tablet positioning: the desktop nudge
+         would squeeze the compact phone row, so transform is reset here. */
+      .main-header .min-plays-wrap {
+        gap: 5px;
+        transform: none;
+      }
+      .main-header .min-plays-label { font-size: 11px; }
+      .min-plays-label-full { display: none; }
+      .min-plays-label-short { display: inline; }
+
+    .main-header .min-plays-input {
+        width: 34px;
+        padding: 5px 4px;
+        font-size: 12px;
+      }
+
+      .main-header .rpp-wrap {
+        gap: 5px;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .main-header .rpp-select {
+        font-size: 12px;
+        padding: 5px 6px;
+      }
+
+      .table-wrap {
+        width: 100%;
+      }
+
+      .table-scroll {
+        overflow-x: auto;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      /* Phone table is intentionally wider than the viewport.
+         This enables horizontal scrolling while keeping columns readable. */
+      #statsTable {
+        width: 900px;
+        min-width: 900px;
+      }
+
+      #statsTable.maps-table {
+        width: 900px !important;
+        min-width: 900px !important;
+        max-width: none !important;
+      }
+
+      #statsTable.icons-table {
+        width: 900px !important;
+        min-width: 900px !important;
+        max-width: none !important;
+      }
+
+      #statsTable th,
+      #statsTable td {
+        padding: 8px 5px;
+      }
+
+      #statsTable th {
+        font-size: 9px;
+        letter-spacing: 0.035em;
+      }
+
+      #statsTable td {
+        font-size: 11px;
+      }
+
+      #statsTable .type-badge {
+        padding: 2px 6px;
+        font-size: 10px;
+        letter-spacing: 0.025em;
+      }
+
+      #statsTable .card-name {
+        font-size: 11.5px;
+        line-height: 1.35;
+      }
+
+      #statsTable .delta {
+        font-size: 11.5px;
+      }
+
+      /* Phone-only column widths.
+         These nth-child selectors depend on the exact table order:
+         1 #, 2 Card, 3 Δ In Hand, 4 Δ Played, 5 Elo, 6 Playrate, 7 Played, 8 Seen, 9 Type. */
+      #statsTable th:nth-child(1), #statsTable td:nth-child(1) { width: 40px !important; }
+      #statsTable th:nth-child(2), #statsTable td:nth-child(2) { width: 110px !important; }
+      #statsTable th:nth-child(3), #statsTable td:nth-child(3) { width: 100px !important; }
+      #statsTable th:nth-child(4), #statsTable td:nth-child(4) { width: 100px !important; }
+      #statsTable th:nth-child(5), #statsTable td:nth-child(5) { width: 60px !important; }
+      #statsTable th:nth-child(6), #statsTable td:nth-child(6) { width: 115px !important; }
+      #statsTable th:nth-child(7), #statsTable td:nth-child(7) { width: 80px !important; }
+      #statsTable th:nth-child(8), #statsTable td:nth-child(8) { width: 80px !important; }
+      #statsTable th:nth-child(9), #statsTable td:nth-child(9) { width: 70px !important; }
+
+      .sort-arrow {
+        margin-left: 2px;
+        font-size: 8px;
+      }
+
+      .col-tip {
+        font-size: 8px;
+        margin-left: 1px;
+        margin-right: 1px;
+      }
+
+      .playrate-cell {
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .playrate-val {
+        flex-basis: 46px;
+        font-size: 10px;
+        min-width: 46px;
+        width: 46px;
+      }
+
+      /* Keep the slide-in filter panel compact on phones. */
+      .sidebar {
+        padding-top: 20px;
+      }
+
+      /* Phone horizontal scrolling: keep only # and Card fixed.
+         Type now sits to the right of Card and scrolls with the other stats. */
+      #statsTable {
+        border-collapse: separate;
+        border-spacing: 0;
+        --phone-rank-left: 0px;
+        --phone-card-left: 40px;
+      }
+
+      /* Force the sticky mobile column widths to the exact same values
+         that are used for the sticky left offsets. */
+      #statsTable th:nth-child(1),
+      #statsTable td:nth-child(1) {
+        width: 40px !important;
+        min-width: 40px !important;
+        max-width: 40px !important;
+      }
+
+      #statsTable th:nth-child(2),
+      #statsTable td:nth-child(2) {
+        width: 110px !important;
+        min-width: 110px !important;
+        max-width: 110px !important;
+      }
+
+      /* Sticky header row. Putting sticky on the th itself is more reliable
+         than sticky on the whole thead when the table also scrolls sideways. */
+      #statsTable thead {
+        position: static;
+      }
+
+      #statsTable thead th {
+        position: sticky;
+        top: 0;
+        background: var(--bg-surface);
+        z-index: 40;
+      }
+
+      #statsTable thead th.type-filter-header {
+        position: sticky;
+      }
+
+      /* Sticky first two columns only: # and Card. */
+      #statsTable th:nth-child(1),
+      #statsTable td:nth-child(1),
+      #statsTable th:nth-child(2),
+      #statsTable td:nth-child(2) {
+        position: sticky !important;
+        background: var(--bg-panel);
+      }
+
+      #statsTable th:nth-child(1),
+      #statsTable td:nth-child(1) {
+        left: var(--phone-rank-left);
+      }
+
+      #statsTable th:nth-child(2),
+      #statsTable td:nth-child(2) {
+        left: var(--phone-card-left);
+        box-shadow: 3px 0 0 var(--border);
+      }
+
+      /* Top-left sticky cells need to sit above both the horizontal-scrolling
+         header cells and the vertical body cells, otherwise header text can
+         appear to slide through them while scrolling. */
+      #statsTable thead th:nth-child(1),
+      #statsTable thead th:nth-child(2) {
+        top: 0;
+        background: var(--bg-surface);
+        z-index: 80;
+      }
+
+      #statsTable tbody td:nth-child(1),
+      #statsTable tbody td:nth-child(2) {
+        background: var(--bg-panel);
+        z-index: 30;
+      }
+
+      #statsTable tbody tr:hover td:nth-child(1),
+      #statsTable tbody tr:hover td:nth-child(2) {
+        background: var(--bg-hover);
+      }
+
+      #statsTable:has(tbody .rank-cell) th:nth-child(1),
+      #statsTable:has(tbody .rank-cell) td.rank-cell {
+        display: none !important;
+      }
+
+      #statsTable:has(tbody .rank-cell) th:nth-child(2),
+      #statsTable:has(tbody .rank-cell) td:nth-child(2) {
+        left: 0 !important;
+      }
+
+      /* Maps and Combos need every data column to scroll normally on phones.
+         Keep the header row vertically sticky, but remove horizontal freezing. */
+      #statsTable.maps-table th:nth-child(1),
+      #statsTable.maps-table th:nth-child(2),
+      #statsTable.combinations-table th:nth-child(1),
+      #statsTable.combinations-table th:nth-child(2) {
+        left: auto !important;
+        box-shadow: none;
+      }
+
+      #statsTable.maps-table td:nth-child(1),
+      #statsTable.maps-table td:nth-child(2),
+      #statsTable.combinations-table td:nth-child(1),
+      #statsTable.combinations-table td:nth-child(2) {
+        position: static !important;
+        left: auto !important;
+        box-shadow: none;
+      }
+
+      /* ── Attributes bar: mobile layout ────────────────────────────────────
+         Keep the desktop toolbar shape, but force one horizontal row and let it
+         scroll sideways. This keeps the table visible instead of pushing it down. */
+
+      .attributes-bar-body {
+        flex-wrap: nowrap;
+        align-items: flex-start;
+        gap: 16px 22px;
+        padding: 16px;
+        overflow-x: auto;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-light) transparent;
+    }
+
+      .attributes-bar-body::-webkit-scrollbar {
+        height: 6px;
+      }
+
+      .attributes-bar-body::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .attributes-bar-body::-webkit-scrollbar-thumb {
+        background: var(--border-light);
+        border-radius: 3px;
+      }
+
+      .attr-group {
+        flex: 0 0 auto;
+      }
+
+      .attr-chip-row {
+        flex-wrap: nowrap;
+      }
+
+      .attr-chip-row .chip {
+        flex: 0 0 auto;
+      }
+
+      .attr-separator {
+        flex: 0 0 auto;
+      }
+    }
+
+    @keyframes minimum-plays-attention {
+      0%, 100% { border-color: var(--border); box-shadow: none; }
+      50% {
+        border-color: var(--accent-filter);
+        box-shadow: 0 0 0 2px rgba(158, 223, 194, 0.14), 0 0 12px rgba(158, 223, 194, 0.42);
+      }
+    }
+
+    .min-plays-input.minimum-plays-warning {
+      animation: minimum-plays-attention 1.35s ease-in-out infinite;
+    }
+
+    /* Overlay for mobile sidebar */
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 190;
+    }
+
+    .sidebar-overlay.active { display: block; }
+.players-table-wrap.players-updating {
+  opacity: 0.58;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.tab-btn.dataset-locked-out,
+.filter-toggle-highlight.filter-button-disabled {
+  opacity: .36;
+  filter: saturate(.25);
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .players-arena-graph-shell {
+    grid-template-columns: minmax(680px, 1fr) 220px;
+    overflow-x: auto;
+  }
+
+  .players-arena-season-control label {
+    display: none;
+  }
+
+  .players-arena-table-wrap,
+  .players-arena-table-wrap .table-scroll {
+    max-height: calc(100vh - 198px);
+  }
+}
