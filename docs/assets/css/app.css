@@ -3788,6 +3788,16 @@
       align-items: center;
     }
 
+    .records-full-leaderboard-link,
+    .records-full-leaderboard-link:link,
+    .records-full-leaderboard-link:visited,
+    .records-full-leaderboard-link:hover,
+    .records-full-leaderboard-link:active,
+    .records-full-leaderboard-link:focus {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
     .records-tabs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
     .records-tabs .endgames-tab { flex: 1 1 20%; min-width: 0; text-align: center; }
     .records-table-wrap { max-height: calc(100vh - 185px); display: flex; flex-direction: column; }
