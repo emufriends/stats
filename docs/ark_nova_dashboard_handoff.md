@@ -273,7 +273,7 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, Build, Conservation, Workers, Players, and Records. Home has no rail item; the topbar logo links to it. Build routes to `#/build`; Conservation routes to `#/conservation`; Workers routes to `#/workers`; Players routes to `#/players`; Records routes to `#/records`. Scoring occupies a non-clickable placeholder position between Conservation and Workers. Scoring and the MW Action Cards entry are placeholders; Records has two placeholder views and three active views, and all Players views are active.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, Build, Conservation, Scoring, Workers, Players, and Records. Home has no rail item; the topbar logo links to it. Scoring is active at `#/scoring` between Conservation and Workers. Only MW Action Cards remains a placeholder; all Records and Players views are active.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Rail icons are either complete inline `<svg>...</svg>` elements or the Build PNG mask span. Keep every inline SVG wrapper balanced when reordering nav items; paths/circles outside an opening SVG are silently discarded by the browser.
 - Header topbar includes:
@@ -851,12 +851,137 @@ Be careful with backend changes:
 - Update scheduler daily refresh to include new page snapshots.
 - Ensure all new maintenance paths require token.
 
+## Conservation page (current behavior)
+
+The Conservation route is `#/conservation`, with `stats_page: "conservation"`
+and `conservation_view: "projects" | "project_rewards" | "cp_rewards"`.
+Conservation Points are Ark Nova's green scoring track. Completing a
+conservation project through the Association action increases the tracked
+project count; releasing an animal is a special kind of conservation project.
+The Projects tab can therefore compare two related but distinct Full Sample
+fields without changing its table structure:
+
+- `Projects` uses `Conservation_project_association_tasks`.
+- `Releases` uses `Released_animals`.
+
+The Projects snapshot carries both populations in one `data` array. Every row
+has `subject: "projects" | "releases"` and `count_value` from 0 through 7.
+Seven is the gameplay maximum represented by this analysis. A null, malformed,
+negative, or greater-than-seven count is excluded from that subject's
+denominator. This matters because the same player-game may be valid for one
+subject and invalid for the other; their denominators are intentionally
+independent. Both subjects hard-filter to non-conceded tables.
+
+For each subject/count/map, Delta is the mean `elo_delta` among player-games
+with exactly that count. Frequency is `exact-count observations / all valid
+scoped observations`, calculated separately per map and across all maps. The
+Projects/Releases, Raw/vs. avg, and Elo Delta/Frequency controls are all local:
+they never trigger another request. In `vs. avg`, each map displays its map
+value minus that row's all-map `Avg`; `Avg` remains the raw reference. Delta
+map cells use the normal Delta scale and CI/1,000-observation rules. Delta Avg
+uses the separate orange-green Avg scale and matching CI metadata. Frequency
+map cells use the fixed 0-50% blue scale and exact numerator/denominator hover;
+Frequency Avg is violet. Only numerical Frequency cells use the one-pixel
+smaller body font.
+
+The shared snapshot paths remain:
+
+```text
+card-stats/conservation/projects/default-{mw|base}.json
+card-stats/conservation/project-rewards/default-{mw|base}.json
+card-stats/conservation/cp-rewards/default-{mw|base}.json
+```
+
+The Projects path includes both Projects and Releases; there is deliberately no
+second Releases asset. Filter-bar Elo, maps, and date predicates apply before
+both subjects are aggregated.
+
+## Scoring page (current behavior)
+
+The active Scoring route is `#/scoring`. Its backend interface is
+`stats_page: "scoring"` and `scoring_view: "final_score" | "appeal" |
+"conservation_points" | "reputation"`. The four equal-width tabs describe the
+four end-of-game tracks: Final score, Appeal, Conservation points, and
+Reputation. Every Scoring observation must satisfy both
+`table_conceded = 0` and `end_game_triggered = TRUE`. The first predicate uses
+the dashboard-wide table-level concession definition; the second is an
+additional Scoring eligibility rule proving that these final-track values came
+from a triggered endgame. It does not redefine "completed game" elsewhere.
+
+The sidebar has Player Elo, Opponent Elo, and Date Range only. Defaults are
+300+, 300+, and 2025-01-01 onward. Every table has the Build/Hexes map grid:
+the value bucket is 10%, each of the 15 maps is 5.5%, and Avg is 7.5%, on the
+shared 900px table canvas. Rows have fixed gameplay order and are not sortable.
+
+Each response contains collapsed `data` and exact `expanded_data`, so
+Raw/vs. avg, Elo Delta/Frequency, and expansion are browser-only operations.
+`vs. avg` is `map value - row Avg`; Avg remains raw. Each bucket/map returns the
+Delta mean, observation count, CI fields, Frequency numerator, and valid-value
+denominator. Delta map cells use the normal Delta/CI/insufficient-data rules;
+Delta Avg uses the orange-green Avg scale and matching CI scale. Frequency map
+cells use blue with a 0-50% domain while collapsed and 0-20% while expanded;
+the displayed number and numerator/denominator tooltip are never clamped.
+Frequency Avg is violet. Numerical Frequency cells are one pixel smaller. The
+compact arrow is attached below the framed table and swaps row sets locally.
+Reputation has no arrow because both row sets are already exact and identical.
+
+Bucket contracts are exact:
+
+- Final score collapsed: `<100`, `100-109`, `110-119`, `120-129`,
+  `130-139`, `140-149`, `150+`; expanded: `<100`, each integer 100-149,
+  `150+` (7/52 rows).
+- Appeal collapsed: `<40`, decade buckets 40-99, `100-112`, `113`;
+  expanded: `<40` and each integer 40-113 (9/75 rows).
+- Conservation points collapsed: `0-10`, then five-point buckets through
+  `36-40`, and `41`; expanded: each integer 0-41 (8/42 rows).
+- Reputation: each integer 1-15 in both modes (15 rows).
+
+Null/non-numeric values never enter a denominator. Appeal must be 0-113,
+Conservation 0-41, and Reputation 1-15. Score deliberately has open lower and
+upper tails because `<100` and `150+` are valid buckets. For example, Score 99
+belongs to `<100`, 100 belongs to `100-109` or exact `100`, 149 belongs to
+`140-149` or exact `149`, and 150 belongs to `150+`. Appeal 113 and
+Conservation 41 are explicit maximum rows.
+
+Default snapshots are:
+
+```text
+card-stats/scoring/final-score/default-{mw|base}.json
+card-stats/scoring/appeal/default-{mw|base}.json
+card-stats/scoring/conservation-points/default-{mw|base}.json
+card-stats/scoring/reputation/default-{mw|base}.json
+```
+
+All eight assets are refreshed daily and included in default-pack schema 5.
+The backend reads the source Full Sample through the backend-owned prepared
+table, performs the aggregations, and writes derived snapshots. Source BigQuery
+tables remain read-only.
+
 ## Records page (current behavior)
 
 The Records route is `#/records` and is backed by `stats_page: "records"` with
 `records_view` set to one of `elo_leaderboard`, `fastest_games`,
-`highest_scores`, `biggest_turns`, or `most_icons`. Elo leaderboard is the only
-placeholder; the other four views are functional.
+`highest_scores`, `biggest_turns`, or `most_icons`. All five views are
+functional.
+
+`elo_leaderboard` is the default Records parser and frontend view. Its header
+message always reads `Top 100 players (for full leaderboard, click here).`,
+with `here` opening `https://emufriends.pet/leaderboard` in a new tab. Local
+player search may narrow the displayed rows, but the message continues to
+describe the underlying Top 100 source.
+
+Elo Leaderboard is a dataset-neutral static view sourced from the public
+Google Sheet `1NG3FPP70riMzhHPJ6Suz30bhJxUocFd_rKDKxn0kZbM`, worksheet
+`Masters`. The daily refresh reads country from column B, player from C, Peak
+Elo from F, and Peak Arena from H. Rows are validated, sorted by Peak Elo
+descending, truncated to the Top 100, and assigned permanent displayed ranks
+1–100. Blank Peak Arena values display as `n/a`. Country codes render through
+the dashboard's FlagCDN flag treatment with accessible country names. The
+sheet has no MW/Base field, so the identical validated leaderboard is published
+under both dataset paths; switching MW/Base does not change it. The table is
+not sortable and does not query BigQuery. The frontend treats the two paths as
+one shared dataset-neutral payload and reuses the same cached table when the
+global MW/Base switch changes.
 
 Automatic Records rows are individual player-game observations from the
 backend-owned `full_stats_prepared` table. Fastest Games also unions manually
@@ -967,16 +1092,25 @@ Records widths are view-specific: Fastest and Highest use Player 20% and EPT
 10%; Most Icons uses Player 20% and ID 15%; Biggest Turns uses the exact widths
 documented above.
 
+Records player search inputs use a dashboard-owned clear button. Browser-native
+search cancel controls are disabled so that a second, browser-colored X is not
+shown beside the dashboard control. In Arena Top 100, the active sortable header
+uses the accent color for both the complete header text and its sort arrow.
+
 Complete Records payloads are written daily under:
 
 ```text
+card-stats/records/elo-leaderboard/default-{mw|base}.json
 card-stats/records/fastest-games/default-{mw|base}.json
 card-stats/records/highest-scores/default-{mw|base}.json
 card-stats/records/biggest-turns/default-{mw|base}.json
 card-stats/records/most-icons/default-{mw|base}.json
 ```
 
-All eight assets participate in the atomic default snapshot pack. Each row
+All ten assets participate in the atomic default snapshot pack. The Elo
+Leaderboard source is cached separately as a last-known-good validated source;
+a temporary Google Sheets delivery or validation failure reuses that source and
+does not publish a partial leaderboard. Each remaining row
 carries `opponent_elo`, `source_enriched`, `is_arena`, `is_tournament`, and the
 available sheet `source_row`, in addition to the displayed fields. The browser
 loads a view snapshot once and performs Player, Maps, Opponent Elo, Date Range,

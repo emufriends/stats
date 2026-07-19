@@ -77,7 +77,13 @@ export const PAGES = {
     id: 'conservation',
     title: 'Conservation',
     navLabel: 'Conservation',
-    load: () => import('./pages/conservation.js?v=20260712-5'),
+    load: () => import('./pages/conservation.js?v=20260719-1'),
+  },
+  scoring: {
+    id: 'scoring',
+    title: 'Scoring',
+    navLabel: 'Scoring',
+    load: () => import('./pages/scoring.js?v=20260719-1'),
   },
   workers: {
     id: 'workers',
@@ -89,12 +95,12 @@ export const PAGES = {
     id: 'players',
     title: 'Players',
     navLabel: 'Players',
-    load: () => import('./pages/players.js?v=20260715-2'),
+    load: () => import('./pages/players.js?v=20260718-1'),
   },
   records: {
     id: 'records',
     title: 'Records',
     navLabel: 'Records',
-    load: () => import('./pages/records.js?v=20260716-4'),
+    load: () => import('./pages/records.js?v=20260719-1'),
   },
 };

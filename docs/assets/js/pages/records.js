@@ -1,4 +1,4 @@
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260716-4';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260719-1';
 import { mapTooltipLabel } from '../table-cells.js?v=20260712-4';
 
 export const id = 'records';
@@ -7,6 +7,7 @@ export const navLabel = 'Records';
 
 const API_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records';
 const API_VIEWS = {
+  elo_leaderboard: 'elo-leaderboard',
   fastest_games: 'fastest-games',
   highest_scores: 'highest-scores',
   biggest_turns: 'biggest-turns',
@@ -66,7 +67,7 @@ export const mainHtml = `
   </div>
   <div class="attributes-bar endgames-tabs-bar records-tabs-bar">
     <div class="attributes-bar-header endgames-tabs-header"><div class="endgames-tabs records-tabs" role="tablist" aria-label="Records views">
-      ${Object.entries(VIEWS).map(([view, label], index) => `<button class="endgames-tab${index === 1 ? ' active' : ''}" type="button" data-view="${view}" onclick="setRecordsView('${view}')">${label}</button>`).join('')}
+      ${Object.entries(VIEWS).map(([view, label], index) => `<button class="endgames-tab${index === 0 ? ' active' : ''}" type="button" data-view="${view}" onclick="setRecordsView('${view}')">${label}</button>`).join('')}
     </div></div>
   </div>
   <div class="table-wrap records-table-wrap"><div class="table-scroll"><table id="recordsTable" class="records-table"><thead id="recordsHead"></thead><tbody id="recordsBody"><tr><td colspan="8"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching records...</div></div></td></tr></tbody></table></div><div class="pagination" id="recordsPagination" style="display:none;"></div></div>`;
@@ -85,7 +86,7 @@ export const sidebarHtml = `
 
 let mounted = false;
 let isMW = 1;
-let view = 'fastest_games';
+let view = 'elo_leaderboard';
 let selectedMaps = DEFAULT_MAPS.map(([, full]) => full);
 let selectedPlayer = '';
 let playerSearch = '';
@@ -113,7 +114,7 @@ export function mount({ dataset = 1 } = {}) {
   Object.assign(window, handlers);
   mounted = true;
   isMW = Number(dataset) === 0 ? 0 : 1;
-  view = 'fastest_games';
+  view = 'elo_leaderboard';
   selectedMaps = DEFAULT_MAPS.map(([, full]) => full);
   selectedPlayer = '';
   playerSearch = '';
@@ -141,6 +142,13 @@ export function unmount() {
 
 export function setDataset(dataset) {
   isMW = Number(dataset) === 0 ? 0 : 1;
+  // The Elo Leaderboard is sourced from one dataset-neutral Masters sheet.
+  // Keep the visible table stable when the global MW/Base switch changes.
+  if (view === 'elo_leaderboard' && rows.length) {
+    renderHead();
+    renderBody();
+    return;
+  }
   loadRecords(++requestToken);
 }
 
@@ -162,7 +170,6 @@ function setRecordsView(next) {
   if (view === 'elo_leaderboard') {
     rows = [];
     renderBody();
-    return;
   }
   loadRecords(++requestToken);
 }
@@ -240,8 +247,11 @@ function renderHead() {
   if (!head) return;
   const table = document.getElementById('recordsTable');
   table?.classList.toggle('records-biggest-turns-table', view === 'biggest_turns');
+  table?.classList.toggle('records-elo-leaderboard-table', view === 'elo_leaderboard');
   const search = renderPlayerSearchMarkup();
-  if (view === 'most_icons') {
+  if (view === 'elo_leaderboard') {
+    head.innerHTML = `<tr><th style="width:10%">Rank</th><th style="width:15%">Country</th><th class="records-player-header" style="width:40%">${search}</th><th style="width:17.5%">Peak Elo</th><th style="width:17.5%">Peak Arena</th></tr>`;
+  } else if (view === 'most_icons') {
     head.innerHTML = `<tr><th style="width:5%">n</th><th style="width:10%">${renderIconFilterMarkup()}</th><th style="width:20%">${search}</th><th style="width:10%">Turns</th><th style="width:10%">Score</th><th style="width:20%">Map</th><th style="width:15%">ID</th><th style="width:10%">Date</th></tr>`;
   } else if (view === 'biggest_turns') {
     head.innerHTML = `<tr><th style="width:6%">Flat</th><th style="width:6%">End</th><th style="width:6%">Total</th><th class="records-player-header" style="width:18%">${search}</th><th style="width:6%">Score</th><th style="width:6%">Turns</th><th style="width:15%">Map</th><th style="width:6%">Move</th><th style="width:6%">Actions</th><th style="width:15%">ID</th><th style="width:10%">Date</th></tr>`;
@@ -264,13 +274,22 @@ function renderBody() {
   const body = document.getElementById('recordsBody');
   if (!body) return;
   const meta = document.getElementById('recordsMeta');
+  const filteredRows = filteredRecordsRows();
   if (view === 'elo_leaderboard') {
-    if (meta) meta.textContent = '';
-    body.innerHTML = `<tr><td colspan="${recordsColumnCount()}"><div class="state-overlay"><div class="state-title">This Records view is reserved for a future leaderboard.</div></div></td></tr>`;
-    renderPagination(0);
+    if (meta) meta.innerHTML = 'Top 100 players (for full leaderboard, click <a href="https://emufriends.pet/leaderboard" target="_blank" rel="noopener noreferrer">here</a>).';
+    if (!filteredRows.length) {
+      body.innerHTML = `<tr><td colspan="${recordsColumnCount()}"><div class="state-overlay"><div class="state-title">No matching players</div></div></td></tr>`;
+      renderPagination(0);
+      return;
+    }
+    const pageSize = rowsPerPage >= 9999 ? filteredRows.length : rowsPerPage;
+    const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+    currentPage = Math.min(Math.max(1, currentPage), totalPages);
+    const pageRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    body.innerHTML = pageRows.map(row => `<tr><td>${whole(row.rank)}</td><td class="records-country-cell">${countryCodeToFlag(row.country)}</td><td>${escapeHtml(row.player)}</td><td>${two(row.peak_elo)}</td><td>${row.peak_arena == null ? 'n/a' : whole(row.peak_arena)}</td></tr>`).join('');
+    renderPagination(totalPages);
     return;
   }
-  const filteredRows = filteredRecordsRows();
   if (meta) meta.textContent = `${filteredRows.length.toLocaleString('en-US')} game${filteredRows.length === 1 ? '' : 's'}`;
   if (!filteredRows.length) {
     body.innerHTML = `<tr><td colspan="${recordsColumnCount()}"><div class="state-overlay"><div class="state-title">No matching games</div><div class="state-sub">Try changing the filters.</div></div></td></tr>`;
@@ -337,6 +356,7 @@ function renderError(error) {
 }
 
 function recordsColumnCount() {
+  if (view === 'elo_leaderboard') return 5;
   if (view === 'biggest_turns') return 11;
   if (view === 'most_icons') return 8;
   return 7;
@@ -364,6 +384,7 @@ function compareText(a, b) {
 }
 
 function compareRecordRows(a, b) {
+  if (view === 'elo_leaderboard') return compareNumber(a.rank, b.rank, 'asc');
   if (view === 'fastest_games') {
     return compareNumber(a.turns, b.turns, 'asc') || compareNumber(a.score, b.score) || compareText(a.player, b.player) || compareText(a.table_id, b.table_id);
   }
@@ -377,6 +398,11 @@ function compareRecordRows(a, b) {
 }
 
 function filteredRecordsRows() {
+  if (view === 'elo_leaderboard') {
+    return rows
+      .filter(row => !selectedPlayer || row.player === selectedPlayer)
+      .sort(compareRecordRows);
+  }
   const opponentMin = numericOrNull(document.getElementById('opponentEloMin')?.value) ?? 0;
   const opponentMax = numericOrNull(document.getElementById('opponentEloMax')?.value);
   const dateFrom = document.getElementById('recordsDateFrom')?.value.trim() || '';
@@ -424,15 +450,15 @@ function validateDateRange() {
 }
 
 async function loadRecords(token) {
-  if (!mounted || view === 'elo_leaderboard') return;
+  if (!mounted) return;
   requestController?.abort();
   requestController = new AbortController();
-  renderLoading();
   try {
-    const dataset = isMW ? 'mw' : 'base';
-    const cacheKey = `${view}:${dataset}`;
+    const dataset = view === 'elo_leaderboard' ? 'mw' : (isMW ? 'mw' : 'base');
+    const cacheKey = view === 'elo_leaderboard' ? `${view}:shared` : `${view}:${dataset}`;
     let payload = snapshotRows.get(cacheKey);
     if (!payload) {
+      renderLoading();
       payload = await loadSnapshot(`${API_ROOT}/${API_VIEWS[view]}/default-${dataset}.json`);
       snapshotRows.set(cacheKey, payload);
     }
@@ -527,7 +553,7 @@ function onRecordsPlayerInput(value) {
   playerSearch = String(value || '');
   selectedPlayer = '';
   if (playerSearch.trim().length < 3) { closeSuggestions(); return; }
-  void ensurePlayerIndex().then(() => renderSuggestions());
+  if (view !== 'elo_leaderboard') void ensurePlayerIndex().then(() => renderSuggestions());
   renderSuggestions();
 }
 
@@ -536,7 +562,9 @@ function renderSuggestions() {
   if (!input || playerSearch.trim().length < 3) { closeSuggestions(); return; }
   let host = document.getElementById('recordsPlayerSuggestions');
   if (!host) { host = document.createElement('div'); host.id = 'recordsPlayerSuggestions'; host.className = 'records-player-suggestions'; document.body.appendChild(host); }
-  const players = Array.isArray(playerIndex?.players) ? playerIndex.players : [];
+  const players = view === 'elo_leaderboard'
+    ? rows.map(row => row.player).filter(Boolean)
+    : Array.isArray(playerIndex?.players) ? playerIndex.players : [];
   const term = playerSearch.trim().toLocaleLowerCase();
   const matches = players.filter(name => String(name).toLocaleLowerCase().includes(term)).slice(0, 50);
   host.innerHTML = playerIndexLoading ? '<div class="records-suggestion-state">Loading players...</div>' : playerIndexError ? `<div class="records-suggestion-state">${escapeHtml(playerIndexError)}</div>` : matches.length ? matches.map(name => `<button type="button" data-player="${escapeAttr(name)}" onclick="selectRecordsPlayer(this.dataset.player)">${escapeHtml(name)}</button>`).join('') : '<div class="records-suggestion-state">No matching players</div>';
@@ -561,6 +589,21 @@ function closeSuggestions() { document.getElementById('recordsPlayerSuggestions'
 
 function whole(value) { const number = Number(value); return Number.isFinite(number) ? Math.round(number).toLocaleString('en-US') : '-'; }
 function two(value) { const number = Number(value); return Number.isFinite(number) ? number.toFixed(2) : '-'; }
+function countryName(code) {
+  const normalized = String(code || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(normalized)) return normalized || 'Unknown';
+  if (normalized === 'XK') return 'Kosovo';
+  if (normalized === 'AQ') return 'Unknown';
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(normalized) || normalized;
+  } catch { return normalized; }
+}
+function countryCodeToFlag(code) {
+  const normalized = String(code || '').trim().toLowerCase();
+  if (!/^[a-z]{2}$/.test(normalized)) return '-';
+  const label = countryName(normalized);
+  return `<img class="records-flag-img" src="https://flagcdn.io/flags/4x3/${normalized}.svg" alt="${escapeAttr(label)} flag" title="${escapeAttr(label)}" loading="lazy" decoding="async" />`;
+}
 function escapeAttr(value) { return escapeHtml(value).replaceAll('`', '&#96;'); }
 function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
 

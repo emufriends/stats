@@ -6,7 +6,7 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 3;
+const DEFAULT_PACK_SCHEMA_VERSION = 5;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
@@ -69,6 +69,14 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/project-rewards/default-base.json'],
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/cp-rewards/default-mw.json'],
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/cp-rewards/default-base.json'],
+  ['scoring', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/scoring/final-score/default-mw.json'],
+  ['scoring', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/scoring/final-score/default-base.json'],
+  ['scoring', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/scoring/appeal/default-mw.json'],
+  ['scoring', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/scoring/appeal/default-base.json'],
+  ['scoring', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/scoring/conservation-points/default-mw.json'],
+  ['scoring', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/scoring/conservation-points/default-base.json'],
+  ['scoring', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/scoring/reputation/default-mw.json'],
+  ['scoring', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/scoring/reputation/default-base.json'],
   ['workers', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/workers/general/default-mw.json'],
   ['workers', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/workers/general/default-base.json'],
   ['workers', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/workers/two-cp-worker/default-mw.json'],
@@ -77,6 +85,8 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-base.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena/manifest.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena-top-100/all-seasons.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/elo-leaderboard/default-mw.json'],
+  ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/elo-leaderboard/default-base.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/fastest-games/default-mw.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/fastest-games/default-base.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/highest-scores/default-mw.json'],

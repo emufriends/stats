@@ -13,7 +13,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260713-1';
+import { loadStats } from '../snapshot-cache.js?v=20260719-1';
 
 export const id = 'conservation';
 export const title = 'Conservation';
@@ -36,6 +36,10 @@ export const mainHtml = `
   <div class="main-header sponsor-endgames-main-header conservation-main-header">
     <div class="table-meta" id="conservationMeta"></div>
     <div class="conservation-switches">
+      <div class="maps-h2h-mode conservation-subject" role="group" aria-label="Conservation project subject">
+        <button type="button" class="active" data-subject="projects" onclick="setConservationSubject('projects')">Projects</button>
+        <button type="button" data-subject="releases" onclick="setConservationSubject('releases')">Releases</button>
+      </div>
       <div class="maps-h2h-mode conservation-scope" role="group" aria-label="CP reward threshold">
         <button type="button" data-scope="5" onclick="setConservationScope('5')">5 CP</button>
         <button type="button" data-scope="8" onclick="setConservationScope('8')">8 CP</button>
@@ -100,17 +104,18 @@ let view = 'projects';
 let mode = 'delta';
 let scope = 'combined';
 let compare = 'raw';
+let subject = 'projects';
 let rows = [];
 let selectedMaps = MAPS.map(([, , full]) => full);
 let rewardSort = { field: 'delta_overall', direction: 'desc' };
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true; token += 1; isMW = Number(dataset) === 0 ? 0 : 1;
-  view = 'projects'; mode = 'delta'; scope = 'combined'; compare = 'raw'; rows = [];
+  view = 'projects'; mode = 'delta'; scope = 'combined'; compare = 'raw'; subject = 'projects'; rows = [];
   rewardSort = { field: 'delta_overall', direction: 'desc' };
   selectedMaps = MAPS.map(([, , full]) => full);
   Object.assign(window, {
-    setConservationView, setConservationMode, setConservationScope, setConservationCompare,
+    setConservationView, setConservationMode, setConservationScope, setConservationCompare, setConservationSubject,
     sortConservationRewards, resetConservationFilters, applyConservationFilters,
     toggleConservationMap, selectAllConservationMaps, selectNoneConservationMaps,
   });
@@ -129,20 +134,24 @@ function setConservationView(next) {
 function setConservationMode(next) { mode = next === 'frequency' ? 'frequency' : 'delta'; syncControls(); render(); }
 function setConservationScope(next) { scope = ['5', '8', 'combined'].includes(next) ? next : 'combined'; syncControls(); render(); }
 function setConservationCompare(next) { compare = next === 'average' ? 'average' : 'raw'; syncControls(); render(); }
+function setConservationSubject(next) { subject = next === 'releases' ? 'releases' : 'projects'; syncControls(); render(); }
 
 function syncControls() {
   document.querySelectorAll('.conservation-tabs .endgames-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   document.querySelectorAll('.conservation-mode button').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
   document.querySelectorAll('.conservation-scope button').forEach(btn => btn.classList.toggle('active', btn.dataset.scope === scope));
   document.querySelectorAll('.conservation-compare button').forEach(btn => btn.classList.toggle('active', btn.dataset.compare === compare));
+  document.querySelectorAll('.conservation-subject button').forEach(btn => btn.classList.toggle('active', btn.dataset.subject === subject));
+  document.querySelector('.conservation-subject')?.classList.toggle('is-hidden', view !== 'projects');
   document.querySelector('.conservation-scope')?.classList.toggle('is-hidden', view !== 'cp_rewards');
-  document.querySelector('.conservation-compare')?.classList.toggle('is-hidden', view !== 'cp_rewards');
+  document.querySelector('.conservation-compare')?.classList.toggle('is-hidden', !['projects', 'cp_rewards'].includes(view));
   document.querySelector('.conservation-map-filter')?.classList.toggle('is-hidden', view === 'cp_rewards');
   document.querySelector('.conservation-map-divider')?.classList.toggle('is-hidden', view === 'cp_rewards');
   const showCompleted = view === 'cp_rewards' || (view === 'project_rewards' && mode === 'delta');
   document.querySelector('.conservation-completed-filter')?.classList.toggle('is-hidden', !showCompleted);
   document.querySelector('.conservation-completed-divider')?.classList.toggle('is-hidden', !showCompleted);
   document.querySelector('.conservation-switches')?.classList.toggle('is-cp-rewards', view === 'cp_rewards');
+  document.querySelector('.conservation-switches')?.classList.toggle('is-projects', view === 'projects');
 }
 
 function params() {
@@ -182,23 +191,41 @@ function render() {
 }
 
 function renderProjects() {
+  const subjectRows = rows.filter(row => (row.subject || 'projects') === subject);
   const mapFields = MAPS.map(([, key]) => key);
-  const values = rows.flatMap(row => mapFields.map(field => ({ value: projectValue(row, field), count: row[`count_${field}`] })));
+  const values = subjectRows.flatMap(row => mapFields.map(field => ({ value: projectValue(row, field), count: row[`count_${field}`] })));
   const mapRange = mode === 'delta'
     ? cappedNumericRange(values.filter(item => !isInsufficientObservationCount(item.count)), item => item.value)
     : numericRange(values, item => item.value);
-  const avgRange = mode === 'delta' ? numericRange(rows, row => row.avg) : numericRange(rows, row => percentage(row.count_avg, row.denom_avg));
+  const avgRange = mode === 'delta' ? numericRange(subjectRows, row => row.avg) : numericRange(subjectRows, row => percentage(row.count_avg, row.denom_avg));
   document.getElementById('conservationContent').innerHTML = `<div class="table-wrap"><div class="table-scroll">
     <table class="maps-table conservation-projects-table ${mode === 'frequency' ? 'conservation-frequency-table' : ''}"><thead><tr><th style="width:12%;text-align:center;">Count</th>
       ${MAPS.map(([short,,full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(mapTooltipLabel(full))}" style="width:5.5%">${short}</th>`).join('')}
       <th style="width:5.5%;text-align:center;">Avg</th></tr></thead>
-      <tbody>${rows.map(row => `<tr><td class="sponsor-name-cell">${escapeHtml(row.count_value)}</td>
+      <tbody>${subjectRows.map(row => `<tr><td class="sponsor-name-cell">${escapeHtml(row.count_value)}</td>
         ${MAPS.map(([,field]) => projectCell(row, field, mapRange)).join('')}${projectAvgCell(row, avgRange)}</tr>`).join('')}</tbody>
     </table></div></div>`;
 }
-function projectValue(row, field) { return mode === 'frequency' ? percentage(row[`count_${field}`], row[`denom_${field}`]) : number(row[field]); }
+function projectValue(row, field) {
+  const raw = mode === 'frequency' ? percentage(row[`count_${field}`], row[`denom_${field}`]) : number(row[field]);
+  if (compare === 'raw') return raw;
+  const overall = mode === 'frequency' ? percentage(row.count_avg, row.denom_avg) : number(row.avg);
+  return Number.isFinite(raw) && Number.isFinite(overall) ? raw - overall : Number.NaN;
+}
 function projectCell(row, field, range) {
-  if (mode === 'frequency') return frequencyTd(row[`count_${field}`], row[`denom_${field}`], 50);
+  if (mode === 'frequency') {
+    const value = projectValue(row, field);
+    if (!Number.isFinite(value)) return unavailableTd();
+    const raw = percentage(row[`count_${field}`], row[`denom_${field}`]);
+    const text = compare === 'average' ? formatSignedPercentAdaptive(value) : fmtPct(raw);
+    return `<td class="build-value-tooltip" data-value-tooltip="${fmtInt(row[`count_${field}`])} / ${fmtInt(row[`denom_${field}`])}" style="color:${frequencyColor(value, 50)}">${text}</td>`;
+  }
+  if (compare === 'average') {
+    const value = projectValue(row, field);
+    if (!Number.isFinite(value)) return unavailableTd();
+    if (isInsufficientObservationCount(row[`count_${field}`])) return `<td class="delta sponsor-delta-insufficient build-value-tooltip" data-value-tooltip="${INSUFFICIENT_DATA_TOOLTIP}">${fmtSigned(value, 3, true)}</td>`;
+    return `<td class="delta cp-map-comparison" style="color:${deltaRangeColor(value, range.min, range.max)}">${fmtSigned(value, 3, true)}</td>`;
+  }
   return deltaTd(row, field, row[`count_${field}`], range);
 }
 function projectAvgCell(row, range) {

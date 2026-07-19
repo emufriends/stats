@@ -3154,6 +3154,12 @@
     height: 24.6667px;
 }
 
+.conservation-switches.is-projects .conservation-subject,
+.conservation-switches.is-projects .conservation-compare,
+.conservation-switches.is-projects .conservation-mode {
+    min-width: 166px;
+}
+
 .conservation-switches.is-cp-rewards {
     gap: 18px;
 }
@@ -3243,6 +3249,26 @@
     border-top: 3px double var(--border-strong, #315b53) !important;
 }
 
+/* Scoring reuses the Hexes distribution grid: four equal tabs, the standard
+   compact control slot, and an attached expand control only on bucketed views. */
+.scoring-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.scoring-switches .maps-h2h-mode {
+    min-width: 192px;
+    height: 24.6667px;
+}
+
+.scoring-table-shell:not(.is-expandable) {
+    padding-bottom: 0;
+}
+
+.scoring-table th,
+.scoring-table td {
+    text-align: center;
+}
+
 @media (max-width: 700px) {
     .conservation-main-header {
         align-items: flex-start;
@@ -3259,7 +3285,10 @@
 
     .conservation-switches.is-cp-rewards .conservation-scope,
     .conservation-switches.is-cp-rewards .conservation-compare,
-    .conservation-switches.is-cp-rewards .conservation-mode {
+    .conservation-switches.is-cp-rewards .conservation-mode,
+    .conservation-switches.is-projects .conservation-subject,
+    .conservation-switches.is-projects .conservation-compare,
+    .conservation-switches.is-projects .conservation-mode {
         min-width: 0;
     }
 
@@ -3774,6 +3803,8 @@
     .records-table td { height: 43px; padding: 8px; }
     .records-table td { white-space: nowrap; font-size: 13px; }
     .records-table a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+    .records-country-cell { text-align: center; }
+    .records-flag-img { width: 24px; height: 18px; display: inline-block; vertical-align: middle; border-radius: 2px; object-fit: cover; }
     .records-table .records-icon-cell img { width: 21px; height: 21px; object-fit: contain; vertical-align: middle; }
     .records-map-filter { display: flex; flex-direction: column; gap: 14px; }
     .records-map-group { margin: 0; }
@@ -3787,6 +3818,14 @@
     .records-player-search-toggle:hover, .records-player-search-toggle:focus-visible { border-color: var(--border-light); color: var(--accent); background: var(--bg-surface); }
     .records-player-search { position: relative; display: flex; align-items: center; min-width: 0; width: 100%; }
     .records-player-search input { width: 100%; min-width: 0; height: 25px; box-sizing: border-box; padding: 3px 29px; border: 1px solid var(--border-light); border-radius: 7px; background: var(--bg-panel); color: var(--text); font: 500 12px/1.2 Inter, sans-serif; text-align: center; text-transform: none; letter-spacing: 0; }
+    /* Keep the dashboard's custom clear button as the only search affordance. */
+    .records-player-search input::-webkit-search-cancel-button,
+    .records-player-search input::-webkit-search-decoration {
+      -webkit-appearance: none;
+      appearance: none;
+      display: none;
+    }
+    .records-player-search input::-ms-clear { display: none; }
     .records-search-icon { position: absolute; left: 9px; color: var(--text-muted); font-size: 0; pointer-events: none; z-index: 1; }
     .records-search-icon::before { content: "\1F50D"; font-size: 15px; }
     .records-search-clear { position: absolute; right: 5px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 0; line-height: 1; }
@@ -3858,6 +3897,11 @@
       font-size: 12px;
       letter-spacing: .04em;
       text-transform: uppercase;
+    }
+
+    .players-arena-table thead th.sorted,
+    .players-arena-table thead th.sorted .col-tip {
+      color: var(--accent);
     }
 
     .players-arena-table .players-arena-name {

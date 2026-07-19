@@ -86,12 +86,12 @@ const sideNavContentHtml = `
       <span>Conservation</span>
     </a>
     <div class="nav-divider"></div>
-    <button type="button" class="side-nav-link nav-placeholder">
+    <a class="side-nav-link" href="#/scoring" data-page-id="scoring">
       <svg class="nav-icon nav-icon-scoring" viewBox="0 0 24 24" aria-hidden="true" fill="none">
         <text x="12" y="15.2" text-anchor="middle" aria-hidden="true">123</text>
       </svg>
       <span>Scoring</span>
-    </button>
+    </a>
     <div class="nav-divider"></div>
     <a class="side-nav-link" href="#/workers" data-page-id="workers">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">

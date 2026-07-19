@@ -1,5 +1,5 @@
 import { divergingRangeColor } from '../color-scales.js?v=20260711-1';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260715-2';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260718-1';
 import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260713-4';
 
 export const id = 'players';
