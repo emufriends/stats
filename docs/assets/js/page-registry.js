@@ -101,6 +101,6 @@ export const PAGES = {
     id: 'records',
     title: 'Records',
     navLabel: 'Records',
-    load: () => import('./pages/records.js?v=20260719-1'),
+    load: () => import('./pages/records.js?v=20260719-2'),
   },
 };
