@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260719-2';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260728-5';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor } from './color-scales.js?v=20260710-3';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
@@ -6,7 +6,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260719-1';
+} from './snapshot-cache.js?v=20260728-5';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -22,6 +22,16 @@ document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;
   document.querySelectorAll('#sidebar .date-input[type="text"]').forEach(normalizeIsoDateInput);
 }, true);
+
+document.addEventListener('click', event => {
+  if (!event.target.closest('#sidebar .reset-btn')) return;
+  window.setTimeout(() => {
+    const arena = document.getElementById('globalArenaOnly');
+    const tournament = document.getElementById('globalTournamentOnly');
+    if (arena) arena.checked = false;
+    if (tournament) tournament.checked = false;
+  }, 0);
+});
 
 function prioritizeNavigationSnapshot(event) {
   const link = event.target.closest?.('.side-nav-link[data-page-id]');
@@ -48,6 +58,76 @@ let routeRenderToken = 0;
 let rankFitFrame = 0;
 let rankFitTimer = 0;
 const minimumWarningTimers = new WeakMap();
+const GLOBAL_MODE_FILTER_PAGES = new Set([
+  'home', 'cards', 'opening-hand', 'endgames', 'maps', 'sponsor-endgames',
+  'combos', 'actions', 'icons', 'predictors', 'build', 'conservation',
+  'scoring', 'workers', 'players',
+]);
+
+function globalModeToggle(id, label, kind) {
+  return `<div class="toggle-row global-mode-toggle-row"><span class="toggle-label">${label}</span><label class="toggle"><input type="checkbox" id="${id}" data-mode-kind="${kind}" /><span class="toggle-track"></span></label></div>`;
+}
+
+function installGlobalModeFilters(pageId) {
+  if (!GLOBAL_MODE_FILTER_PAGES.has(pageId)) return;
+  const sidebar = document.getElementById('sidebar');
+  const actions = sidebar?.querySelector('.filter-action-stack');
+  if (!sidebar || !actions) return;
+  const players = pageId === 'players';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'global-mode-filter-shell';
+  // Page sidebars reserve their final filter section immediately before the
+  // last divider and Apply button. Keeping this group there means it can sit
+  // directly below a visible Completed-games toggle without an extra divider,
+  // while pages without that toggle still get one normal final section.
+  wrapper.innerHTML = `<div class="filter-group global-mode-filter-group">
+    ${players ? '' : globalModeToggle('globalArenaOnly', 'Arena games only', 'arena')}
+    ${globalModeToggle('globalTournamentOnly', 'Tournament games only', 'tournament')}
+  </div>`;
+  const finalDivider = actions.previousElementSibling?.matches('hr.divider')
+    ? actions.previousElementSibling
+    : null;
+  (finalDivider || actions).parentNode.insertBefore(wrapper, finalDivider || actions);
+  wrapper.addEventListener('change', event => {
+    const input = event.target.closest('input[data-mode-kind]');
+    if (!input) return;
+    if (input.checked && input.dataset.modeKind === 'arena') {
+      const other = document.getElementById('globalTournamentOnly');
+      if (other) other.checked = false;
+    }
+    if (input.checked && input.dataset.modeKind === 'tournament') {
+      const other = document.getElementById('globalArenaOnly');
+      if (other) other.checked = false;
+    }
+    window.dispatchEvent(new CustomEvent('arknova:global-mode-filter-change', {
+      detail: { kind: input.dataset.modeKind, checked: input.checked },
+    }));
+  });
+}
+
+window.setGlobalModeFilterVisibility = ({ arena = true, tournament = true } = {}) => {
+  const arenaRow = document.getElementById('globalArenaOnly')?.closest('.global-mode-toggle-row');
+  const tournamentRow = document.getElementById('globalTournamentOnly')?.closest('.global-mode-toggle-row');
+  if (arenaRow) arenaRow.hidden = !arena;
+  if (tournamentRow) tournamentRow.hidden = !tournament;
+  const group = document.querySelector('.global-mode-filter-shell');
+  if (group) group.hidden = !arena && !tournament;
+};
+
+window.setGlobalTournamentOnly = value => {
+  const input = document.getElementById('globalTournamentOnly');
+  if (!input) return;
+  input.checked = Boolean(value);
+  if (input.checked) {
+    const arena = document.getElementById('globalArenaOnly');
+    if (arena) arena.checked = false;
+  }
+};
+
+window.hasActiveGlobalModeFilter = () => Boolean(
+  document.getElementById('globalArenaOnly')?.checked
+  || document.getElementById('globalTournamentOnly')?.checked
+);
 
 // Home owns a tiny synchronous bootstrap. All other defaults begin warming as
 // soon as the shell module loads, without delaying Home's first paint.
@@ -78,6 +158,7 @@ async function renderCurrentRoute() {
   document.getElementById('pageMain').innerHTML = page.mainHtml || '';
   document.getElementById('sidebar').innerHTML = page.sidebarHtml || '';
   enhanceIsoDateInputs();
+  installGlobalModeFilters(activePageId);
   setTopbarDataset(currentDataset);
 
   if (page.mount) page.mount({ dataset: currentDataset, pageId: activePageId });

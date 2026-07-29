@@ -6,7 +6,7 @@ import {
   numericRange,
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260710-2';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260713-1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-3';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
   formatSignedDeltaAdaptive,
@@ -247,6 +247,7 @@ function getParams() {
 }
 
 function isDefaultParams(params) {
+  if (window.hasActiveGlobalModeFilter?.()) return false;
   return params.player_elo_min === 300 &&
     params.player_elo_max === null &&
     params.opponent_elo_min === 300 &&

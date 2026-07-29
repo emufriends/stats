@@ -9,7 +9,7 @@ import {
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260711-1';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260716-4';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-3';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';
@@ -275,6 +275,10 @@ function renderTabs() {
 
 function syncFilterVisibility() {
   const isH2h = activeView === H2H_VIEW;
+  window.setGlobalModeFilterVisibility?.({
+    arena: !isH2h,
+    tournament: !isH2h,
+  });
   document.querySelectorAll('.maps-metrics-filter').forEach(el => {
     el.style.display = isH2h ? 'none' : '';
   });
@@ -310,6 +314,7 @@ function getFilterParams() {
 }
 
 function isDefaultParams(params) {
+  if (window.hasActiveGlobalModeFilter?.()) return false;
   if (params.maps_view === H2H_VIEW) return true;
   return params.player_elo_min === 300 &&
     params.player_elo_max === null &&

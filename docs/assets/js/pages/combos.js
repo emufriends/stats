@@ -129,7 +129,7 @@ export const sidebarHtml = `
 
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260713-1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-4';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
@@ -179,6 +179,7 @@ let eloRange = { min: null, max: null };
 let interactionRange = { min: null, max: null };
 let deltaRanges = {};
 let serverPaged = false;
+let forceServerPaging = false;
 let serverMeta = null;
 let combinationRanges = null;
 let minimumDebounceTimer = 0;
@@ -201,6 +202,7 @@ export function mount({ dataset = 1 } = {}) {
   rowsPerPage = 50;
   sortState = { col: 'interaction', dir: 'desc' };
   serverPaged = false;
+  forceServerPaging = false;
   serverMeta = null;
   combinationRanges = null;
   bindHandlers();
@@ -230,6 +232,7 @@ export function setDataset(value) {
   selectedCardTypes = new Set(CARD_TYPES);
   currentPage = 1;
   serverPaged = false;
+  forceServerPaging = false;
   serverMeta = null;
   combinationRanges = null;
   renderRoundChips();
@@ -292,6 +295,7 @@ function setCombinationsView(view) {
   sortState = { col: 'interaction', dir: 'desc' };
   currentPage = 1;
   serverPaged = false;
+  forceServerPaging = false;
   serverMeta = null;
   combinationRanges = null;
   renderTabs();
@@ -340,6 +344,7 @@ function getParams() {
 }
 
 function isDefaultParams(params) {
+  if (window.hasActiveGlobalModeFilter?.()) return false;
   return params.player_elo_min === 300 && params.player_elo_max === null
     && params.opponent_elo_min === 300 && params.opponent_elo_max === null
     && params.date_from === '2025-01-01' && params.date_to === null
@@ -352,7 +357,9 @@ function minimumPlaysValue() {
 }
 
 function shouldUseServerPaging(params) {
-  return minimumPlaysValue() < COMBINATION_DEFAULT_MIN_PLAYS || !isDefaultParams(params);
+  return forceServerPaging
+    || minimumPlaysValue() < COMBINATION_DEFAULT_MIN_PLAYS
+    || !isDefaultParams(params);
 }
 
 function serverPagedParams(params) {
@@ -374,6 +381,7 @@ function serverPagedParams(params) {
 }
 
 async function applyFilters(token = mountToken) {
+  forceServerPaging = false;
   currentPage = 1;
   renderLoading();
   if (!selectedMaps.length || (activeView !== 'card_round' && !selectedRounds.size)) {
@@ -417,6 +425,11 @@ async function applyFilters(token = mountToken) {
     currentPage = 1;
     if (serverPaged) {
       filteredData = allData;
+      window.setMinimumPlaysWarning?.(
+        document.getElementById('minPlayedInput'),
+        Number(payload.candidate_count_before_minimum || 0) > 0
+          && Number(payload.visible_count || 0) === 0
+      );
       applyCombinationRanges();
       renderTable();
     } else {
@@ -445,7 +458,9 @@ async function loadServerPage(preserveHead = false) {
   }
   const token = ++mountToken;
   serverPaged = true;
-  renderLoading();
+  const tableWrap = document.querySelector('.combinations-table-wrap');
+  if (allData.length) tableWrap?.classList.add('is-updating');
+  else renderLoading();
   try {
     const payload = await fetchApi(serverPagedParams(params));
     if (!mounted || token !== mountToken) return;
@@ -460,11 +475,18 @@ async function loadServerPage(preserveHead = false) {
     serverMeta = payload;
     combinationRanges = payload.combination_ranges || null;
     filteredData = allData;
+    window.setMinimumPlaysWarning?.(
+      document.getElementById('minPlayedInput'),
+      Number(payload.candidate_count_before_minimum || 0) > 0
+        && Number(payload.visible_count || 0) === 0
+    );
     applyCombinationRanges();
     renderTable(preserveHead);
   } catch (error) {
     if (!mounted || token !== mountToken) return;
     renderError(error);
+  } finally {
+    tableWrap?.classList.remove('is-updating');
   }
 }
 
@@ -536,6 +558,27 @@ function applyClientFilters({ preserveHead = false } = {}) {
     }
     return true;
   });
+  // Default snapshots intentionally contain only 1,000+ pairs. If selecting a
+  // card finds no snapshot row, consult the daily-warmed complete scope once so
+  // the UI can distinguish "no pair exists" from "pairs exist below Minimum".
+  // The scope is then retained for minimum, type, sort, and page interactions.
+  if (
+    activeView === 'card_card'
+    && allData.length > 0
+    && (selectedOne || selectedTwo)
+    && candidatesBeforeMinimum.length === 0
+  ) {
+    forceServerPaging = true;
+    serverPaged = true;
+    filteredData = [];
+    window.setMinimumPlaysWarning?.(
+      document.getElementById('minPlayedInput'),
+      minimum > 0
+    );
+    renderTable(preserveHead);
+    scheduleServerPage(true);
+    return;
+  }
   filteredData = candidatesBeforeMinimum.filter(row => Number(row.n_played) >= minimum);
   window.setMinimumPlaysWarning?.(
     document.getElementById('minPlayedInput'),
@@ -1005,7 +1048,10 @@ function onCombinationRowsChange() {
 function onCombinationFilterChange() {
   currentPage = 1;
   window.clearTimeout(minimumDebounceTimer);
-  minimumDebounceTimer = window.setTimeout(() => applyFilters(++mountToken), 250);
+  minimumDebounceTimer = window.setTimeout(() => {
+    if (serverPaged && shouldUseServerPaging(getParams())) loadServerPage(true);
+    else applyFilters(++mountToken);
+  }, 250);
 }
 
 function toggleCombinationTypePopup(event) {

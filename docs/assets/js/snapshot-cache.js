@@ -6,7 +6,7 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 5;
+const DEFAULT_PACK_SCHEMA_VERSION = 6;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
@@ -204,12 +204,23 @@ export function peekSnapshot(url) {
   return memoryCache.get(key) || null;
 }
 
+function withGlobalModeFilters(params) {
+  const normalized = { ...params };
+  if (normalized.stats_page === 'records') return normalized;
+  const arena = document.getElementById('globalArenaOnly');
+  const tournament = document.getElementById('globalTournamentOnly');
+  normalized.arena_only = Boolean(arena?.checked);
+  normalized.tournament_only = Boolean(tournament?.checked);
+  return normalized;
+}
+
 export function fetchStats(params, { signal } = {}) {
-  return runForeground(() => loadCached(cacheKey('filtered', params), async () => {
+  const normalized = withGlobalModeFilters(params);
+  return runForeground(() => loadCached(cacheKey('filtered', normalized), async () => {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify(normalized),
       signal,
     });
     const payload = await response.json();
@@ -221,10 +232,11 @@ export function fetchStats(params, { signal } = {}) {
 }
 
 export async function loadStats(params, defaultUrl = null, options = {}) {
-  if (defaultUrl) {
-    try { return await loadSnapshot(defaultUrl); } catch { return fetchStats(params, options); }
+  const normalized = withGlobalModeFilters(params);
+  if (defaultUrl && !normalized.arena_only && !normalized.tournament_only) {
+    try { return await loadSnapshot(defaultUrl); } catch { return fetchStats(normalized, options); }
   }
-  return fetchStats(params, options);
+  return fetchStats(normalized, options);
 }
 
 function packCacheName(version = dataVersion()) {

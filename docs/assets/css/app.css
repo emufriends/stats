@@ -858,6 +858,11 @@
       gap: 8px;
     }
 
+    .global-mode-filter-group {
+      display: grid;
+      gap: 12px;
+    }
+
     /* Apply button */
     .apply-btn {
       width: 100%;
@@ -2810,6 +2815,22 @@
       background: var(--bg-surface);
     }
 
+    /* Every metric/comparison segmented control occupies the same header slot.
+       Page-specific wrappers may control width, but not vertical geometry. */
+    .main-header .maps-h2h-mode,
+    .main-header .cp-map-mode {
+      height: 24.6667px !important;
+      min-height: 24.6667px !important;
+    }
+
+    .main-header .maps-h2h-mode button,
+    .main-header .cp-map-mode button {
+      min-height: 0 !important;
+      line-height: 1 !important;
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+    }
+
     .maps-main-header .maps-h2h-mode {
       height: 24.6667px;
     }
@@ -3589,8 +3610,10 @@
     .players-table thead th {
       text-align: center;
       box-sizing: border-box;
-      height: 40px;
-      padding: 7px 6px;
+      height: 39.1667px;
+      min-height: 39.1667px;
+      padding: 0 6px;
+      vertical-align: middle;
     }
 
     .players-table .players-value-cell {
@@ -3806,11 +3829,10 @@
     .records-table.records-biggest-turns-table { min-width: 900px; }
     .records-table thead { position: sticky; top: 0; z-index: 12; }
     .records-table th, .records-table td { box-sizing: border-box; text-align: center; }
-    /* Standard data-table headers render at 40px (11px text at the global
-       1.5 line-height plus 11px vertical padding). Search controls need less
-       padding around their 25px input, but the resulting row must be identical. */
-    .records-table th { height: 40px; padding: 7px 6px; font-size: 11px; line-height: 1.2; vertical-align: middle; }
-    .records-table td { height: 43px; padding: 8px; }
+    /* Keep Records headers on the shared 39.1667px table geometry. Search
+       controls fit inside this fixed row instead of determining its height. */
+    .records-table th { height: 39.1667px; min-height: 39.1667px; padding: 0 6px; font-size: 11px; line-height: 1.2; vertical-align: middle; }
+    .records-table td { padding: 8px; line-height: 1.35; }
     .records-table td { white-space: nowrap; font-size: 13px; }
     .records-table a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
     .records-country-cell { text-align: center; }
@@ -3874,8 +3896,8 @@
 
     .players-arena-table th,
     .players-arena-table td {
-      height: 43px;
-      padding: 6px 4px;
+      padding: 8px 4px;
+      line-height: 1.35;
       border-right: 1px solid var(--border-light);
       border-bottom: 1px solid var(--border-light);
       text-align: center;
@@ -3884,7 +3906,11 @@
     }
 
     .players-arena-table th {
-      height: 40px;
+      box-sizing: border-box;
+      height: 39.1667px;
+      min-height: 39.1667px;
+      padding-top: 0;
+      padding-bottom: 0;
     }
 
     .players-arena-table th.sortable {
@@ -5415,6 +5441,12 @@
   opacity: 0.58;
   pointer-events: none;
   transition: opacity 120ms ease;
+}
+
+.combinations-table-wrap.is-updating {
+  opacity: .72;
+  pointer-events: none;
+  transition: opacity .12s ease;
 }
 
 .tab-btn.dataset-locked-out,

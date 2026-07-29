@@ -6,7 +6,7 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
-import { loadStats } from '../snapshot-cache.js?v=20260713-1';
+import { loadStats } from '../snapshot-cache.js?v=20260728-3';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 
 export const title = 'Opening Hand';
@@ -108,7 +108,7 @@ let searchQuery = '';
 let cardAliases = new Map();
 let isMW = 1;
 let roundFilterActive = false; // Opening Hand has no round filter; kept false so all metric columns stay visible.
-let minPlayedThreshold = null; // Client-side minimum kept-count filter. Null/blank means no minimum.
+let minPlayedThreshold = 1000; // Client-side default; changing it never requests backend data.
 // In-memory browser cache for the two default backend snapshots. This complements
 // the server-side Cloud Storage cache: once MW/Base has loaded in this page view,
 // switching back to that default tab can render immediately without another fetch.
@@ -191,7 +191,9 @@ function resetOpeningHandPageState(dataset) {
   searchQuery = '';
   isMW = Number(dataset) === 0 ? 0 : 1;
   roundFilterActive = false;
-  minPlayedThreshold = null;
+  minPlayedThreshold = 1000;
+  const minimumInput = document.getElementById('minPlayedInput');
+  if (minimumInput) minimumInput.value = '1000';
   selectedSpeciesTags = new Set(SPECIES_TAGS);
   selectedContinentTags = new Set(CONTINENT_TAGS);
   selectedStrengths = new Set(STRENGTH_VALUES);
@@ -302,8 +304,8 @@ function resetFilters() {
 
   document.querySelectorAll('#mapChips .chip').forEach(c => c.classList.add('active'));
   const minPlayedInput = document.getElementById('minPlayedInput');
-  if (minPlayedInput) minPlayedInput.value = '';
-  minPlayedThreshold = null;
+  if (minPlayedInput) minPlayedInput.value = '1000';
+  minPlayedThreshold = 1000;
 
   // Reset type filter chips
   document.querySelectorAll('#typeFilterPopup .chip').forEach(c => c.classList.add('active'));
@@ -350,6 +352,7 @@ function getParams() {
 }
 
 function getDefaultSnapshotKey(params) {
+  if (window.hasActiveGlobalModeFilter?.()) return null;
   // Mirrors the backend's cacheable-default definition. Only these two cases
   // are safe to reuse without a fetch: default Marine Worlds and default Base.
   const selectedMaps = params.maps || [];

@@ -10,7 +10,7 @@ import {
   relativeEloColor,
 } from '../color-scales.js?v=20260710-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260713-1';
+import { loadStats } from '../snapshot-cache.js?v=20260728-3';
 
 export const title = 'Endgames';
 export const navLabel = 'Endgames';
@@ -413,6 +413,7 @@ async function applyFiltersFromSidebar() {
 }
 
 function getDefaultSnapshotKey(params) {
+  if (window.hasActiveGlobalModeFilter?.()) return null;
   const selectedMaps = params.maps || [];
   const allMapNames = VALID_MAPS.map(m => m.full);
   const allMapsSelected =

@@ -5,10 +5,9 @@ Output:
 # Ark Nova Statistics Dashboard Handoff
 
 Date: 2026-06-21  
-Last updated: 2026-07-03  
+Last updated: 2026-07-28  
 Project owner: pr0paganda-panda / Panda  
-Current active development repo: https://github.com/emufriends/arknova-stats  
-Public frozen repo: pr0paganda-panda/ark-nova-stats, maintained manually by the user
+Current repository: https://github.com/emufriends/stats
 
 This handoff is for a future Codex/AI session continuing the Ark Nova statistics dashboard. It is intentionally comprehensive and secret-free. Do not add maintenance tokens, API keys, or service account JSON to this file.
 
@@ -25,7 +24,7 @@ The project is now a static GitHub Pages frontend backed by one Google Cloud Fun
 
 Cards, Opening Hand, Endgames, and Maps share the same shell, navigation rail, topbar, filter sidebar style, table behavior, and MW/Base dataset toggle. Cards and Opening Hand also share the attributes bar and type/search filters. Endgames and Maps use fixed in-page tab bars instead of an attributes bar. The backend serves Cards, Opening Hand, Endgames, and Maps via the same Cloud Function endpoint, selected with `stats_page`.
 
-The current version is considered public-release-ready. Future work should happen in the `emufriends/arknova-stats` repo/working copy; the user will manually update the public repo when desired.
+The current version is considered public-release-ready. Future work should happen in the `emufriends/stats` repository and its local working copies.
 
 ## Current Local Folders
 
@@ -41,12 +40,15 @@ Backend Cloud Function source:
 C:\Users\ascri\Desktop\ark-nova-function
 ```
 
-Backend folder is now cleaned down to:
+Backend folder contains the deployable Function and packaged metadata fallbacks:
 
 ```text
 main.py
 requirements.txt
 cards_attributes.csv
+merge_players.csv
+arena/
+tests/
 ```
 
 Old temporary backup Python files (`main_backup_before_opening_hand.py`, `main_with_opening_hand.py`) can be removed once `main.py` is confirmed current.
@@ -77,10 +79,10 @@ The script appends a `?fresh=...` query when opening the browser to reduce stale
 The working GitHub repo is:
 
 ```text
-https://github.com/emufriends/arknova-stats
+https://github.com/emufriends/stats
 ```
 
-The user cloned the public repo into this quieter account so development can continue without changing the public live version. Treat `emufriends/arknova-stats` as the development repo from now on.
+Treat `emufriends/stats` as the canonical GitHub repository.
 
 GitHub Pages should serve the static app from:
 
@@ -298,7 +300,8 @@ Central stylesheet for all pages. Important conventions:
 - Phone table: outer `.table-wrap` is the framed table container, inner `.table-scroll` owns horizontal scrolling, and pagination sits outside `.table-scroll` so page buttons stay visible while columns scroll.
 - Statistical tables use the thick 2px `.table-wrap` frame. Two-table layouts such as Build Enclosures and Actions Starting position/Upgrades use the same visual frame on each panel even when the DOM wrapper class is page-specific.
 - Map header tooltips are a frontend display convention: backend map values remain `Map 1a: Observation Tower`, while tooltips show `Observation Tower (1a)`.
-- Phone table fixed width is currently `755px`; phone Card column is `110px`. Rank columns are hidden on phone layouts only; desktop and tablet retain them.
+- Normal tables use the shared 900px minimum canvas and scroll horizontally below
+  that width. Compact side-by-side tables are the only `min-width: 0` exception.
 - Avoid broad visual refactors unless requested. The user is happy with the current look.
 
 ## Current Pages
@@ -356,7 +359,7 @@ Filters:
 - Completed and incomplete games included
 - Type filter, client-side
 - Search, client-side
-- Minimum plays, client-side
+- Minimum plays, client-side; default and Reset value `1000`
 - Attributes bar, client-side
 
 The `#` rank is global across every loaded card that meets the current Minimum
@@ -436,7 +439,7 @@ Filters:
 - Completed and incomplete games included
 - Type filter, client-side
 - Search, client-side
-- Minimum keeps, client-side
+- Minimum keeps, client-side; default and Reset value `1000`
 - Attributes bar, client-side
 
 Opening Hand intentionally has no Round filter because opening hand is before rounds occur.
@@ -526,7 +529,7 @@ Endgames filters:
 
 ### Home Page
 
-`assets/js/pages/home.js` is the default route and renders 12 aggregate fact tiles. It uses MW/Base plus Elo, map, date, and Completed-only filters. Its defaults are intentionally unrestricted Elo, unrestricted dates, incomplete games included, and all 25 known maps. Map chips are grouped into current maps, original Maps 1-8, and beginner Maps A/0. Backend `stats_page` is `home`, with public snapshots under `card-stats/home/`.
+`assets/js/pages/home.js` is the default route and renders 12 aggregate fact tiles. It uses MW/Base plus Elo, map, date, and Completed-only filters. Its defaults are intentionally unrestricted Elo, unrestricted dates, incomplete games included, and all 25 known maps. Map chips are grouped into current maps, original Maps 1-8, and beginner Maps A/0, and all groups are active by default. Home is the deliberate all-map exception: its backend query passes `exclude_invalid_maps=False`, so the Full Sample and Log Sample aggregates include every configured Home map. Analytical pages retain the restricted default population that excludes legacy Maps 1-8 and beginner Maps A/0. Home counts distinct `table_id` values after row-level map/dataset filtering; it does not add per-map counts. A Full Sample table can contain different Map or `is_mw` values for its player rows, so grouped `(Map, is_mw)` counts overlap and are not expected to sum to the Home total. Backend `stats_page` is `home`, with public snapshots under `card-stats/home/`.
 
 The daily refresh also publishes `card-stats/home/defaults.js`, containing both MW and Base payloads in `window.__ARK_NOVA_HOME_DEFAULTS__`. `index.html` loads this small asset before the app so default Home and MW/Base switching render immediately. Filtered requests still use the API, while the JSON snapshots remain the fallback.
 
@@ -952,10 +955,174 @@ card-stats/scoring/conservation-points/default-{mw|base}.json
 card-stats/scoring/reputation/default-{mw|base}.json
 ```
 
-All eight assets are refreshed daily and included in default-pack schema 5.
+All eight assets are refreshed daily and included in default-pack schema 6.
 The backend reads the source Full Sample through the backend-owned prepared
 table, performs the aggregations, and writes derived snapshots. Source BigQuery
 tables remain read-only.
+
+## Combinations performance architecture
+
+Card + Card interactive requests never scan one physical row per pair at query
+time. Daily maintenance first builds `card_pairs_prepared`, then collapses it
+into `card_pair_daily_aggregates`. The aggregate dimensions preserve dataset,
+date, map, Player/Opponent Elo, completion, Arena season, Tournament status,
+both cards/types, and both played-round sets. Each group stores observation
+counts, Elo counts/sums, and Elo-delta counts/sums/squared sums. Weighted
+averages, interactions, sample standard deviations, CIs, and play counts are
+therefore reconstructed exactly from moments.
+
+The complete default-filter Card + Card scope is warmed for MW and Base during
+the daily refresh. This is deliberately separate from the default table
+snapshot: the snapshot contains only rows meeting 1,000 plays, while the scope
+cache retains every matching pair so lowering Minimum plays can be answered
+without BigQuery. A non-default filter-bar scope is materialized into the same
+versioned `card-card-scopes` cache on its first request. Minimum plays, sort,
+page, pair type, and selected cards are deliberately absent from the scope key:
+changing those table controls reads the scope cache and starts no BigQuery job.
+The response still contains at most the selected page size. It also returns:
+
+```text
+candidate_count_before_minimum
+visible_count
+highest_matching_play_count
+```
+
+The frontend uses these fields to mark Minimum plays when matching combinations
+exist but the current threshold hides all of them. When a selected Card + Card
+header card has no row in the thresholded snapshot, the frontend consults the
+daily-warmed complete scope once to obtain this metadata; it then keeps that
+scope active for later Minimum, type, sort, and page changes. During a
+scope-cache update, the existing table remains visible in a lightweight
+updating state. The compact scope artifact is stored as newline-delimited row
+arrays with low-overhead gzip; it is decoded only inside the Function and never
+sent wholesale to the browser.
+
+The practical performance target for Players is under three seconds for a
+default selection, no more than five seconds for an uncached filtered General
+or five-player Comparison request, and under 500ms for a component-cache hit.
+Warm measured requests meet the five-second limit; an infrastructure cold start
+can add roughly one second. A warmed Card + Card scope normally responds in
+about two seconds and starts no BigQuery job. Building an arbitrary new custom
+Card + Card scope can still take roughly 9–10 seconds because tens of thousands
+of pair aggregates must be materialized and persisted once; all later minimum,
+sort, page, type, and card-selection changes for that scope are fast. Paid
+minimum Function instances are not part of the architecture.
+
+## Players page (current behavior)
+
+The Players route is `#/players`. General and Comparison use
+`stats_page: "players"` with `players_view: "general" | "comparison"`;
+Arena Top 100 is a separate static view and never participates in account
+merging. General sends one exact `players_player`. Comparison sends up to five
+exact names in `players_players`. The selected names remain the visible column
+labels even when the backend resolves them to a merged analytical identity.
+
+`merge_players.csv` is the canonical manual account-identity source. In the
+local dashboard folder it corresponds to `docs/merge_players.csv` in the
+`emufriends/stats` repository. Every non-empty CSV row is one person and
+contains at least two exact BGA account names; empty trailing cells are ignored.
+Names must be unique across the complete file, case-insensitively, and UTF-8
+spelling is preserved. The Cloud Function refreshes the published GitHub copy,
+keeps a validated last-known-good Cloud Storage copy, and packages a local copy
+for first-deployment/GitHub-outage fallback. A local dashboard edit becomes
+automatic for future daily refreshes after it is published to GitHub; otherwise
+the backend's packaged fallback changes only after redeployment.
+
+The backend-owned `players_stats_prepared` table assigns every player-game row
+a `player_identity`. Listed aliases share a stable merge identity; unlisted
+players retain an individual identity. This identity is the first clustering
+field, followed by dataset, map, and opponent Elo. The daily
+`players_default_prepared` table aggregates the original player-game rows by
+identity and retains exact per-account game counts. Metrics are therefore
+calculated from all qualifying observations, never by averaging already
+averaged account values. All/Winners/Experts/Masters remain ordinary
+player-game baselines and are unchanged by identity merging.
+
+General and Comparison filters—including maps, opponent Elo, dates, and Arena
+seasons—apply before merged aggregation. `Last X games` ranks the complete
+identity by `game_ended_at DESC` and table ID, then keeps the newest X rows
+across all associated accounts together. Comparison forbids two aliases from
+the same CSV row without publishing those relationships. After three
+characters, Comparison autocomplete sends `players_search: true`,
+`players_search_term`, the current `players_players`, and `is_mw` to a cached
+Cloud Function search that reads the player-index snapshot and in-memory merge
+metadata only; it never queries BigQuery. The response contains at most 50
+alphabetical eligible aliases and omits all aliases of identities already
+selected. The API independently rejects an invalid duplicate identity with a
+neutral selection error.
+General and Comparison selections still persist across MW/Base changes.
+
+The public MW/Base player-index snapshots contain only `players`; merge groups
+and exact associated-account names are never published. If any member of a
+group has qualifying observations in a dataset, every alias remains searchable,
+allowing a deleted account name to resolve to its associated historical
+accounts. General responses expose:
+
+```text
+player_game_count
+player_selected_game_count
+player_associated_game_count
+player_is_merged
+```
+
+Comparison returns the equivalent fields in each `players` summary entry.
+Merged counts display as `selected+associated`; ordinary players display one
+number and never show `+0`. Changing the selected alias within a group leaves
+metric values unchanged but changes which account contributes the first count.
+Identity-aware component caches are keyed by data version, dataset, filters,
+Arena seasons, Last X, and resolved identity. Source BigQuery tables remain
+read-only; prepared Players tables, indexes, and caches are backend-owned
+derivatives.
+
+Players has one ordered player-game table and two daily weighted rollups.
+`players_stats_prepared` is clustered identity-first and is used only when Last
+X requires ordering exact games by timestamp and table ID.
+`players_baseline_prepared` groups non-conceded observations by dataset, map,
+date, opponent Elo, Arena season, Tournament state, winner/expert/master state,
+and stores each metric's sum plus valid-value count.
+`players_identity_daily_rollup` stores the same moments by merged identity and
+exact account, preserving the selected-versus-associated count split. Without
+Last X, General and Comparison reconstruct all averages in one aggregation over
+these rollups; the General response is emitted from one `UNNEST` metric array
+rather than 64 separate query branches. Missing baseline and selected
+components run concurrently and are cached independently by data version,
+dataset, map/date/opponent-Elo scope, Arena seasons, Tournament state, resolved
+identity, and Last X. The empty selected-player companion is a valid zero-row
+relation, so custom baseline-only requests remain valid SQL. Default baselines
+still come from the static Players snapshot; default selected identities use
+`players_default_prepared`.
+
+A Last X value may remain in the sidebar while no General or Comparison player
+is selected. In that state the frontend omits it from the statistics request,
+the backend returns any applicable baselines, and the retained value is
+automatically reapplied when a player is selected again.
+
+Arena metadata is read from `docs/arena/arena_settings.csv` in
+`emufriends/stats`, with the backend-packaged `arena/` folder and validated
+Cloud Storage metadata as fallbacks. Each row provides the official
+`start_utc`, official `end_utc`, and MW/Base mode. The backend derives
+`effective_end_utc = end_utc + 2 hours`: an Arena player-game must have a
+non-null `arena_rating_delta`, match the season mode, and satisfy
+`start_utc <= game_ended_at < effective_end_utc`. The end-exclusive grace
+period includes games started before the official deadline but completed up to
+two hours later. Effective intervals are validated against the next season to
+prevent overlap.
+
+General and Comparison Arena filters use the prepared row's exact
+`arena_season`, with partition-pruning bounds extended through the effective
+end. Arena Top 100 uses the same effective interval for Games, Winrate, Peak,
+Opp. Elo, PR, Turns, PPT, and rating histories. Public day numbering and
+official season dates remain based on `end_utc`; the final graph day extends
+through `effective_end_utc`. A season is computationally complete after the
+effective end, while Top 100 availability is controlled by the presence of a
+validated `sN.csv` ranking file.
+
+S13 is the current newest Arena Top 100 season and is MW. The daily refresh
+validates all 100 S13 ranks, rebuilds prepared Arena assignments, recalculates
+every available season, and atomically publishes
+`card-stats/players/arena-top-100/all-seasons.json`. Season switching,
+table/graph switching, graph search, and Day X-Y zoom remain client-side after
+that bundle is cached.
 
 ## Records page (current behavior)
 
@@ -966,7 +1133,7 @@ functional.
 
 `elo_leaderboard` is the default Records parser and frontend view. Its header
 message always reads `Top 100 players (for full leaderboard, click here).`,
-with `here` opening `https://emufriends.pet/leaderboard` in a new tab. Local
+with `here` opening `https://emufriends.github.io/leaderboard/` in a new tab. Local
 player search may narrow the displayed rows, but the message continues to
 describe the underlying Top 100 source.
 
@@ -1082,11 +1249,21 @@ and All. It defaults to 50 and controls client-side pagination. The result
 count uses the noun `games` and retains the existing displayed-row semantics,
 including the one-row-per-icon behavior of Most Icons.
 
-Records and every Players table (General, Comparison, and Arena Top 100) use the
-same 40px rendered table-header height as Workers and Conservation. Their 25px
-player-search inputs use 7px vertical cell padding so the controls fit inside
-that shared slot; search inputs must never increase the row height or move the
-table when switching pages.
+Records and Arena Top 100 body rows use the shared table line-height and
+vertical padding; neither has a fixed 43px row height. Their compact
+player-search controls must not increase header geometry or move the table when
+switching pages.
+
+The global Arena-games-only and Tournament-games-only toggles are inserted in
+the final filter section immediately before the Apply control. When a page has
+a visible Completed-games-only toggle, the three controls form one consecutive
+stack with no divider between them. Pages without that toggle use the same
+reserved bottom section without adding an extra adjacent divider. Existing page
+exceptions remain: Players exposes Tournament-only alongside its Arena-season
+chips, Maps/Tournament H2H exposes neither, and Records uses its own equivalent
+mode controls. Players and Records table headers use the shared 39.1667px
+header geometry; their search inputs are constrained inside that row so search
+controls cannot change table positioning.
 
 Records widths are view-specific: Fastest and Highest use Player 20% and EPT
 10%; Most Icons uses Player 20% and ID 15%; Biggest Turns uses the exact widths
@@ -1138,6 +1315,24 @@ filter is an immediate in-memory operation.
 - Clearing any Player/Opponent minimum-Elo input means zero; a blank maximum is
   unrestricted. Home serializes blank minima as zero so its unrestricted
   bootstrap payload still renders synchronously without an API request.
+- Generic filtered requests accept `arena_only` and `tournament_only`. Both
+  default false and are mutually exclusive. Arena means a non-null validated
+  `arena_season`, including the configured two-hour end grace period;
+  Tournament means membership in the backend-owned tournament table cache.
+  Missing classification is false. The fields are materialized once in
+  prepared Full Sample and Logs and propagated to Players/card derivatives.
+- Arena and Tournament switches appear on Home, Cards, Opening Hand, Endgames,
+  Sponsor Endgames, Combos, Actions, Icons, Predictors, Build, Conservation,
+  Scoring, Workers, Maps/Metrics, and Records. Maps/Tournament H2H has neither.
+  Players General/Comparison has Tournament only because Arena is selected by
+  season chips; choosing Tournament clears Arena seasons, and choosing a season
+  clears Tournament. Arena Top 100 remains static and unfiltered. Reset turns
+  both generic switches off. Default snapshots are eligible only while both are
+  off.
+- Main-header metric/comparison segmented controls use one `24.6667px` slot
+  across Predictors, Icons, Sponsor Endgames, Actions, Build, Conservation,
+  Scoring, Workers, and Maps. A view change must keep the tab bar and table top
+  offset within one pixel.
 - Map tooltips use `Map name (code)`, for example `Observation Tower (1a)`;
   backend filter values retain the full `Map 1a: Observation Tower` string.
 - Records, Players, Conservation, and Cards map chips use the same five-column

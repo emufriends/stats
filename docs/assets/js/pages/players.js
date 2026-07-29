@@ -1,5 +1,5 @@
 import { divergingRangeColor } from '../color-scales.js?v=20260711-1';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260718-1';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260728-3';
 import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260713-4';
 
 export const id = 'players';
@@ -100,9 +100,16 @@ let playerIndexState = 'idle';
 let playerIndexError = '';
 let playerIndexRequest = 0;
 let suggestionsOpen = false;
+let comparisonSearchTimer = null;
+let comparisonSearchController = null;
+let comparisonSearchRequest = 0;
+let comparisonMatches = [];
 let selectedMaps = MAPS.map(([, full]) => full);
 let rows = [];
 let playerGameCount = 0;
+let playerSelectedGameCount = 0;
+let playerAssociatedGameCount = 0;
+let playerIsMerged = false;
 let comparisonCounts = [];
 let statsAbortController = null;
 let statsLoading = false;
@@ -122,6 +129,14 @@ let arenaGraphRenderState = null;
 let arenaTableSort = { field: 'end', direction: 'desc' };
 let arenaAssetRequest = 0;
 
+function onGlobalModeFilterChange(event) {
+  if (event?.detail?.kind !== 'tournament' || !event.detail.checked) return;
+  if (selectedArenaSeasons.length) {
+    selectedArenaSeasons = [];
+    renderArenaSeasonFilter();
+  }
+}
+
 export function mount({ dataset = 1 } = {}) {
   mounted = true;
   token += 1;
@@ -135,6 +150,9 @@ export function mount({ dataset = 1 } = {}) {
   playerIndexError = '';
   suggestionsOpen = false;
   playerGameCount = 0;
+  playerSelectedGameCount = 0;
+  playerAssociatedGameCount = 0;
+  playerIsMerged = false;
   comparisonCounts = [];
   selectedMaps = MAPS.map(([, full]) => full);
   rows = [];
@@ -162,6 +180,7 @@ export function mount({ dataset = 1 } = {}) {
   });
   renderMapChips();
   syncTabs();
+  window.addEventListener('arknova:global-mode-filter-change', onGlobalModeFilterChange);
   syncDateLastControls();
   loadPlayerIndex();
   loadArenaAssets();
@@ -172,12 +191,14 @@ export function unmount() {
   mounted = false;
   token += 1;
   playerIndexRequest += 1;
+  cancelComparisonSearch();
   statsAbortController?.abort();
   statsAbortController = null;
   hideTooltip();
   closeSuggestions();
   setTopbarDatasetLock(null);
   setFilterButtonDisabled(false);
+  window.removeEventListener('arknova:global-mode-filter-change', onGlobalModeFilterChange);
 }
 
 export function setDataset(value) {
@@ -193,6 +214,9 @@ export function setDataset(value) {
   closeSuggestions();
   comparisonCounts = [];
   playerGameCount = 0;
+  playerSelectedGameCount = 0;
+  playerAssociatedGameCount = 0;
+  playerIsMerged = false;
   playerNames = [];
   playerIndexState = 'idle';
   playerIndexError = '';
@@ -221,6 +245,10 @@ function syncTabs() {
   });
   const control = document.getElementById('playersArenaSeasonControl');
   control?.classList.toggle('is-hidden', view !== 'arena_top_100');
+  window.setGlobalModeFilterVisibility?.({
+    arena: false,
+    tournament: view !== 'arena_top_100',
+  });
 }
 
 function value(id) { return document.getElementById(id)?.value ?? ''; }
@@ -241,7 +269,11 @@ function params() {
     date_to: dateToInput?.disabled ? null : (value('playersDateTo') || null),
     players_player: view === 'general' ? selectedPlayer : null,
     players_players: view === 'comparison' ? selectedPlayers : [],
-    last_x_games: last === '' ? null : Number(last),
+    last_x_games: (
+      last === ''
+      || (view === 'general' && !selectedPlayer)
+      || (view === 'comparison' && selectedPlayers.length === 0)
+    ) ? null : Number(last),
     players_arena_only: selectedArenaSeasons.length > 0,
     players_arena_seasons: selectedArenaSeasons.length > 0 ? [...selectedArenaSeasons] : [],
   };
@@ -313,11 +345,13 @@ function togglePlayersArenaSeason(season) {
   selectedArenaSeasons = selectedArenaSeasons.includes(season)
     ? selectedArenaSeasons.filter(value => value !== season)
     : [...selectedArenaSeasons, season];
+  if (selectedArenaSeasons.length) window.setGlobalTournamentOnly?.(false);
   renderArenaSeasonFilter();
 }
 
 function selectAllPlayersArenaSeasons() {
   selectedArenaSeasons = compatibleArenaSeasons().map(item => item.season);
+  if (selectedArenaSeasons.length) window.setGlobalTournamentOnly?.(false);
   renderArenaSeasonFilter();
 }
 
@@ -421,6 +455,9 @@ async function loadData(activeToken) {
       comparisonCounts = Array.isArray(payload.players) ? payload.players : [];
     } else {
       playerGameCount = Number(payload.player_game_count) || 0;
+      playerSelectedGameCount = Number(payload.player_selected_game_count) || 0;
+      playerAssociatedGameCount = Number(payload.player_associated_game_count) || 0;
+      playerIsMerged = Boolean(payload.player_is_merged);
     }
     statsLoading = false;
     renderTable();
@@ -428,14 +465,23 @@ async function loadData(activeToken) {
     if (error?.name === 'AbortError') return;
     if (mounted && activeToken === token) {
       statsLoading = false;
+      const publicError = publicPlayersError(error);
       if (rows.length) {
         document.querySelector('.players-table-wrap')?.classList.remove('players-updating');
-        updatePlayersMeta(error?.message || String(error));
-      } else renderError(error);
+        updatePlayersMeta(publicError);
+      } else renderError(new Error(publicError));
     }
   } finally {
     if (statsAbortController === requestController) statsAbortController = null;
   }
+}
+
+function publicPlayersError(error) {
+  const message = String(error?.message || error || '');
+  if (/merged player identity|same merged|invalid comparison player selection/i.test(message)) {
+    return 'The selected player could not be added.';
+  }
+  return message;
 }
 
 function renderTable() {
@@ -590,13 +636,77 @@ function renderSuggestions(term = value(view === 'general' ? 'playersSearch' : `
   }
   if (!suggestionsOpen || normalized.length < 3) { closeSuggestions(); return; }
   if (playerIndexState !== 'ready') return;
-  // General and Comparison keep independent selections. Duplicate prevention
-  // applies only among the five Comparison columns.
-  const excluded = new Set(view === 'comparison' ? selectedPlayers.filter(Boolean) : []);
-  const matches = playerNames.filter(name => !excluded.has(name) && name.toLocaleLowerCase().includes(normalized)).slice(0, 50);
+  if (view === 'comparison') {
+    scheduleComparisonSuggestions(String(term || '').trim());
+    return;
+  }
+  const matches = playerNames
+    .filter(name => name.toLocaleLowerCase().includes(normalized))
+    .slice(0, 50);
+  renderSuggestionMatches(matches);
+}
+
+function renderSuggestionMatches(matches) {
+  const host = document.getElementById('playersSuggestions');
+  if (!host) return;
   host.innerHTML = matches.map(name => `<button type="button" role="option" data-player="${escapeAttr(name)}">${escapeHtml(name)}</button>`).join('');
   host.classList.toggle('open', matches.length > 0);
   if (matches.length > 0) requestAnimationFrame(positionSuggestions);
+}
+
+function cancelComparisonSearch() {
+  if (comparisonSearchTimer !== null) clearTimeout(comparisonSearchTimer);
+  comparisonSearchTimer = null;
+  comparisonSearchController?.abort();
+  comparisonSearchController = null;
+  comparisonSearchRequest += 1;
+  comparisonMatches = [];
+}
+
+function scheduleComparisonSuggestions(term) {
+  cancelComparisonSearch();
+  const normalized = String(term || '').trim();
+  if (!mounted || view !== 'comparison' || normalized.length < 3) return;
+  const requestId = ++comparisonSearchRequest;
+  const requestedDataset = isMW;
+  const requestedSlot = activeSearchSlot;
+  const selectedAtRequest = selectedPlayers.slice();
+  const host = document.getElementById('playersSuggestions');
+  if (host) {
+    host.innerHTML = '';
+    host.classList.remove('open');
+  }
+  comparisonSearchTimer = setTimeout(async () => {
+    comparisonSearchTimer = null;
+    const controller = new AbortController();
+    comparisonSearchController = controller;
+    try {
+      const payload = await fetchStats({
+        stats_page: 'players',
+        players_view: 'comparison',
+        players_search: true,
+        players_search_term: normalized,
+        players_players: selectedAtRequest,
+        is_mw: requestedDataset,
+      }, { signal: controller.signal });
+      if (
+        !mounted
+        || view !== 'comparison'
+        || requestId !== comparisonSearchRequest
+        || requestedDataset !== isMW
+        || requestedSlot !== activeSearchSlot
+      ) return;
+      comparisonMatches = Array.isArray(payload?.players) ? payload.players : [];
+      renderSuggestionMatches(comparisonMatches);
+    } catch (error) {
+      if (error?.name !== 'AbortError' && requestId === comparisonSearchRequest) {
+        comparisonMatches = [];
+        renderSuggestionMatches([]);
+      }
+    } finally {
+      if (comparisonSearchController === controller) comparisonSearchController = null;
+    }
+  }, 180);
 }
 
 function positionSuggestions() {
@@ -612,6 +722,7 @@ function positionSuggestions() {
 }
 
 function closeSuggestions() {
+  cancelComparisonSearch();
   suggestionsOpen = false;
   const host = document.getElementById('playersSuggestions');
   if (!host) return;
@@ -621,9 +732,10 @@ function closeSuggestions() {
 function selectPlayer(name, slot = activeSearchSlot) {
   const exact = String(name);
   if (!playerNames.includes(exact)) return;
+  if (view === 'comparison' && !comparisonMatches.includes(exact)) return;
   if (view === 'general') {
     selectedPlayer = exact;
-  } else if (view === 'comparison' && !selectedPlayers.includes(exact)) {
+  } else if (view === 'comparison') {
     const next = selectedPlayers.filter(Boolean);
     next.push(exact);
     selectedPlayers = next.slice(0, 5);
@@ -641,6 +753,11 @@ function clearPlayersSearch(event) {
   loadData(++token);
 }
 
+function formattedMergedGameCount(item) {
+  if (!item?.is_merged) return String(Number(item?.game_count) || 0);
+  return `${Number(item?.selected_game_count) || 0}+${Number(item?.associated_game_count) || 0}`;
+}
+
 function updatePlayersMeta(errorMessage = '') {
   const meta = document.getElementById('playersMeta');
   if (!meta) return;
@@ -653,8 +770,12 @@ function updatePlayersMeta(errorMessage = '') {
   else if (statsLoading) meta.textContent = 'Updating player statistics...';
   else if (playerIndexState === 'loading') meta.textContent = 'Loading player list...';
   else if (playerIndexState === 'error') meta.textContent = `Could not load player list${playerIndexError ? `: ${playerIndexError}` : ''}. Use the retry button in the Player header.`;
-  else if (view === 'comparison') meta.textContent = selectedPlayers.length ? `Number of games considered: ${comparisonCounts.map(item => `${item.name} (${item.game_count})`).join(', ')}` : 'Select players to compare.';
-  else meta.textContent = selectedPlayer ? `Number of games considered: ${playerGameCount}` : 'Select a player to populate the Player column.';
+  else if (view === 'comparison') meta.textContent = selectedPlayers.length
+    ? `Number of games considered: ${comparisonCounts.map(item => `${item.name} (${formattedMergedGameCount(item)})`).join(', ')}`
+    : 'Select players to compare.';
+  else meta.textContent = selectedPlayer
+    ? `Number of games considered: ${playerIsMerged ? `${playerSelectedGameCount}+${playerAssociatedGameCount}` : playerGameCount}`
+    : 'Select a player to populate the Player column.';
 }
 
 function updatePlayerSearchState() {
@@ -923,10 +1044,18 @@ function renderArenaGraphCanvas() {
   const margin = { left: 62, right: 24, top: 25, bottom: 34 };
   const innerWidth = width - margin.left - margin.right;
   const innerHeight = height - margin.top - margin.bottom;
-  const seasonStart = Date.parse(data.start_utc); const seasonEnd = Date.parse(data.end_utc);
+  const seasonStart = Date.parse(data.start_utc);
+  const officialSeasonEnd = Date.parse(data.end_utc);
+  const effectiveSeasonEnd = Date.parse(data.effective_end_utc || data.end_utc);
   const dayMs = 24 * 60 * 60 * 1000;
+  const maxDay = arenaSeasonDayCount(data);
   const start = seasonStart + (arenaGraphDayStart - 1) * dayMs;
-  const end = Math.min(seasonEnd, seasonStart + arenaGraphDayEnd * dayMs);
+  // Day numbering follows the official season interval. The final day extends
+  // through the backend's two-hour completion grace so late-finishing games
+  // remain visible without creating an extra numbered day in the UI.
+  const end = arenaGraphDayEnd >= maxDay
+    ? effectiveSeasonEnd
+    : Math.min(officialSeasonEnd, seasonStart + arenaGraphDayEnd * dayMs);
   const pointsFor = item => (item.timestamps || []).map((timestamp, index) => ({
     time: Date.parse(timestamp), rating: Number(item.ratings?.[index]),
   })).filter(point => Number.isFinite(point.time) && Number.isFinite(point.rating) && point.time >= start && point.time <= end);

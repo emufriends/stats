@@ -1,5 +1,5 @@
 export const id = 'home';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260716-4';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-3';
 export const title = 'Home';
 export const navLabel = 'Home';
 
@@ -118,6 +118,9 @@ const MAP_GROUPS = [
     ],
   },
 ];
+// Home intentionally starts with every configured map active, including the
+// legacy 1-8 and beginner A/0 groups. Other pages use their own restricted map
+// populations; this complete catalog is a Home-only behavior.
 const ALL_MAPS = MAP_GROUPS.flatMap(group => group.maps);
 // Population groups:
 // INDEXED: games_indexed + animals_played, sponsors_played, projects_supported,
@@ -207,6 +210,7 @@ function getParams() {
 }
 
 function isDefaultParams(params) {
+  if (window.hasActiveGlobalModeFilter?.()) return false;
   return params.player_elo_min === 0 &&
     params.player_elo_max === null &&
     params.opponent_elo_min === 0 &&

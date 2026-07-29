@@ -1,4 +1,4 @@
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260719-1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-3';
 import { mapTooltipLabel } from '../table-cells.js?v=20260712-4';
 
 export const id = 'records';
