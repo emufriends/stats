@@ -6,11 +6,12 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 6;
+const DEFAULT_PACK_SCHEMA_VERSION = 8;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
 const inFlight = new Map();
+const activeFilteredControllers = new Map();
 let foregroundActivity = 0;
 let cacheCleanupStarted = false;
 let defaultPackInit = null;
@@ -216,7 +217,19 @@ function withGlobalModeFilters(params) {
 
 export function fetchStats(params, { signal } = {}) {
   const normalized = withGlobalModeFilters(params);
-  return runForeground(() => loadCached(cacheKey('filtered', normalized), async () => {
+  const key = cacheKey('filtered', normalized);
+  if (inFlight.has(key)) return runForeground(() => inFlight.get(key));
+
+  const group = String(normalized.stats_page || 'dashboard');
+  let managedController = null;
+  if (!signal && typeof AbortController !== 'undefined') {
+    activeFilteredControllers.get(group)?.abort();
+    managedController = new AbortController();
+    activeFilteredControllers.set(group, managedController);
+    signal = managedController.signal;
+  }
+
+  const request = runForeground(() => loadCached(key, async () => {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -229,6 +242,11 @@ export function fetchStats(params, { signal } = {}) {
     }
     return payload;
   }));
+  return request.finally(() => {
+    if (managedController && activeFilteredControllers.get(group) === managedController) {
+      activeFilteredControllers.delete(group);
+    }
+  });
 }
 
 export async function loadStats(params, defaultUrl = null, options = {}) {

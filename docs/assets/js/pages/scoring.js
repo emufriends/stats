@@ -13,7 +13,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260728-3';
+import { loadStats } from '../snapshot-cache.js?v=20260728-4';
 
 export const id = 'scoring';
 export const title = 'Scoring';
@@ -33,7 +33,7 @@ const MAPS = [
 const VIEWS = {
   final_score: { label: 'Final score', header: 'Final score', slug: 'final-score', expandable: true },
   appeal: { label: 'Appeal', header: 'Appeal', slug: 'appeal', expandable: true },
-  conservation_points: { label: 'Conservation points', header: 'Conservation points', slug: 'conservation-points', expandable: true },
+  conservation_points: { label: 'Conservation points', header: 'CP', headerTooltip: 'Conservation Points', slug: 'conservation-points', expandable: true },
   reputation: { label: 'Reputation', header: 'Reputation', slug: 'reputation', expandable: false },
 };
 
@@ -157,7 +157,10 @@ function isDefault(p) {
 function snapshotUrl() { return `${SNAPSHOT_ROOT}/${VIEWS[view].slug}/default-${isMW ? 'mw' : 'base'}.json`; }
 
 async function loadData(activeToken) {
-  renderLoading();
+  const content = document.getElementById('scoringContent');
+  const preserve = rows.length > 0;
+  if (preserve) content?.classList.add('stats-updating');
+  else renderLoading();
   try {
     const p = params();
     const payload = await loadStats(p, isDefault(p) ? snapshotUrl() : null);
@@ -166,7 +169,10 @@ async function loadData(activeToken) {
     expandedRows = payload.expanded_data || [];
     render();
   } catch (error) {
-    if (mounted && activeToken === token) renderError(error);
+    if (mounted && activeToken === token && !preserve) renderError(error);
+    else console.error('Could not update scoring statistics', error);
+  } finally {
+    if (mounted && activeToken === token) content?.classList.remove('stats-updating');
   }
 }
 
@@ -185,7 +191,7 @@ function render() {
   document.getElementById('scoringContent').innerHTML = `<div class="build-hexes-shell scoring-table-shell ${VIEWS[view].expandable ? 'is-expandable' : ''} ${expanded ? 'is-expanded' : ''}">
     <div class="table-wrap build-hexes-wrap"><div class="table-scroll">
       <table class="maps-table build-hexes-table scoring-table ${mode === 'frequency' ? 'build-hexes-frequency scoring-frequency-table' : ''}">
-        <thead><tr><th class="build-hexes-bucket-header" style="width:10%">${escapeHtml(VIEWS[view].header)}</th>
+        <thead><tr><th class="build-hexes-bucket-header" style="width:10%">${escapeHtml(VIEWS[view].header)}${VIEWS[view].headerTooltip ? ` <span class="col-tip scoring-header-tooltip" data-tip="${escapeAttr(VIEWS[view].headerTooltip)}">?</span>` : ''}</th>
           ${MAPS.map(([short, , full]) => `<th class="maps-custom-tip" data-tip="${escapeAttr(mapTooltipLabel(full))}" style="width:5.5%">${escapeHtml(short)}</th>`).join('')}
           <th style="width:7.5%">Avg</th></tr></thead>
         <tbody>${displayRows.map(row => `<tr class="${expanded ? 'hexes-expanded-row' : ''}"><td class="sponsor-name-cell build-hexes-bucket-cell scoring-bucket-cell">${escapeHtml(row.bucket_label)}</td>
@@ -260,7 +266,7 @@ function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, char
 const escapeAttr = escapeHtml;
 
 const tooltip = document.getElementById('col-tooltip');
-function tooltipSource(event) { return event.target.closest?.('.build-value-tooltip, .maps-custom-tip'); }
+function tooltipSource(event) { return event.target.closest?.('.build-value-tooltip, .maps-custom-tip, .col-tip'); }
 function positionTooltip(event) {
   if (!tooltip) return;
   tooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 8))}px`;

@@ -1,5 +1,5 @@
 import { divergingRangeColor } from '../color-scales.js?v=20260711-1';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260728-3';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260731-3';
 import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260713-4';
 
 export const id = 'players';
@@ -13,7 +13,55 @@ const SNAPSHOT_URL = dataset => `${API_ROOT}/general/default-${dataset ? 'mw' : 
 const ARENA_MANIFEST_URL = `${API_ROOT}/arena/manifest.json`;
 const ARENA_BUNDLE_URL = `${API_ROOT}/arena-top-100/all-seasons.json`;
 const ARENA_LINE_COLORS = ['#42d392', '#60a5fa', '#f59e0b', '#c084fc', '#fb7185'];
-const MAPS = [
+const HISTORY_LINE_COLORS = ['#42d392', '#60a5fa', '#f59e0b', '#c084fc', '#fb7185', '#22d3ee', '#f97316', '#a3e635'];
+const PLAYER_GRAPH_MIN_GAMES = 250;
+// The aggregate table intentionally keeps its compact display shape. This map
+// connects those existing labels to the prepared-table keys used by history.
+const HISTORY_METRIC_KEYS = new Map([
+  ['Turns', 'turns'], ['Breaks triggered', 'breaks_triggered'], ['Break%', 'break_pct'],
+  ['Points per turn', 'points_per_turn'], ['Points per money', 'points_per_money'],
+  ['$ gained per turn', 'money_per_turn'], ['Money per turn', 'money_per_turn'],
+  ['Score', 'score'], ['Appeal', 'appeal'], ['Conservation', 'conservation'],
+  ['Reputation', 'reputation'], ['Projects', 'projects'], ['Upgrades', 'upgrades'],
+  ['Workers', 'workers'], ['Cover%', 'cover_pct'], ['Fill%', 'fill_pct'],
+  ['Animals%', 'animals_pct'], ['Association%', 'association_pct'], ['Build%', 'build_pct'],
+  ['Cards%', 'cards_pct'], ['Sponsors%', 'sponsors_pct'], ['Determinations', 'determinations'],
+  ['Animals actions', 'animals_actions'], ['Association actions', 'association_actions'],
+  ['Build actions', 'build_actions'], ['Cards actions', 'cards_actions'],
+  ['Sponsors actions', 'sponsors_actions'], ['Universities', 'universities'],
+  ['Partner zoos', 'partner_zoos'], ['X-token gained', 'x_tokens_gained'],
+  ['X-token spent', 'x_tokens_spent'], ['X-backs', 'x_backs'],
+  ['Money gained', 'money_gained'], ['$ gained', 'money_gained'],
+  ['Money gained (income)', 'money_gained_income'], ['$ gained (income)', 'money_gained_income'],
+  ['Money spent (Animals)', 'money_spent_animals_pct'], ['$ spent (Animals)', 'money_spent_animals_pct'],
+  ['Money spent (Build)', 'money_spent_build_pct'], ['$ spent (Build)', 'money_spent_build_pct'],
+  ['Money spent (Donations)', 'money_spent_donations_pct'], ['$ spent (Donations)', 'money_spent_donations_pct'],
+  ['Money spent (Range)', 'money_spent_range_pct'], ['$ spent (Range)', 'money_spent_range_pct'],
+  ['Cards drawn (deck)', 'cards_drawn_deck'], ['Cards drawn from deck', 'cards_drawn_deck'],
+  ['Cards drawn (Range)', 'cards_drawn_range'], ['Cards drawn from range', 'cards_drawn_range'],
+  ['Cards snapped', 'cards_snapped'], ['Cards discarded', 'cards_discarded'],
+  ['Enclosures', 'enclosures'], ['Kiosks', 'kiosks'], ['Pavilions', 'pavilions'],
+  ['Unique buildings', 'unique_buildings'], ['Animals played', 'animals_played'],
+  ['Animals released', 'animals_released'], ['Sponsors played', 'sponsors_played'],
+  ['Bird icons', 'bird_icons'], ['Herbivore icons', 'herbivore_icons'],
+  ['Predator icons', 'predator_icons'], ['Primate icons', 'primate_icons'],
+  ['Reptile icons', 'reptile_icons'], ['Sea Animal icons', 'sea_animal_icons'],
+  ['Bear icons', 'bear_icons'], ['Petting zoo icons', 'petting_zoo_icons'],
+  ['Africa icons', 'africa_icons'], ['America icons', 'america_icons'],
+  ['Asia icons', 'asia_icons'], ['Australia icons', 'australia_icons'],
+  ['Europe icons', 'europe_icons'], ['Rock icons', 'rock_icons'],
+  ['Water icons', 'water_icons'], ['Science icons', 'science_icons'],
+]);
+const HISTORY_GROUPS = new Map();
+[
+  ['upgrade_percentages', ['animals_pct', 'association_pct', 'build_pct', 'cards_pct', 'sponsors_pct']],
+  ['action_counts', ['animals_actions', 'association_actions', 'build_actions', 'cards_actions', 'sponsors_actions']],
+  ['association_bonuses', ['universities', 'partner_zoos']],
+  ['x_tokens', ['x_tokens_gained', 'x_tokens_spent']],
+  ['small_buildings', ['kiosks', 'pavilions']],
+  ['icons', ['bird_icons', 'herbivore_icons', 'predator_icons', 'primate_icons', 'reptile_icons', 'sea_animal_icons', 'bear_icons', 'petting_zoo_icons', 'africa_icons', 'america_icons', 'asia_icons', 'australia_icons', 'europe_icons', 'rock_icons', 'water_icons', 'science_icons']],
+].forEach(([group, keys]) => keys.forEach(key => HISTORY_GROUPS.set(key, group)));
+const STANDARD_MAPS = [
   ['1a', 'Map 1a: Observation Tower'], ['2a', 'Map 2a: Outdoor Areas'],
   ['3a', 'Map 3a: Silver Lake'], ['4a', 'Map 4a: Commercial Harbor'],
   ['5a', 'Map 5a: Park Restaurant'], ['6a', 'Map 6a: Research Institute'],
@@ -23,6 +71,19 @@ const MAPS = [
   ['13', 'Map 13: Drawing Board'], ['14', 'Map 14: Lagoon'],
   ['T1', 'Map T1: Tournament 1'],
 ];
+const LEGACY_MAPS = [
+  ['1', 'Map 1: Observation Tower'], ['2', 'Map 2: Outdoor Areas'],
+  ['3', 'Map 3: Silver Lake'], ['4', 'Map 4: Commercial Harbor'],
+  ['5', 'Map 5: Park Restaurant'], ['6', 'Map 6: Research Institute'],
+  ['7', 'Map 7: Ice Cream Parlors'], ['8', 'Map 8: Hollywood Hills'],
+];
+const BEGINNER_MAPS = [['A', 'Map A'], ['0', 'Map 0']];
+const MAP_GROUPS = [
+  ['standard', 'Standard Maps', STANDARD_MAPS],
+  ['legacy', 'Legacy Maps', LEGACY_MAPS],
+  ['beginner', 'Beginner Maps', BEGINNER_MAPS],
+];
+const MAPS = MAP_GROUPS.flatMap(([, , maps]) => maps);
 const POPULATIONS = ['player', 'all', 'winners', 'experts', 'masters'];
 const SPENDING_METRICS = new Set([
   'Money spent (Animals)', 'Money spent (Build)',
@@ -44,8 +105,8 @@ export const mainHtml = `
   <div class="attributes-bar endgames-tabs-bar players-tabs-bar">
     <div class="attributes-bar-header endgames-tabs-header">
       <div class="endgames-tabs players-tabs" role="tablist" aria-label="Players views">
-        <button class="endgames-tab active" data-view="general" onclick="setPlayersView('general')">General</button>
-        <button class="endgames-tab" data-view="comparison" onclick="setPlayersView('comparison')">Comparison</button>
+        <button class="endgames-tab players-history-tab active" data-view="general" onclick="setPlayersView('general')"><span>General</span><span class="endgames-graph-toggle" id="playersGeneralGraphToggle" role="button" tabindex="0" title="Show graph" aria-label="Show General history graph" onclick="togglePlayersHistoryGraph(event, 'general')" onkeydown="onPlayersHistoryGraphKey(event, 'general')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M4 5v14"/><path d="M6.5 15.5 10 11l3.5 2.5L18 7"/></svg></span></button>
+        <button class="endgames-tab players-history-tab" data-view="comparison" onclick="setPlayersView('comparison')"><span>Comparison</span><span class="endgames-graph-toggle" id="playersComparisonGraphToggle" role="button" tabindex="0" title="Show graph" aria-label="Show Comparison history graph" onclick="togglePlayersHistoryGraph(event, 'comparison')" onkeydown="onPlayersHistoryGraphKey(event, 'comparison')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M4 5v14"/><path d="M6.5 15.5 10 11l3.5 2.5L18 7"/></svg></span></button>
         <button class="endgames-tab players-arena-tab" data-view="arena_top_100" onclick="setPlayersView('arena_top_100')">
           <span>Arena Top 100</span>
           <span class="endgames-graph-toggle" id="playersArenaGraphToggle" role="button" tabindex="0" title="Show graph" aria-label="Show Arena rating graph" onclick="togglePlayersArenaGraph(event)" onkeydown="onPlayersArenaGraphKey(event)">
@@ -55,7 +116,10 @@ export const mainHtml = `
       </div>
     </div>
   </div>
-  <div id="playersContent"></div>`;
+  <div id="playersContent"></div>
+  <div class="players-history-modal" id="playersHistoryModal" role="dialog" aria-modal="true" aria-labelledby="playersHistoryModalMessage" hidden>
+    <div class="players-history-modal-card"><div id="playersHistoryModalMessage"></div><button type="button" id="playersHistoryModalOk" onclick="closePlayersHistoryModal()">OK</button></div>
+  </div>`;
 
 export const sidebarHtml = `
   <div class="sidebar-header"><span class="sidebar-title">Filters</span><div style="display:flex;align-items:center;gap:6px;">
@@ -68,10 +132,7 @@ export const sidebarHtml = `
     <input class="range-input" type="number" id="playersOpponentEloMax" placeholder="Max" min="0" />
   </div></div>
   <hr class="divider" />
-  <div class="filter-group"><div style="display:flex;align-items:baseline;gap:6px;margin-bottom:8px;">
-    <span class="filter-label" style="margin-bottom:0">Maps</span>
-    <span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllPlayersMaps()">all</span> / <span class="map-toggle-link" onclick="selectNonePlayersMaps()">none</span>)</span>
-  </div><div class="chip-grid" id="playersMapChips"></div></div>
+  <div class="filter-group records-map-filter" id="playersMapFilter"></div>
   <hr class="divider" />
   <div class="filter-group"><span class="filter-label">Date Range</span>
     <input class="date-input" type="text" id="playersDateFrom" placeholder="yyyy-mm-dd" oninput="onPlayersDateInput()" />
@@ -128,6 +189,18 @@ let arenaGraphHover = null;
 let arenaGraphRenderState = null;
 let arenaTableSort = { field: 'end', direction: 'desc' };
 let arenaAssetRequest = 0;
+let historyGraphView = { general: false, comparison: false };
+let historySelectedMetrics = { general: new Set(), comparison: new Set() };
+let historyAxisMode = { general: 'count', comparison: 'count' };
+let historyPayload = { general: null, comparison: null };
+let historyPayloadKey = { general: '', comparison: '' };
+let historyLoading = false;
+let historyError = '';
+let historyAbortController = null;
+let historyRequest = 0;
+let historyHover = null;
+let historyRenderState = null;
+let committedFilters = null;
 
 function onGlobalModeFilterChange(event) {
   if (event?.detail?.kind !== 'tournament' || !event.detail.checked) return;
@@ -165,6 +238,16 @@ export function mount({ dataset = 1 } = {}) {
   arenaGraphDayEnd = null;
   arenaGraphHover = null;
   arenaTableSort = { field: 'end', direction: 'desc' };
+  historyGraphView = { general: false, comparison: false };
+  historySelectedMetrics = { general: new Set(), comparison: new Set() };
+  historyAxisMode = { general: 'count', comparison: 'count' };
+  historyPayload = { general: null, comparison: null };
+  historyPayloadKey = { general: '', comparison: '' };
+  historyLoading = false;
+  historyError = '';
+  historyHover = null;
+  historyRenderState = null;
+  committedFilters = null;
   Object.assign(window, {
     setPlayersView, resetPlayersFilters, applyPlayersFilters,
     selectAllPlayersMaps, selectNonePlayersMaps, togglePlayersMap,
@@ -177,6 +260,10 @@ export function mount({ dataset = 1 } = {}) {
     onPlayersArenaGraphMove, clearPlayersArenaGraphHover, onArenaGraphDayInput,
     selectPlayersArenaTopFive, clearPlayersArenaGraphSelection, selectPlayersArenaRandom,
     sortArenaTable,
+    togglePlayersHistoryGraph, onPlayersHistoryGraphKey,
+    togglePlayersHistoryMetric, clearPlayersHistoryMetrics,
+    setPlayersHistoryAxis, onPlayersHistoryGraphMove,
+    clearPlayersHistoryGraphHover, closePlayersHistoryModal,
   });
   renderMapChips();
   syncTabs();
@@ -194,6 +281,9 @@ export function unmount() {
   cancelComparisonSearch();
   statsAbortController?.abort();
   statsAbortController = null;
+  historyAbortController?.abort();
+  historyAbortController = null;
+  closePlayersHistoryModal();
   hideTooltip();
   closeSuggestions();
   setTopbarDatasetLock(null);
@@ -223,7 +313,7 @@ export function setDataset(value) {
   ensureCompatibleArenaSelection();
   renderArenaSeasonFilter();
   loadPlayerIndex();
-  loadData(++token);
+  loadData(++token, { recheckGraphAfterLoad: true });
 }
 
 function setPlayersView(next) {
@@ -248,6 +338,15 @@ function syncTabs() {
   window.setGlobalModeFilterVisibility?.({
     arena: false,
     tournament: view !== 'arena_top_100',
+  });
+  ['general', 'comparison'].forEach(tabView => {
+    const toggle = document.getElementById(`players${tabView === 'general' ? 'General' : 'Comparison'}GraphToggle`);
+    toggle?.classList.toggle('active', Boolean(historyGraphView[tabView]));
+    if (toggle) {
+      const showingGraph = Boolean(historyGraphView[tabView]);
+      toggle.title = showingGraph ? 'Show table' : 'Show graph';
+      toggle.setAttribute('aria-label', showingGraph ? `Show ${tabView} table` : `Show ${tabView} history graph`);
+    }
   });
 }
 
@@ -277,6 +376,35 @@ function params() {
     players_arena_only: selectedArenaSeasons.length > 0,
     players_arena_seasons: selectedArenaSeasons.length > 0 ? [...selectedArenaSeasons] : [],
   };
+}
+
+function capturePlayersFilterState() {
+  return {
+    opponentEloMin: value('playersOpponentEloMin'),
+    opponentEloMax: value('playersOpponentEloMax'),
+    dateFrom: value('playersDateFrom'),
+    dateTo: value('playersDateTo'),
+    lastX: value('playersLastX'),
+    maps: [...selectedMaps],
+    arenaSeasons: [...selectedArenaSeasons],
+    tournamentOnly: Boolean(document.getElementById('globalTournamentOnly')?.checked),
+  };
+}
+
+function restorePlayersFilterState(state) {
+  if (!state) return;
+  const set = (id, next) => { const input = document.getElementById(id); if (input) input.value = next ?? ''; };
+  set('playersOpponentEloMin', state.opponentEloMin);
+  set('playersOpponentEloMax', state.opponentEloMax);
+  set('playersDateFrom', state.dateFrom);
+  set('playersDateTo', state.dateTo);
+  set('playersLastX', state.lastX);
+  selectedMaps = [...state.maps];
+  selectedArenaSeasons = [...state.arenaSeasons];
+  window.setGlobalTournamentOnly?.(state.tournamentOnly);
+  renderMapChips();
+  renderArenaSeasonFilter();
+  syncDateLastControls();
 }
 
 function isDefault(request) {
@@ -414,7 +542,48 @@ async function loadPlayerIndex() {
 
 function retryPlayersIndex() { loadPlayerIndex(); }
 
-async function loadData(activeToken) {
+function applyPlayersPayload(payload) {
+  rows = Array.isArray(payload.data) ? payload.data : [];
+  if (view === 'comparison') {
+    comparisonCounts = Array.isArray(payload.players) ? payload.players : [];
+  } else {
+    playerGameCount = Number(payload.player_game_count) || 0;
+    playerSelectedGameCount = Number(payload.player_selected_game_count) || 0;
+    playerAssociatedGameCount = Number(payload.player_associated_game_count) || 0;
+    playerIsMerged = Boolean(payload.player_is_merged);
+  }
+}
+
+function graphEligibilityFromPayload(payload, targetView = view) {
+  if (targetView === 'general') {
+    if (!selectedPlayer) return { ok: false, message: 'Please select a player' };
+    if ((Number(payload?.player_game_count) || 0) < PLAYER_GRAPH_MIN_GAMES) {
+      return { ok: false, message: 'Minimum game count: 250' };
+    }
+    return { ok: true };
+  }
+  if (selectedPlayers.length < 2) return { ok: false, message: 'Please select at least two players' };
+  const counts = Array.isArray(payload?.players) ? payload.players : [];
+  if (selectedPlayers.some(name => (Number(counts.find(item => item.name === name)?.game_count) || 0) < PLAYER_GRAPH_MIN_GAMES)) {
+    return { ok: false, message: 'Minimum game count for any player: 250' };
+  }
+  return { ok: true };
+}
+
+function currentGraphEligibility(targetView = view) {
+  return graphEligibilityFromPayload(targetView === 'general'
+    ? { player_game_count: playerGameCount }
+    : { players: comparisonCounts }, targetView);
+}
+
+function invalidateHistory(targetView = view) {
+  historyPayload[targetView] = null;
+  historyPayloadKey[targetView] = '';
+  historyHover = null;
+  historyRenderState = null;
+}
+
+async function loadData(activeToken, { proposedGraphFilters = false, recheckGraphAfterLoad = false } = {}) {
   if (view === 'arena_top_100') {
     statsAbortController?.abort();
     statsLoading = false;
@@ -422,6 +591,11 @@ async function loadData(activeToken) {
     return;
   }
   if (view === 'comparison' && selectedPlayers.length === 0) {
+    if (historyGraphView.comparison) {
+      historyGraphView.comparison = false;
+      syncTabs();
+      showPlayersHistoryModal('Please select at least two players');
+    }
     renderLoading();
     try {
       const payload = await loadSnapshot(SNAPSHOT_URL(isMW));
@@ -429,6 +603,7 @@ async function loadData(activeToken) {
       rows = (payload.data || []).map(row => ({ ...row, values: [] }));
       comparisonCounts = [];
       statsLoading = false;
+      committedFilters = capturePlayersFilterState();
       renderTable();
     } catch (error) {
       if (mounted && activeToken === token) {
@@ -450,22 +625,44 @@ async function loadData(activeToken) {
       { signal: requestController.signal },
     );
     if (!mounted || activeToken !== token) return;
-    rows = Array.isArray(payload.data) ? payload.data : [];
-    if (view === 'comparison') {
-      comparisonCounts = Array.isArray(payload.players) ? payload.players : [];
-    } else {
-      playerGameCount = Number(payload.player_game_count) || 0;
-      playerSelectedGameCount = Number(payload.player_selected_game_count) || 0;
-      playerAssociatedGameCount = Number(payload.player_associated_game_count) || 0;
-      playerIsMerged = Boolean(payload.player_is_merged);
+    if (proposedGraphFilters && historyGraphView[view]) {
+      const eligibility = graphEligibilityFromPayload(payload);
+      if (!eligibility.ok) {
+        restorePlayersFilterState(committedFilters);
+        statsLoading = false;
+        document.querySelector('.players-history-graph-shell')?.classList.remove('players-updating');
+        updatePlayersMeta();
+        showPlayersHistoryModal(view === 'general'
+          ? 'Minimum game count: 250 (not fulfilled under proposed filter set)'
+          : 'Minimum game count for any player: 250 (not fulfilled under proposed filter set)');
+        return false;
+      }
     }
+    applyPlayersPayload(payload);
+    committedFilters = capturePlayersFilterState();
+    invalidateHistory(view);
     statsLoading = false;
+    if ((recheckGraphAfterLoad || historyGraphView[view]) && historyGraphView[view]) {
+      const eligibility = currentGraphEligibility();
+      if (!eligibility.ok) {
+        historyGraphView[view] = false;
+        syncTabs();
+        showPlayersHistoryModal(eligibility.message);
+      }
+    }
     renderTable();
+    return true;
   } catch (error) {
     if (error?.name === 'AbortError') return;
     if (mounted && activeToken === token) {
       statsLoading = false;
       const publicError = publicPlayersError(error);
+      if (proposedGraphFilters && historyGraphView[view]) {
+        restorePlayersFilterState(committedFilters);
+        document.querySelector('.players-history-graph-shell')?.classList.remove('players-updating');
+        updatePlayersMeta(publicError);
+        return false;
+      }
       if (rows.length) {
         document.querySelector('.players-table-wrap')?.classList.remove('players-updating');
         updatePlayersMeta(publicError);
@@ -485,7 +682,8 @@ function publicPlayersError(error) {
 }
 
 function renderTable() {
-  if (view === 'comparison') renderComparisonTable();
+  if (historyGraphView[view] && (view === 'general' || view === 'comparison')) renderPlayersHistoryGraph();
+  else if (view === 'comparison') renderComparisonTable();
   else renderGeneralTable();
 }
 
@@ -570,13 +768,29 @@ function rangeForValues(values) {
 }
 
 function renderMapChips() {
-  const host = document.getElementById('playersMapChips');
-  if (host) host.innerHTML = MAPS.map(([short, full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="togglePlayersMap(this.dataset.map)">${short}</button>`).join('');
+  const host = document.getElementById('playersMapFilter');
+  if (!host) return;
+  host.innerHTML = MAP_GROUPS.map(([id, label, maps]) => `
+    <div class="records-map-group" data-map-group="${id}">
+      <div class="records-filter-heading">
+        <span class="filter-label">${label}</span>
+        <span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllPlayersMaps('${id}')">all</span> / <span class="map-toggle-link" onclick="selectNonePlayersMaps('${id}')">none</span>)</span>
+      </div>
+      <div class="records-map-chips">${maps.map(([short, full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="togglePlayersMap(this.dataset.map)">${short}</button>`).join('')}</div>
+    </div>`).join('');
 }
 
 function togglePlayersMap(map) { selectedMaps = selectedMaps.includes(map) ? selectedMaps.filter(item => item !== map) : [...selectedMaps, map]; renderMapChips(); }
-function selectAllPlayersMaps() { selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); }
-function selectNonePlayersMaps() { selectedMaps = []; renderMapChips(); }
+function selectAllPlayersMaps(groupId) {
+  const maps = MAP_GROUPS.find(([id]) => id === groupId)?.[2] || [];
+  selectedMaps = [...new Set([...selectedMaps, ...maps.map(([, full]) => full)])];
+  renderMapChips();
+}
+function selectNonePlayersMaps(groupId) {
+  const maps = new Set((MAP_GROUPS.find(([id]) => id === groupId)?.[2] || []).map(([, full]) => full));
+  selectedMaps = selectedMaps.filter(map => !maps.has(map));
+  renderMapChips();
+}
 
 function resetPlayersFilters() {
   const set = (id, next) => { const el = document.getElementById(id); if (el) el.value = next; };
@@ -584,11 +798,13 @@ function resetPlayersFilters() {
   set('playersDateFrom', ''); set('playersDateTo', ''); set('playersLastX', '');
   selectedArenaSeasons = [];
   selectedMaps = MAPS.map(([, full]) => full);
-  renderMapChips(); renderArenaSeasonFilter(); syncDateLastControls(); loadData(++token);
+  window.setGlobalTournamentOnly?.(false);
+  renderMapChips(); renderArenaSeasonFilter(); syncDateLastControls();
+  loadData(++token, { proposedGraphFilters: historyGraphView[view] });
 }
 
 function applyPlayersFilters() {
-  loadData(++token);
+  loadData(++token, { proposedGraphFilters: historyGraphView[view] });
   document.getElementById('sidebar')?.classList.remove('open');
   document.getElementById('sidebarOverlay')?.classList.remove('active');
 }
@@ -742,7 +958,7 @@ function selectPlayer(name, slot = activeSearchSlot) {
   }
   suggestionsOpen = false;
   closeSuggestions();
-  loadData(++token);
+  loadData(++token, { recheckGraphAfterLoad: true });
 }
 
 function clearPlayersSearch(event) {
@@ -750,6 +966,12 @@ function clearPlayersSearch(event) {
   if (view === 'general') selectedPlayer = null;
   else selectedPlayers = selectedPlayers.filter((_, index) => index !== slot);
   closeSuggestions();
+  if (historyGraphView[view]) {
+    historyGraphView[view] = false;
+    invalidateHistory(view);
+    syncTabs();
+    showPlayersHistoryModal(view === 'general' ? 'Please select a player' : 'Please select at least two players');
+  }
   loadData(++token);
 }
 
@@ -804,6 +1026,338 @@ function formatValue(raw, format) {
   if (format === 'percent') return `${value.toFixed(1)}%`;
   if (format === 'compact') return value.toLocaleString('en-US');
   return value.toFixed(2);
+}
+
+function historyMetricCatalog() {
+  return rows.map((row, index) => {
+    const key = HISTORY_METRIC_KEYS.get(String(row.metric)) || HISTORY_METRIC_KEYS.get(displayMetricName(row.metric));
+    if (!key) return null;
+    return {
+      key,
+      label: displayMetricName(row.metric),
+      format: row.format || 'number',
+      group: HISTORY_GROUPS.get(key) || `metric:${key}`,
+      sort_order: index + 1,
+    };
+  }).filter(Boolean);
+}
+
+function showPlayersHistoryModal(message) {
+  const modal = document.getElementById('playersHistoryModal');
+  const text = document.getElementById('playersHistoryModalMessage');
+  if (!modal || !text) return;
+  text.textContent = message;
+  modal.hidden = false;
+  requestAnimationFrame(() => document.getElementById('playersHistoryModalOk')?.focus());
+}
+
+function closePlayersHistoryModal() {
+  const modal = document.getElementById('playersHistoryModal');
+  if (modal) modal.hidden = true;
+}
+
+function togglePlayersHistoryGraph(event, targetView) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  if (view !== targetView || !['general', 'comparison'].includes(targetView)) return;
+  if (historyGraphView[targetView]) {
+    historyGraphView[targetView] = false;
+    historyHover = null;
+    syncTabs();
+    renderTable();
+    return;
+  }
+  const eligibility = currentGraphEligibility(targetView);
+  if (!eligibility.ok) {
+    showPlayersHistoryModal(eligibility.message);
+    return;
+  }
+  historyGraphView[targetView] = true;
+  syncTabs();
+  renderPlayersHistoryGraph();
+}
+
+function onPlayersHistoryGraphKey(event, targetView) {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  togglePlayersHistoryGraph(event, targetView);
+}
+
+function clearPlayersHistoryMetrics() {
+  if (!['general', 'comparison'].includes(view)) return;
+  historySelectedMetrics[view] = new Set();
+  invalidateHistory(view);
+  renderPlayersHistoryGraph();
+}
+
+function togglePlayersHistoryMetric(metricKey) {
+  if (!historyGraphView[view]) return;
+  const catalog = historyMetricCatalog();
+  const metric = catalog.find(item => item.key === metricKey);
+  if (!metric) return;
+  if (view === 'comparison') {
+    historySelectedMetrics.comparison = new Set([metricKey]);
+    invalidateHistory('comparison');
+    renderPlayersHistoryGraph();
+    return;
+  }
+  const selected = new Set(historySelectedMetrics.general);
+  const activeMetric = catalog.find(item => selected.has(item.key));
+  if (activeMetric && activeMetric.group !== metric.group) return;
+  if (selected.has(metricKey)) selected.delete(metricKey);
+  else selected.add(metricKey);
+  historySelectedMetrics.general = selected;
+  if (selected.size === 0) invalidateHistory('general');
+  renderPlayersHistoryGraph();
+}
+
+function setPlayersHistoryAxis(axis) {
+  if (!['count', 'date'].includes(axis) || !['general', 'comparison'].includes(view)) return;
+  historyAxisMode[view] = axis;
+  historyHover = null;
+  renderPlayersHistoryGraphCanvas();
+}
+
+function historyRequestMetrics() {
+  const catalog = historyMetricCatalog();
+  const selected = [...historySelectedMetrics[view]];
+  if (!selected.length) return [];
+  if (view === 'comparison') return [selected[0]];
+  const first = catalog.find(item => item.key === selected[0]);
+  return first ? catalog.filter(item => item.group === first.group).map(item => item.key) : [];
+}
+
+function playersHistoryRequest(metricKeys) {
+  return {
+    ...params(),
+    tournament_only: Boolean(document.getElementById('globalTournamentOnly')?.checked),
+    players_history: true,
+    players_history_metrics: metricKeys,
+  };
+}
+
+function historyRequestCacheKey(request) {
+  return JSON.stringify({
+    ...request,
+    maps: [...(request.maps || [])].sort(),
+    players_arena_seasons: [...(request.players_arena_seasons || [])].sort(),
+    players_history_metrics: [...(request.players_history_metrics || [])].sort(),
+  });
+}
+
+async function ensurePlayersHistory() {
+  const metricKeys = historyRequestMetrics();
+  if (!metricKeys.length || !historyGraphView[view]) return;
+  const targetView = view;
+  const request = playersHistoryRequest(metricKeys);
+  const key = historyRequestCacheKey(request);
+  if (historyPayload[targetView] && historyPayloadKey[targetView] === key) return;
+  const requestId = ++historyRequest;
+  historyAbortController?.abort();
+  const controller = new AbortController();
+  historyAbortController = controller;
+  historyLoading = true;
+  historyError = '';
+  renderPlayersHistoryGraphStatus();
+  try {
+    const payload = await fetchStats(request, { signal: controller.signal });
+    if (!mounted || requestId !== historyRequest || view !== targetView || !historyGraphView[targetView]) return;
+    if (payload?.players_history !== true || !Array.isArray(payload.metrics) || !Array.isArray(payload.players)) {
+      throw new Error('History response has an invalid shape.');
+    }
+    historyPayload[targetView] = payload;
+    historyPayloadKey[targetView] = key;
+    historyLoading = false;
+    historyError = '';
+    renderPlayersHistoryGraph();
+  } catch (error) {
+    if (error?.name === 'AbortError') return;
+    if (!mounted || requestId !== historyRequest || view !== targetView) return;
+    historyLoading = false;
+    historyError = publicPlayersError(error);
+    renderPlayersHistoryGraphStatus();
+  } finally {
+    if (historyAbortController === controller) historyAbortController = null;
+  }
+}
+
+function renderPlayersHistoryGraph() {
+  const host = document.getElementById('playersContent');
+  if (!host || !historyGraphView[view]) return;
+  updatePlayersMeta();
+  host.innerHTML = `<div class="players-history-graph-shell">
+    <div class="players-history-chart" id="playersHistoryChart">
+      <div class="players-arena-graph-tooltip" id="playersHistoryGraphTooltip" role="status" aria-live="polite"></div>
+      <div class="players-history-chart-status" id="playersHistoryChartStatus"></div>
+    </div>
+    <aside class="players-history-legend">
+      <button type="button" class="players-history-deselect" onclick="clearPlayersHistoryMetrics()">Deselect all</button>
+      <div class="players-history-legend-list" id="playersHistoryLegendList"></div>
+    </aside>
+  </div>`;
+  renderPlayersHistoryLegend();
+  renderPlayersHistoryGraphCanvas();
+  void ensurePlayersHistory();
+}
+
+function renderPlayersHistoryGraphStatus() {
+  const host = document.getElementById('playersHistoryChartStatus');
+  if (!host) return;
+  const selected = historySelectedMetrics[view].size;
+  if (!selected) host.textContent = 'Select a metric from the legend.';
+  else if (historyLoading) host.textContent = 'Loading rolling averages...';
+  else if (historyError) host.textContent = `Could not load history: ${historyError}`;
+  else host.textContent = '';
+  host.classList.toggle('is-hidden', host.textContent === '');
+}
+
+function renderPlayersHistoryLegend() {
+  const host = document.getElementById('playersHistoryLegendList');
+  if (!host) return;
+  const catalog = historyMetricCatalog();
+  const selected = historySelectedMetrics[view];
+  const selectedList = catalog.filter(item => selected.has(item.key));
+  const activeGroup = view === 'general' ? selectedList[0]?.group : null;
+  host.innerHTML = catalog.map(metric => {
+    const active = selected.has(metric.key);
+    const compatible = view === 'comparison' || !activeGroup || metric.group === activeGroup;
+    const colorIndex = selectedList.findIndex(item => item.key === metric.key);
+    const dotColor = active
+      ? HISTORY_LINE_COLORS[Math.max(0, colorIndex) % HISTORY_LINE_COLORS.length]
+      : compatible && activeGroup ? '#ffffff' : 'transparent';
+    return `<button type="button" class="players-history-legend-item ${active ? 'active' : ''} ${compatible ? '' : 'incompatible'}" data-metric="${escapeAttr(metric.key)}" onclick="togglePlayersHistoryMetric(this.dataset.metric)" ${compatible ? '' : 'disabled'}><span class="players-history-metric-dot" style="background:${dotColor}"></span><span>${escapeHtml(metric.label)}</span></button>`;
+  }).join('');
+}
+
+function svgPathForHistory(points) {
+  let path = '';
+  let drawing = false;
+  points.forEach(point => {
+    if (!Number.isFinite(point.value) || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      drawing = false;
+      return;
+    }
+    path += `${drawing ? ' L' : ' M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+    drawing = true;
+  });
+  return path.trim();
+}
+
+function historyDateLabel(timestamp) {
+  return new Date(timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
+}
+
+function renderPlayersHistoryGraphCanvas() {
+  const host = document.getElementById('playersHistoryChart');
+  if (!host) return;
+  renderPlayersHistoryGraphStatus();
+  const selectedMetrics = [...historySelectedMetrics[view]];
+  const payload = historyPayload[view];
+  const requestKey = selectedMetrics.length ? historyRequestCacheKey(playersHistoryRequest(historyRequestMetrics())) : '';
+  const usable = payload && historyPayloadKey[view] === requestKey;
+  host.querySelector('svg')?.remove();
+  host.querySelector('.players-history-axis-footer')?.remove();
+  host.querySelector('.players-history-player-key')?.remove();
+  if (!selectedMetrics.length || !usable) return;
+  const width = 900; const height = 430;
+  const margin = { left: 64, right: 25, top: 24, bottom: 42 };
+  const innerWidth = width - margin.left - margin.right;
+  const innerHeight = height - margin.top - margin.bottom;
+  const metricMap = new Map((payload.metrics || []).map(item => [item.key, item]));
+  const series = [];
+  if (view === 'general') {
+    const player = payload.players?.[0];
+    selectedMetrics.forEach((metricKey, index) => {
+      const values = player?.series?.[metricKey] || [];
+      series.push({
+        id: metricKey, label: metricMap.get(metricKey)?.label || metricKey,
+        format: metricMap.get(metricKey)?.format || 'number',
+        color: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length],
+        gameNumbers: player?.game_numbers || [], timestamps: player?.timestamps || [], values,
+      });
+    });
+  } else {
+    const metricKey = selectedMetrics[0];
+    (payload.players || []).forEach((player, index) => series.push({
+      id: player.name, label: player.name,
+      format: metricMap.get(metricKey)?.format || 'number',
+      color: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length],
+      gameNumbers: player.game_numbers || [], timestamps: player.timestamps || [],
+      values: player.series?.[metricKey] || [],
+    }));
+  }
+  const useDate = historyAxisMode[view] === 'date';
+  const allX = series.flatMap(item => (useDate ? item.timestamps.map(Date.parse) : item.gameNumbers.map(Number))).filter(Number.isFinite);
+  const allY = series.flatMap(item => item.values.map(Number)).filter(Number.isFinite);
+  if (!allX.length || !allY.length) return;
+  let xMin = Math.min(...allX); let xMax = Math.max(...allX);
+  let yMin = Math.min(...allY); let yMax = Math.max(...allY);
+  if (xMax <= xMin) xMax = xMin + 1;
+  const yPad = Math.max((yMax - yMin) * .08, Math.abs(yMax || 1) * .02, .1);
+  yMin -= yPad; yMax += yPad;
+  if (yMax <= yMin) yMax = yMin + 1;
+  const x = value => margin.left + ((value - xMin) / (xMax - xMin)) * innerWidth;
+  const y = value => margin.top + (1 - (value - yMin) / (yMax - yMin)) * innerHeight;
+  const yTicks = Array.from({ length: 6 }, (_, index) => yMin + (yMax - yMin) * index / 5);
+  const xTicks = Array.from({ length: 5 }, (_, index) => xMin + (xMax - xMin) * index / 4);
+  const grid = yTicks.map(value => `<g><line x1="${margin.left}" y1="${y(value)}" x2="${width - margin.right}" y2="${y(value)}"/><text x="${margin.left - 9}" y="${y(value) + 4}" text-anchor="end">${Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1)}</text></g>`).join('');
+  const xGrid = xTicks.map(value => `<g><line x1="${x(value)}" y1="${margin.top}" x2="${x(value)}" y2="${height - margin.bottom}"/><text x="${x(value)}" y="${height - 18}" text-anchor="middle">${useDate ? historyDateLabel(value) : Math.round(value).toLocaleString('en-US')}</text></g>`).join('');
+  const plotted = series.map(item => ({
+    ...item,
+    points: item.values.map((raw, index) => {
+      const value = finiteNumber(raw);
+      const rawX = useDate ? Date.parse(item.timestamps[index]) : Number(item.gameNumbers[index]);
+      return { value, rawX, x: Number.isFinite(rawX) ? x(rawX) : Number.NaN, y: Number.isFinite(value) ? y(value) : Number.NaN };
+    }),
+  }));
+  const paths = plotted.map(item => `<path class="players-history-line" data-series="${escapeAttr(item.id)}" d="${svgPathForHistory(item.points)}" stroke="${item.color}"></path>`).join('');
+  host.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Trailing 100-game rolling averages" onmousemove="onPlayersHistoryGraphMove(event)" onmouseleave="clearPlayersHistoryGraphHover()"><g class="players-arena-grid">${grid}${xGrid}</g><line class="players-arena-axis" x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}"/><line class="players-arena-axis" x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}"/>${paths}<text class="players-arena-axis-title" transform="translate(15 ${height / 2}) rotate(-90)" text-anchor="middle">Value</text></svg>`);
+  const footerName = view === 'general' ? `<div class="players-history-footer-name">${escapeHtml(selectedPlayer || '')}</div>` : '';
+  host.insertAdjacentHTML('beforeend', `<div class="players-history-axis-footer">${footerName}<div class="players-history-axis-modes"><button type="button" class="${useDate ? '' : 'active'}" onclick="setPlayersHistoryAxis('count')">by game count</button><span>/</span><button type="button" class="${useDate ? 'active' : ''}" onclick="setPlayersHistoryAxis('date')">by date</button></div></div>`);
+  if (view === 'comparison') {
+    host.insertAdjacentHTML('beforeend', `<div class="players-history-player-key">${plotted.map(item => `<span><i style="background:${item.color}"></i>${escapeHtml(item.label)}</span>`).join('')}</div>`);
+  }
+  historyRenderState = { series: new Map(plotted.map(item => [item.id, item])) };
+  updatePlayersHistoryHoverLabel();
+}
+
+function nearestHistoryPoint(points, targetX) {
+  let best = null;
+  (points || []).forEach(point => {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.value)) return;
+    if (!best || Math.abs(point.x - targetX) < Math.abs(best.x - targetX)) best = point;
+  });
+  return best;
+}
+
+function onPlayersHistoryGraphMove(event) {
+  const svg = event.currentTarget;
+  const line = event.target?.closest?.('.players-history-line');
+  if (!svg || !line || !historyRenderState) { clearPlayersHistoryGraphHover(); return; }
+  const matrix = svg.getScreenCTM?.();
+  if (!matrix) return;
+  const pointer = svg.createSVGPoint(); pointer.x = event.clientX; pointer.y = event.clientY;
+  const svgPointer = pointer.matrixTransform(matrix.inverse());
+  const item = historyRenderState.series.get(line.dataset.series);
+  const point = nearestHistoryPoint(item?.points, svgPointer.x);
+  if (!point || !item) return;
+  historyHover = { value: point.value, format: item.format, clientX: event.clientX, clientY: event.clientY };
+  updatePlayersHistoryHoverLabel();
+}
+
+function clearPlayersHistoryGraphHover() { historyHover = null; updatePlayersHistoryHoverLabel(); }
+
+function updatePlayersHistoryHoverLabel() {
+  const host = document.getElementById('playersHistoryChart');
+  const tip = document.getElementById('playersHistoryGraphTooltip');
+  if (!host || !tip) return;
+  if (!historyHover) { tip.classList.remove('visible'); return; }
+  tip.textContent = formatValue(historyHover.value, historyHover.format);
+  tip.classList.add('visible');
+  const rect = host.getBoundingClientRect();
+  const left = historyHover.clientX - rect.left - tip.offsetWidth / 2;
+  const top = historyHover.clientY - rect.top - tip.offsetHeight - 8;
+  tip.style.left = `${Math.max(8, Math.min(rect.width - tip.offsetWidth - 8, left))}px`;
+  tip.style.top = `${Math.max(4, top)}px`;
 }
 
 function availableTop100Seasons() {
@@ -1208,6 +1762,12 @@ function renderArenaGraphLegend() {
 
 function renderLoading() {
   statsLoading = true;
+  const graph = document.querySelector('.players-history-graph-shell');
+  if (graph && historyGraphView[view]) {
+    graph.classList.add('players-updating');
+    updatePlayersMeta();
+    return;
+  }
   const existing = document.querySelector('.players-table-wrap');
   if (existing && rows.length) {
     existing.classList.add('players-updating');
@@ -1231,3 +1791,11 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('scroll', () => { if (mounted) positionSuggestions(); }, true);
 window.addEventListener('resize', () => { if (mounted) positionSuggestions(); });
+document.addEventListener('keydown', event => {
+  if (!mounted || event.key !== 'Escape') return;
+  const modal = document.getElementById('playersHistoryModal');
+  if (modal && !modal.hidden) {
+    event.preventDefault();
+    closePlayersHistoryModal();
+  }
+});

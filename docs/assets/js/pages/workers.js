@@ -152,7 +152,10 @@ function isDefault(p) {
 function snapshotUrl() { return `${API_ROOT}/${VIEWS[view]}/default-${isMW ? 'mw' : 'base'}.json`; }
 
 async function loadData(activeToken) {
-  renderLoading();
+  const content = document.getElementById('workersContent');
+  const preserve = rows.length > 0;
+  if (preserve) content?.classList.add('stats-updating');
+  else renderLoading();
   try {
     const p = params();
     const payload = await loadStats(p, isDefault(p) ? snapshotUrl() : null);
@@ -160,7 +163,10 @@ async function loadData(activeToken) {
     rows = Array.isArray(payload.data) ? payload.data : [];
     render();
   } catch (error) {
-    if (mounted && activeToken === token) renderError(error);
+    if (mounted && activeToken === token && !preserve) renderError(error);
+    else console.error('Could not update worker statistics', error);
+  } finally {
+    if (mounted && activeToken === token) content?.classList.remove('stats-updating');
   }
 }
 

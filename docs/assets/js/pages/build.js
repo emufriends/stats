@@ -278,7 +278,7 @@ function enclosureCell(row, field, range) {
 }
 
 function renderHexes() {
-  // Hexes is always non-conceded. Both collapsed and exact rows arrive in the
+  // Hexes always uses the shared completed-game population. Both collapsed and exact rows arrive in the
   // same snapshot/API payload, so changing expansion never performs a request.
   document.getElementById('tableMeta').textContent = '';
   const mapFields = MAPS.map(([, key]) => key);

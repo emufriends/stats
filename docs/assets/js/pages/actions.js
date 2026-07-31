@@ -166,13 +166,21 @@ function isDefault(p) {
     p.date_from === '2025-01-01' && p.date_to === null && selectedMaps.length === MAPS.length;
 }
 async function loadData(activeToken) {
-  renderLoading();
+  const content = document.getElementById('actionsContent');
+  const preserve = rows.length > 0;
+  if (preserve) content?.classList.add('stats-updating');
+  else renderLoading();
   try {
     const p = params();
     const payload = await loadStats(p, isDefault(p) ? snapshotUrl() : null);
     if (!mounted || activeToken !== token) return;
     rows = payload.data || []; render();
-  } catch (error) { if (mounted && activeToken === token) renderError(error); }
+  } catch (error) {
+    if (mounted && activeToken === token && !preserve) renderError(error);
+    else console.error('Could not update action statistics', error);
+  } finally {
+    if (mounted && activeToken === token) content?.classList.remove('stats-updating');
+  }
 }
 function render() {
   document.getElementById('tableMeta').textContent = '';

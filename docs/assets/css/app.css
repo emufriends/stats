@@ -2554,9 +2554,7 @@
     }
 
     .home-map-group {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 6px;
+      display: block;
     }
 
     .home-map-group + .home-map-group {
@@ -3161,6 +3159,30 @@
     width: 33.3333%;
 }
 
+/* Filtered refreshes retain the previous complete table. This lightweight
+   state communicates progress without replacing useful data with a spinner. */
+.stats-updating {
+  position: relative;
+  opacity: .62;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.stats-updating::after {
+  content: "Updating...";
+  position: sticky;
+  z-index: 40;
+  top: 8px;
+  left: calc(100% - 92px);
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--border-color, #28534d);
+  border-radius: 7px;
+  background: #0c2824;
+  color: #7dc9be;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 /* Conservation uses the same compact table language as Actions and Endgames,
    while keeping three independent switch groups aligned in the shared header. */
 .conservation-switches {
@@ -3288,6 +3310,11 @@
 .scoring-table th,
 .scoring-table td {
     text-align: center;
+}
+
+.scoring-header-tooltip {
+    margin-left: 3px;
+    margin-right: 0;
 }
 
 @media (max-width: 700px) {
@@ -3745,7 +3772,8 @@
       font: 600 12px Inter, sans-serif;
     }
 
-    .players-arena-tab {
+    .players-arena-tab,
+    .players-history-tab {
       display: flex;
       align-items: center;
       justify-content: center;
@@ -3956,6 +3984,206 @@
       border: 2px solid var(--border);
       border-radius: var(--radius-lg);
       background: var(--bg-panel);
+    }
+
+    .players-history-graph-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 255px;
+      height: min(500px, calc(100dvh - 212px));
+      min-height: 300px;
+      overflow: hidden;
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--bg-panel);
+    }
+
+    .players-history-graph-shell.players-updating {
+      opacity: .65;
+      pointer-events: none;
+      transition: opacity .12s ease;
+    }
+
+    .players-history-chart {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      padding: 8px 8px 4px;
+    }
+
+    .players-history-chart svg {
+      display: block;
+      width: 100%;
+      min-height: 0;
+      flex: 1 1 auto;
+    }
+
+    .players-history-line {
+      fill: none;
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      pointer-events: stroke;
+      cursor: crosshair;
+      transition: stroke-width .12s, opacity .12s;
+    }
+
+    .players-history-line:hover { stroke-width: 3.8; }
+
+    .players-history-chart-status {
+      position: absolute;
+      inset: 45% 16px auto;
+      z-index: 2;
+      color: var(--text-muted);
+      text-align: center;
+      font-size: 12px;
+    }
+
+    .players-history-axis-footer {
+      flex: 0 0 auto;
+      min-height: 37px;
+      text-align: center;
+    }
+
+    .players-history-footer-name {
+      height: 17px;
+      overflow: hidden;
+      color: var(--text);
+      font: 600 11px/17px Inter, sans-serif;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .players-history-axis-modes {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 5px;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .players-history-axis-modes button {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font: 500 11px Inter, sans-serif;
+    }
+
+    .players-history-axis-modes button.active {
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .players-history-player-key {
+      position: absolute;
+      top: 16px;
+      right: 18px;
+      z-index: 2;
+      display: flex;
+      max-width: min(55%, 430px);
+      flex-wrap: wrap;
+      gap: 4px 10px;
+      padding: 6px 8px;
+      border: 1px solid var(--border-light);
+      border-radius: 6px;
+      background: rgba(9, 27, 24, .88);
+      color: var(--text);
+      font-size: 10px;
+    }
+
+    .players-history-player-key span { display: flex; align-items: center; gap: 5px; min-width: 0; }
+    .players-history-player-key i { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+
+    .players-history-legend {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      padding: 10px;
+      border-left: 1px solid var(--border-light);
+      background: var(--bg-header);
+    }
+
+    .players-history-deselect {
+      flex: 0 0 auto;
+      align-self: flex-start;
+      margin-bottom: 7px;
+      padding: 3px 8px;
+      border: 1px solid var(--border-light);
+      border-radius: 5px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      font: 600 11px Inter, sans-serif;
+    }
+
+    .players-history-legend-list {
+      display: flex;
+      min-height: 0;
+      overflow-y: auto;
+      flex: 1 1 auto;
+      flex-direction: column;
+      gap: 2px;
+      padding-right: 3px;
+    }
+
+    .players-history-legend-item {
+      display: grid;
+      grid-template-columns: 12px minmax(0, 1fr);
+      align-items: center;
+      gap: 7px;
+      width: 100%;
+      padding: 4px 5px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font: 500 11px/1.2 Inter, sans-serif;
+      text-align: left;
+    }
+
+    .players-history-legend-item:hover:not(:disabled),
+    .players-history-legend-item.active { background: var(--bg-hover); color: var(--text); }
+    .players-history-legend-item.incompatible { opacity: .32; cursor: not-allowed; }
+    .players-history-metric-dot { width: 8px; height: 8px; border: 1px solid transparent; border-radius: 50%; }
+    .players-history-legend-item:not(.incompatible) .players-history-metric-dot[style*="#ffffff"] { border-color: rgba(255,255,255,.35); }
+
+    .players-history-modal[hidden] { display: none; }
+    .players-history-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1400;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, .58);
+    }
+    .players-history-modal-card {
+      min-width: min(360px, calc(100vw - 40px));
+      padding: 18px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      background: var(--bg-panel);
+      color: var(--text);
+      box-shadow: 0 14px 36px rgba(0,0,0,.38);
+      text-align: center;
+      font-size: 13px;
+    }
+    .players-history-modal-card button {
+      margin-top: 16px;
+      min-width: 64px;
+      padding: 5px 12px;
+      border: 1px solid var(--border-light);
+      border-radius: 5px;
+      background: var(--bg-header);
+      color: var(--accent);
+      cursor: pointer;
+      font: 700 12px Inter, sans-serif;
     }
 
     .players-arena-chart {
@@ -5459,6 +5687,13 @@
 @media (max-width: 760px) {
   .players-arena-graph-shell {
     grid-template-columns: minmax(680px, 1fr) 220px;
+    overflow-x: auto;
+  }
+
+  .players-history-graph-shell {
+    grid-template-columns: minmax(680px, 1fr) 220px;
+    height: calc(100dvh - 198px);
+    min-height: 280px;
     overflow-x: auto;
   }
 

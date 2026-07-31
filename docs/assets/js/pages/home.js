@@ -35,15 +35,7 @@ export const sidebarHtml = `
 
   <hr class="divider" />
 
-  <div class="filter-group">
-    <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:8px;">
-      <span class="filter-label" style="margin-bottom:0">Maps</span>
-      <span class="map-select-all-none">
-        (<span class="map-toggle-link" onclick="selectAllMaps()">all</span> / <span class="map-toggle-link" onclick="selectNoneMaps()">none</span>)
-      </span>
-    </div>
-    <div class="chip-grid" id="mapChips"></div>
-  </div>
+  <div class="filter-group records-map-filter" id="mapChips"></div>
 
   <hr class="divider" />
 
@@ -78,7 +70,8 @@ const DEFAULT_SNAPSHOT_URLS = {
 };
 const MAP_GROUPS = [
   {
-    id: 'current',
+    id: 'standard',
+    label: 'Standard Maps',
     maps: [
       { short: '1a', full: 'Map 1a: Observation Tower' },
       { short: '2a', full: 'Map 2a: Outdoor Areas' },
@@ -98,7 +91,8 @@ const MAP_GROUPS = [
     ],
   },
   {
-    id: 'original',
+    id: 'legacy',
+    label: 'Legacy Maps',
     maps: [
       { short: '1', full: 'Map 1: Observation Tower' },
       { short: '2', full: 'Map 2: Outdoor Areas' },
@@ -112,6 +106,7 @@ const MAP_GROUPS = [
   },
   {
     id: 'beginner',
+    label: 'Beginner Maps',
     maps: [
       { short: 'A', full: 'Map A' },
       { short: '0', full: 'Map 0' },
@@ -119,8 +114,8 @@ const MAP_GROUPS = [
   },
 ];
 // Home intentionally starts with every configured map active, including the
-// legacy 1-8 and beginner A/0 groups. Other pages use their own restricted map
-// populations; this complete catalog is a Home-only behavior.
+// legacy 1-8 and beginner A/0 groups. Analytical pages own their individual
+// defaults; Players now deliberately uses this same all-map population.
 const ALL_MAPS = MAP_GROUPS.flatMap(group => group.maps);
 // Population groups:
 // INDEXED: games_indexed + animals_played, sponsors_played, projects_supported,
@@ -326,12 +321,16 @@ function renderMapChips() {
   const container = document.getElementById('mapChips');
   if (!container) return;
   container.innerHTML = MAP_GROUPS.map(group => `
-    <div class="home-map-group home-map-group-${group.id}">
-      ${group.maps.map(map => `
+    <div class="records-map-group home-map-group home-map-group-${group.id}">
+      <div class="records-filter-heading">
+        <span class="filter-label">${group.label}</span>
+        <span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllMaps('${group.id}')">all</span> / <span class="map-toggle-link" onclick="selectNoneMaps('${group.id}')">none</span>)</span>
+      </div>
+      <div class="records-map-chips">${group.maps.map(map => `
         <button class="chip ${selectedMaps.includes(map.full) ? 'active' : ''}" type="button"
                 title="${escapeHtml(map.full)}" onclick="toggleMapChip('${escapeAttr(map.full)}')">
           ${escapeHtml(map.short)}
-        </button>`).join('')}
+        </button>`).join('')}</div>
     </div>`).join('');
 }
 
@@ -344,13 +343,15 @@ function toggleMapChip(mapName) {
   renderMapChips();
 }
 
-function selectAllMaps() {
-  selectedMaps = ALL_MAPS.map(map => map.full);
+function selectAllMaps(groupId) {
+  const maps = MAP_GROUPS.find(group => group.id === groupId)?.maps || [];
+  selectedMaps = [...new Set([...selectedMaps, ...maps.map(map => map.full)])];
   renderMapChips();
 }
 
-function selectNoneMaps() {
-  selectedMaps = [];
+function selectNoneMaps(groupId) {
+  const maps = new Set((MAP_GROUPS.find(group => group.id === groupId)?.maps || []).map(map => map.full));
+  selectedMaps = selectedMaps.filter(map => !maps.has(map));
   renderMapChips();
 }
 
@@ -367,7 +368,8 @@ function resetFilters() {
   setValue('dateTo', '');
   const toggle = document.getElementById('endGameToggle');
   if (toggle) toggle.checked = false;
-  selectAllMaps();
+  selectedMaps = ALL_MAPS.map(map => map.full);
+  renderMapChips();
   applyFilters(++mountToken);
 }
 

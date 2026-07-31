@@ -5,7 +5,7 @@ Output:
 # Ark Nova Statistics Dashboard Handoff
 
 Date: 2026-06-21  
-Last updated: 2026-07-28  
+Last updated: 2026-07-31  
 Project owner: pr0paganda-panda / Panda  
 Current repository: https://github.com/emufriends/stats
 
@@ -25,6 +25,40 @@ The project is now a static GitHub Pages frontend backed by one Google Cloud Fun
 Cards, Opening Hand, Endgames, and Maps share the same shell, navigation rail, topbar, filter sidebar style, table behavior, and MW/Base dataset toggle. Cards and Opening Hand also share the attributes bar and type/search filters. Endgames and Maps use fixed in-page tab bars instead of an attributes bar. The backend serves Cards, Opening Hand, Endgames, and Maps via the same Cloud Function endpoint, selected with `stats_page`.
 
 The current version is considered public-release-ready. Future work should happen in the `emufriends/stats` repository and its local working copies.
+
+## Canonical Completed-Game Population
+
+Every dashboard feature uses one definition whenever it says a game is
+completed:
+
+```text
+completed game =
+  table_conceded = 0
+  AND end_game_triggered = TRUE
+```
+
+`table_conceded` is derived at table level from Full Sample `concede`: a
+concession by either player makes the table incomplete. `end_game_triggered` is
+the normalized Boolean prepared from the canonical source field. Null,
+malformed, and false trigger values are incomplete. The backend helper
+`_completed_game_sql()` is the single SQL source for this predicate in Full
+Sample, Logs, Players, card/combo aggregates, and page-specific queries.
+
+An optional `completed_only` request flag applies both conditions. If its
+filter-bar toggle is off, that page keeps its documented broader population.
+Hard-completed views apply the predicate regardless of request input. These
+include Players General/Comparison, Maps/Metrics, Endgames, Sponsor Endgames,
+Icons, Build/Hexes, the completed Actions views, Workers/General, Conservation
+Projects/Releases, Project Rewards Frequency, all Predictors views, Scoring,
+and the completed subsets used by Arena Top 100. Automatic Records use the same
+predicate. Manual Fastest Games remain an explicit spreadsheet exception;
+Biggest Turns and Elo Leaderboard remain spreadsheet-only.
+
+Predictors/Specific is always hard-completed and has no Completed-games toggle.
+Its obsolete `Triggered endgame` predictor was removed because trigger status
+is now an eligibility rule rather than an outcome. Frequency is condition
+observations divided by all completed observations in the current scope. The
+current row counts are 21 for MW and 19 for Base.
 
 ## Current Local Folders
 
@@ -503,7 +537,7 @@ currentSort = { col: 'delta_played', dir: 'desc' };
 
 Important Endgames definitions:
 
-- `Dealt` counts appearances in the starting `endgame` array from non-conceded games.
+- `Dealt` counts appearances in the starting `endgame` array from completed games.
 - `Scored` counts appearances in `endgame_scores`.
 - `Keeprate` is `Scored / Dealt`, so it can exceed 100% due to effects such as Elephants and Adapt.
 - Keeprate's numeric value is not capped; only the blue bar width is capped at 100%.
@@ -511,8 +545,8 @@ Important Endgames definitions:
   two- and three-digit percentages retain identical bar-track lengths.
 - General-view desktop widths are `5/20/12/12/8/15/9/9/10` percent for
   Rank/Endgame/Delta scored/Delta dealt/Elo/Keeprate/Scored/Dealt/CP.
-- Scored/CP stats use non-conceded games only.
-- `delta dealt` uses raw non-conceded dealt rows for Base.
+- Scored/CP stats use completed games only.
+- `delta dealt` uses raw completed-game dealt rows for Base.
 - Some MW logs attach the two initial `endgame` arrays to the opposite player. For each complete table,
   the backend chooses the same/swapped dealt-array orientation that produces more dealt/scored matches.
   Tied/ambiguous tables are excluded from MW `delta dealt`.
@@ -529,7 +563,7 @@ Endgames filters:
 
 ### Home Page
 
-`assets/js/pages/home.js` is the default route and renders 12 aggregate fact tiles. It uses MW/Base plus Elo, map, date, and Completed-only filters. Its defaults are intentionally unrestricted Elo, unrestricted dates, incomplete games included, and all 25 known maps. Map chips are grouped into current maps, original Maps 1-8, and beginner Maps A/0, and all groups are active by default. Home is the deliberate all-map exception: its backend query passes `exclude_invalid_maps=False`, so the Full Sample and Log Sample aggregates include every configured Home map. Analytical pages retain the restricted default population that excludes legacy Maps 1-8 and beginner Maps A/0. Home counts distinct `table_id` values after row-level map/dataset filtering; it does not add per-map counts. A Full Sample table can contain different Map or `is_mw` values for its player rows, so grouped `(Map, is_mw)` counts overlap and are not expected to sum to the Home total. Backend `stats_page` is `home`, with public snapshots under `card-stats/home/`.
+`assets/js/pages/home.js` is the default route and renders 12 aggregate fact tiles. It uses MW/Base plus Elo, map, date, and Completed-only filters. Its defaults are intentionally unrestricted Elo, unrestricted dates, incomplete games included, and all 25 known maps. Map chips are grouped into Standard Maps (1a-14 and T1), Legacy Maps (1-8), and Beginner Maps (A and 0); every group has independent all/none controls and starts fully active. Home passes `exclude_invalid_maps=False`, so the Full Sample and Log Sample aggregates include every configured Home map. Players General/Comparison deliberately share this all-map default; other analytical pages retain their own map populations. Home counts distinct `table_id` values after row-level map/dataset filtering; it does not add per-map counts. A Full Sample table can contain different Map or `is_mw` values for its player rows, so grouped `(Map, is_mw)` counts overlap and are not expected to sum to the Home total. Backend `stats_page` is `home`, with public snapshots under `card-stats/home/`.
 
 The daily refresh also publishes `card-stats/home/defaults.js`, containing both MW and Base payloads in `window.__ARK_NOVA_HOME_DEFAULTS__`. `index.html` loads this small asset before the app so default Home and MW/Base switching render immediately. Filtered requests still use the API, while the JSON snapshots remain the fallback.
 
@@ -537,11 +571,11 @@ On phones, Home keeps the navigation rail expanded and reserves its width in the
 
 ### Sponsor Endgames Page
 
-`assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to non-conceded games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points and delta buckets use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. There is intentionally no Elo result column or `avg_elo` payload field. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
+`assets/js/pages/sponsor-endgames.js` has `Conservation Points` and `Appeal` tabs backed by `stats_page: "sponsor_endgames"` and `sponsor_endgames_view: "cp" | "appeal"`. It hard-filters to completed games and supports Elo, map, and date filters. The backend starts from distinct sponsor plays, left-joins one maximum endgame value per table/player/sponsor, and treats a missing endgame entry as zero. Thus average points and delta buckets use the played-card population. Configured theoretical values determine valid delta buckets; impossible logged values remain in the overall point average but are excluded from delta buckets. MW-only sponsor cards are omitted client-side in Base. There is intentionally no Elo result column or `avg_elo` payload field. Snapshots live under `card-stats/sponsor-endgames/{cp|appeal}/`.
 
 ### Icons Page
 
-`assets/js/pages/icons.js` is routed at `#/icons` and uses backend `stats_page: "icons"`. It reads only the prepared Full Sample and hard-filters to non-conceded tables. One observation is one table/player. The 16 rows are Birds, Herbivores, Predators, Primates, Reptiles, Sea Animals, Bears, Petting Zoo Animals, Africa, Americas, Asia, Australia, Europe, Rock, Water, and Science.
+`assets/js/pages/icons.js` is routed at `#/icons` and uses backend `stats_page: "icons"`. It reads only the prepared Full Sample and hard-filters to completed tables. One observation is one table/player. The 16 rows are Birds, Herbivores, Predators, Primates, Reptiles, Sea Animals, Bears, Petting Zoo Animals, Africa, Americas, Asia, Australia, Europe, Rock, Water, and Science.
 
 Amount is the mean non-null final icon count. Buckets `0` through `6` are exact counts and `7+` includes every value at least seven. Null icon fields are excluded rather than converted to zero. Each bucket's displayed Delta, sample SD, CI count, and prevalence count come from the same filtered icon/player population; frequency divides the bucket count by that icon's non-null `n_total`. Delta buckets below 1,000 observations use the Sponsor Endgames insufficient-data presentation. Default order is Amount descending.
 
@@ -592,8 +626,8 @@ The CI count is deliberately separate from visible table counts:
 - Cards played: non-null played-row deltas, not distinct-table `Played`.
 - Cards in hand: distinct table/player/card in-hand rows, not `Seen`.
 - Opening Hand: non-null dealt or kept entries, respectively.
-- Endgames scored: scored events from non-conceded games.
-- Endgames dealt: the exact non-conceded dealt-delta population, including corrected
+- Endgames scored: scored events from completed games.
+- Endgames dealt: the exact completed-game dealt-delta population, including corrected
   MW dealt-array ownership, ambiguous-table exclusion, and the MW no-Adapt restriction;
   this can differ from visible `Dealt`.
 - Combos: the exact pair, card/map, or card/round observations for the displayed mean.
@@ -765,12 +799,12 @@ Endgames use the `endgame` array for initial dealt endgames and `endgame_scores`
 
 Definitions:
 
-- `Dealt` = count of appearances in the initial `endgame` array from non-conceded games.
+- `Dealt` = count of appearances in the initial `endgame` array from completed games.
 - `Scored` = count of appearances in `endgame_scores`.
 - `Keeprate` = scored / dealt; it can exceed 100% because extra/scored endgames can come from Adapt or Elephants.
 - The Keeprate number remains uncapped. Its blue visualization bar is clamped to 100%.
 - `Delta scored` = average elo delta when the endgame appeared in `endgame_scores`.
-- `Delta dealt` = average elo delta when the endgame was initially dealt. Base uses raw non-conceded
+- `Delta dealt` = average elo delta when the endgame was initially dealt. Base uses raw completed-game
   dealt rows. For MW, the backend first corrects table-level dealt-array ownership by choosing the
   same/swapped player orientation with more dealt/scored matches, excludes tied/ambiguous tables,
   then excludes players for whom none of their corrected initially dealt cards was scored.
@@ -873,7 +907,7 @@ Seven is the gameplay maximum represented by this analysis. A null, malformed,
 negative, or greater-than-seven count is excluded from that subject's
 denominator. This matters because the same player-game may be valid for one
 subject and invalid for the other; their denominators are intentionally
-independent. Both subjects hard-filter to non-conceded tables.
+independent. Both subjects hard-filter to completed tables.
 
 For each subject/count/map, Delta is the mean `elo_delta` among player-games
 with exactly that count. Frequency is `exact-count observations / all valid
@@ -904,12 +938,10 @@ both subjects are aggregated.
 The active Scoring route is `#/scoring`. Its backend interface is
 `stats_page: "scoring"` and `scoring_view: "final_score" | "appeal" |
 "conservation_points" | "reputation"`. The four equal-width tabs describe the
-four end-of-game tracks: Final score, Appeal, Conservation points, and
-Reputation. Every Scoring observation must satisfy both
-`table_conceded = 0` and `end_game_triggered = TRUE`. The first predicate uses
-the dashboard-wide table-level concession definition; the second is an
-additional Scoring eligibility rule proving that these final-track values came
-from a triggered endgame. It does not redefine "completed game" elsewhere.
+four end-of-game tracks: Final score, Appeal, CP, and Reputation. The CP
+header has a `Conservation Points` tooltip. Every Scoring observation uses the
+dashboard-wide completed-game predicate: `table_conceded = 0 AND
+end_game_triggered = TRUE`.
 
 The sidebar has Player Elo, Opponent Elo, and Date Range only. Defaults are
 300+, 300+, and 2025-01-01 onward. Every table has the Build/Hexes map grid:
@@ -955,7 +987,7 @@ card-stats/scoring/conservation-points/default-{mw|base}.json
 card-stats/scoring/reputation/default-{mw|base}.json
 ```
 
-All eight assets are refreshed daily and included in default-pack schema 6.
+All eight assets are refreshed daily and included in default-pack schema 8.
 The backend reads the source Full Sample through the backend-owned prepared
 table, performs the aggregations, and writes derived snapshots. Source BigQuery
 tables remain read-only.
@@ -971,14 +1003,34 @@ counts, Elo counts/sums, and Elo-delta counts/sums/squared sums. Weighted
 averages, interactions, sample standard deviations, CIs, and play counts are
 therefore reconstructed exactly from moments.
 
-The complete default-filter Card + Card scope is warmed for MW and Base during
-the daily refresh. This is deliberately separate from the default table
-snapshot: the snapshot contains only rows meeting 1,000 plays, while the scope
-cache retains every matching pair so lowering Minimum plays can be answered
-without BigQuery. A non-default filter-bar scope is materialized into the same
-versioned `card-card-scopes` cache on its first request. Minimum plays, sort,
-page, pair type, and selected cards are deliberately absent from the scope key:
-changing those table controls reads the scope cache and starts no BigQuery job.
+Ordinary Card + Card requests use the narrower
+`card_pair_scope_daily_aggregates`, which removes the played-round JSON
+dimension. Round-filtered requests retain the full aggregate. A cold scope
+returns its requested page and range/count metadata first; complete-scope cache
+materialization is queued after the response and can never delay that first
+page. Until the background scope exists, subsequent controls may issue another
+small paged query rather than waiting for the entire population.
+
+The complete default-filter Card + Card scope is warmed for MW and Base by a
+separate authenticated maintenance operation, `warm_card_card_defaults`. The
+`warm-card-card-default-scopes` Cloud Scheduler job invokes it at 01:40 UTC,
+after the 01:05 UTC daily refresh, and its BigQuery jobs use batch priority.
+The operation refuses to warm an older data version and returns a retryable
+response until the current UTC day's version is published. Scheduler retries
+therefore handle an unusually long refresh without warming stale data. This
+work is deliberately outside snapshot/default-pack publication: a failed or
+slow warm-up can never delay the dashboard's daily assets, and no visitor's
+browser sends warm-up traffic.
+
+The default table snapshot contains only rows meeting 1,000 plays, while the
+separate versioned scope cache retains every matching pair for the default
+standard-map, default Elo/date, unrestricted Arena/Tournament scope. Lowering
+Minimum plays, sorting, pagination, pair-type changes, and card-header filters
+then use that warmed scope immediately. A non-default filter-bar scope is
+materialized into the same `card-card-scopes` cache on its first request.
+Minimum plays, sort, page, pair type, and selected cards are deliberately absent
+from the scope key: changing those table controls reads the scope cache and
+starts no BigQuery job.
 The response still contains at most the selected page size. It also returns:
 
 ```text
@@ -1001,12 +1053,52 @@ The practical performance target for Players is under three seconds for a
 default selection, no more than five seconds for an uncached filtered General
 or five-player Comparison request, and under 500ms for a component-cache hit.
 Warm measured requests meet the five-second limit; an infrastructure cold start
-can add roughly one second. A warmed Card + Card scope normally responds in
-about two seconds and starts no BigQuery job. Building an arbitrary new custom
-Card + Card scope can still take roughly 9–10 seconds because tens of thousands
-of pair aggregates must be materialized and persisted once; all later minimum,
-sort, page, type, and card-selection changes for that scope are fast. Paid
-minimum Function instances are not part of the architecture.
+can add roughly one second. A warmed Card + Card scope starts no BigQuery job.
+Paid minimum Function instances are not part of the architecture.
+
+## Filter-performance architecture
+
+Interactive filters read backend-owned, daily rebuilt observation tables rather
+than repeatedly expanding Logs arrays or reconstructing opponent/card roles.
+Current tables include flattened endgame events, sponsor rewards, Actions
+starting-position observations, Projects/Releases counts, Specific predictor
+flags, played/in-hand/seen card moments, deduplicated project rewards, CP reward
+opportunities, Card + Endgame moments, and Home observations. The Home table
+pre-resolves Emu, Petting Zoo, CP-bonus, and Proboscis Monkey checks. Card +
+Endgame is additionally collapsed into daily count/sum/squared-sum moments.
+
+Every observation source retains dataset, date, map, exact Player/Opponent Elo,
+completion, Arena season, and Tournament classification. This preserves the
+existing filter semantics and lets average, sample SD, CI, count, and frequency
+results be reconstructed without querying the read-only source tables.
+
+Filtered responses use three cache layers: a small per-instance LRU, versioned
+Cloud Storage filter objects, and BigQuery's query cache. Prepared tables are
+atomically replaced during daily refresh; the data version and filter schema are
+part of cache keys, so old results cannot cross a refresh. Endgames, Sponsor
+Endgames, Maps, and every other multi-view page include the selected subview in
+their cache key. Exact repeats target under 500 ms backend time.
+
+Normal responses expose `Server-Timing` and `X-Request-Id`. Timings identify
+query submission, BigQuery wait, row iteration, and total Function time. The
+read-only `benchmark_filters.py` script in the Function project exercises every
+dynamic view without invoking maintenance operations. The acceptance budget is
+4.5 seconds backend/5 seconds browser for a cold filtered request and under one
+second browser time for an exact repeat.
+
+The deployed reference matrix places ordinary cold filtered views at roughly
+2.4–4.9 seconds and exact repeats at roughly 0.4–1.0 seconds. Card + Card is the
+one documented cold-scope exception: an arbitrary new exact scope scans about
+8 GB of pair moments and has measured around 8.5–10.6 seconds. Its requested
+page is still capped at 100 rows, complete-scope warming is asynchronous, and an
+exact repeat or warmed scope returns in about one second without a new query.
+
+While filtered work runs, affected pages keep the previous table visible, dim
+it with the shared `stats-updating` state, and replace it atomically after a
+successful response. The shared loader aborts a superseded request for the same
+page, and request tokens prevent stale responses from winning; an error
+preserves the previous table. Client-only switches, sorting, pagination,
+expansion, searches, and documented minimum controls remain network-free.
 
 ## Players page (current behavior)
 
@@ -1016,6 +1108,14 @@ Arena Top 100 is a separate static view and never participates in account
 merging. General sends one exact `players_player`. Comparison sends up to five
 exact names in `players_players`. The selected names remain the visible column
 labels even when the backend resolves them to a merged analytical identity.
+
+General and Comparison always use the canonical completed-game population.
+Their map filter defaults to all 25 configured maps and is grouped into
+Standard Maps (1a-14 and T1), Legacy Maps (1-8), and Beginner Maps (A and 0).
+Each group has independent all/none controls. Reset selects every group, and an
+explicit empty selection remains empty rather than silently restoring Standard
+Maps. The Players request parser and prepared/default aggregates accept the same
+25-map catalog. Arena Top 100 is unaffected by these controls.
 
 `merge_players.csv` is the canonical manual account-identity source. In the
 local dashboard folder it corresponds to `docs/merge_players.csv` in the
@@ -1074,10 +1174,18 @@ Arena seasons, Last X, and resolved identity. Source BigQuery tables remain
 read-only; prepared Players tables, indexes, and caches are backend-owned
 derivatives.
 
-Players has one ordered player-game table and two daily weighted rollups.
-`players_stats_prepared` is clustered identity-first and is used only when Last
-X requires ordering exact games by timestamp and table ID.
-`players_baseline_prepared` groups non-conceded observations by dataset, map,
+Players has one date-partitioned player-game table, one identity-clustered
+ordering copy, and two daily weighted rollups. `players_stats_prepared` remains
+partitioned by game date for date-bounded maintenance and Arena work.
+`players_recent_prepared` contains the exact player-game rows in 1,024 stable
+hash partitions keyed by merged identity, then clusters each partition by
+identity, dataset, map, and opponent Elo. Last X supplies the selected
+identity's bucket so BigQuery prunes to roughly one-thousandth of the table
+before applying its filters and final timestamp rank. Its 64 display metrics are
+then emitted from one `UNNEST` struct array, so the selected aggregate is
+computed once rather than repeated in 64 UNION branches. Without these two
+properties, a cold Last X request could take tens of seconds.
+`players_baseline_prepared` groups completed observations by dataset, map,
 date, opponent Elo, Arena season, Tournament state, winner/expert/master state,
 and stores each metric's sum plus valid-value count.
 `players_identity_daily_rollup` stores the same moments by merged identity and
@@ -1090,12 +1198,48 @@ dataset, map/date/opponent-Elo scope, Arena seasons, Tournament state, resolved
 identity, and Last X. The empty selected-player companion is a valid zero-row
 relation, so custom baseline-only requests remain valid SQL. Default baselines
 still come from the static Players snapshot; default selected identities use
-`players_default_prepared`.
+`players_default_prepared`. General reads and writes its baseline and selected
+component objects in parallel and does not add a redundant whole-response cache
+object; an exact repeat is recomposed from those reusable components.
 
 A Last X value may remain in the sidebar while no General or Comparison player
 is selected. In that state the frontend omits it from the statistics request,
 the backend returns any applicable baselines, and the retained value is
 automatically reapplied when a player is selected again.
+
+General and Comparison also have Arena-style table/graph toggles. History is a
+separate cached request (`players_history: true` plus
+`players_history_metrics`) against the exact prepared player-game rows. It
+resolves aliases to merged identities, applies the canonical completed-game
+population and every active Players filter, applies Last X across the merged
+identity, and orders observations by UTC timestamp plus table ID. The first
+point is filtered game 100; each point is the trailing 100-game average. Null
+metric values are ignored inside that fixed 100-game frame, while an entirely
+null window creates a gap. Responses are compact columnar arrays of game
+numbers, timestamps, and rolling values and are cached by data version,
+dataset, identity, filters, Last X, and requested group.
+
+General opens an empty graph after one selected identity has at least 250
+filtered games. Its metric legend has no visible group headings: the first
+metric activates its compatibility group, compatible unselected metrics gain a
+white dot, incompatible metrics stay muted, and `Deselect all` is required to
+change groups. The groups are action-upgrade percentages; action counts;
+Universities/Partner zoos; X-token gained/spent; Kiosks/Pavilions; all icon
+metrics; and singleton groups for every other metric. The first selection asks
+the backend for its complete group, so later compatible selections are local.
+Comparison requires two to five identities, each with at least 250 filtered
+games, permits exactly one metric, and draws one color-coded line per player.
+Both graphs default to game-count x coordinates, can switch locally to UTC date
+coordinates, and show only the hovered line's formatted rolling value.
+
+The 250-game restriction applies only to opening or retaining graph mode; table
+filters remain unrestricted. While a graph is active, a proposed filter is
+first evaluated by the ordinary aggregate request. If General falls below 250,
+or any Comparison player does, the graph and its history remain unchanged, the
+sidebar is restored to its last committed values, and no history request is
+sent. Superseded aggregate/history requests are aborted and successful changes
+replace graph data atomically. The graph shell is viewport-bound and only its
+metric legend scrolls vertically.
 
 Arena metadata is read from `docs/arena/arena_settings.csv` in
 `emufriends/stats`, with the backend-packaged `arena/` folder and validated
@@ -1111,7 +1255,10 @@ prevent overlap.
 General and Comparison Arena filters use the prepared row's exact
 `arena_season`, with partition-pruning bounds extended through the effective
 end. Arena Top 100 uses the same effective interval for Games, Winrate, Peak,
-Opp. Elo, PR, Turns, PPT, and rating histories. Public day numbering and
+Opp. Elo, PR, Turns, PPT, and rating histories. Games, Winrate, Peak, Opp. Elo,
+PR, and rating histories retain all matched Arena games, including concessions
+or games without a triggered endgame. Only Turns and PPT use the canonical
+completed-game subset. Public day numbering and
 official season dates remain based on `end_utc`; the final graph day extends
 through `effective_end_utc`. A season is computationally complete after the
 effective end, while Top 100 availability is controlled by the presence of a
@@ -1154,12 +1301,11 @@ Automatic Records rows are individual player-game observations from the
 backend-owned `full_stats_prepared` table. Fastest Games also unions manually
 extrapolated rows, and Biggest Turns is entirely manual; both use the derived
 `records_manual_prepared` table described below. Source BigQuery tables remain
-read-only. Automatic Fastest, Highest Scores, and Most Icons rows hard-filter
-`table_conceded = 0` and `end_game_triggered = TRUE`. `table_conceded` is
-derived from Full Sample `concede` at table level: any concession makes the
-table incomplete. The visible default opponent-Elo minimum is 300. Records
-defaults to the 15 current maps plus legacy maps 1-8; beginner maps A and 0
-remain selectable but are off by default. These are browser defaults only:
+read-only. Automatic Fastest, Highest Scores, and Most Icons rows use the
+shared completed-game predicate. The visible default opponent-Elo minimum is
+300. Records labels its map groups Standard Maps, Legacy Maps, and Beginner
+Maps, with independent all/none controls. Standard and Legacy start active;
+Beginner starts inactive. These are browser defaults only:
 every functional Records snapshot contains the complete eligible population
 for all 25 known maps, with no player, opponent-Elo, date, Arena, or Tournament
 restriction.

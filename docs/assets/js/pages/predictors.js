@@ -69,12 +69,6 @@ export const sidebarHtml = `
     <input class="date-input" type="text" id="dateFrom" value="2025-01-01" placeholder="yyyy-mm-dd" />
     <input class="date-input" type="text" id="dateTo" placeholder="yyyy-mm-dd" />
   </div>
-  <div id="predictorsCompletedBlock">
-    <hr class="divider" />
-    <div class="filter-group"><div class="toggle-row"><span class="toggle-label">Completed games only</span>
-      <label class="toggle"><input type="checkbox" id="endGameToggle"><span class="toggle-track"></span></label>
-    </div></div>
-  </div>
   <hr class="divider" />
   <div class="filter-action-stack"><button class="apply-btn" onclick="applyFiltersFromSidebar()">Apply filters</button></div>`;
 
@@ -111,7 +105,6 @@ function setPredictorsMode(next) {
 }
 function syncTabs() {
   document.querySelectorAll('.predictors-tabs .endgames-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.view === activeView));
-  document.getElementById('predictorsCompletedBlock')?.classList.toggle('is-hidden', activeView !== 'specific');
   document.querySelector('.predictors-mode')?.classList.toggle('is-hidden', activeView !== 'specific');
   document.querySelectorAll('.predictors-mode button').forEach(button => button.classList.toggle('active', button.dataset.mode === mode));
 }
@@ -124,17 +117,19 @@ function params() {
     opponent_elo_min: v('opponentEloMin') === '' ? 0 : Number(v('opponentEloMin')),
     opponent_elo_max: v('opponentEloMax') === '' ? null : Number(v('opponentEloMax')),
     date_from: v('dateFrom') || '2025-01-01', date_to: v('dateTo') || null,
-    completed_only: activeView === 'specific' && document.getElementById('endGameToggle')?.checked ? true : null,
   };
 }
 function isDefault(p) {
   return p.player_elo_min === 300 && p.player_elo_max === null &&
     p.opponent_elo_min === 300 && p.opponent_elo_max === null &&
-    p.date_from === '2025-01-01' && p.date_to === null && p.completed_only === null &&
+    p.date_from === '2025-01-01' && p.date_to === null &&
     selectedMaps.length === MAPS.length;
 }
 async function loadData(activeToken) {
-  renderLoading();
+  const body = document.getElementById('tableBody');
+  const preserve = rows.length > 0;
+  if (preserve) body?.closest('.table-wrap')?.classList.add('stats-updating');
+  else renderLoading();
   try {
     const p = params();
     const payload = await loadStats(
@@ -143,7 +138,12 @@ async function loadData(activeToken) {
     );
     if (!mounted || activeToken !== token) return;
     rows = payload.data || []; render();
-  } catch (error) { if (mounted && activeToken === token) renderError(error); }
+  } catch (error) {
+    if (mounted && activeToken === token && !preserve) renderError(error);
+    else console.error('Could not update predictors', error);
+  } finally {
+    if (mounted && activeToken === token) body?.closest('.table-wrap')?.classList.remove('stats-updating');
+  }
 }
 function renderHead() {
   const metric = mode === 'frequency' && activeView === 'specific' ? 'frequency' : 'delta';
@@ -210,7 +210,6 @@ function resetFilters() {
   const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
   set('playerEloMin', '300'); set('playerEloMax', ''); set('opponentEloMin', '300'); set('opponentEloMax', '');
   set('dateFrom', '2025-01-01'); set('dateTo', '');
-  const completed = document.getElementById('endGameToggle'); if (completed) completed.checked = false;
   selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); loadData(++token);
 }
 function applyFiltersFromSidebar() {

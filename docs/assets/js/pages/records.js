@@ -31,9 +31,9 @@ const LEGACY_MAPS = [
 const BEGINNER_MAPS = [['A', 'Map A'], ['0', 'Map 0']];
 const DEFAULT_MAPS = [...STANDARD_MAPS, ...LEGACY_MAPS];
 const MAP_GROUPS = [
-  ['regular', 'Regular maps', STANDARD_MAPS],
-  ['legacy', 'Legacy maps', LEGACY_MAPS],
-  ['beginner', 'Beginner maps', BEGINNER_MAPS],
+  ['standard', 'Standard Maps', STANDARD_MAPS],
+  ['legacy', 'Legacy Maps', LEGACY_MAPS],
+  ['beginner', 'Beginner Maps', BEGINNER_MAPS],
 ];
 const ICON_ASSETS = {
   Birds: 'bird.png', Herbivores: 'herbivore.png', Predators: 'predator.png',

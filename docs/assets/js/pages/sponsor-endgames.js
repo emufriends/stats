@@ -258,7 +258,10 @@ function isDefaultParams(params) {
 }
 
 async function applyFilters(token = mountToken) {
-  renderLoading();
+  const tableWrap = document.querySelector('.table-wrap');
+  const preserve = rows.length > 0;
+  if (preserve) tableWrap?.classList.add('stats-updating');
+  else renderLoading();
   const params = getParams();
   if (!selectedMaps.length) {
     rows = [];
@@ -281,7 +284,10 @@ async function applyFilters(token = mountToken) {
     renderTable();
   } catch (error) {
     if (!isCurrentMount(token)) return;
-    renderError(error);
+    if (!preserve) renderError(error);
+    else console.error('Could not update sponsor endgames', error);
+  } finally {
+    if (isCurrentMount(token)) tableWrap?.classList.remove('stats-updating');
   }
 }
 

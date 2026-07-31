@@ -527,7 +527,10 @@ async function applyFilters(activeMountToken = mountToken) {
 
   const btn = document.getElementById('applyBtn');
   if (btn) btn.disabled = true;
-  showLoading(defaultSnapshotKey === null ? 'query' : 'saved');
+  const tableWrap = document.querySelector('.table-wrap');
+  const preserve = defaultSnapshotKey === null && allData.length > 0;
+  if (preserve) tableWrap?.classList.add('stats-updating');
+  else showLoading(defaultSnapshotKey === null ? 'query' : 'saved');
 
   try {
     let json;
@@ -562,8 +565,10 @@ async function applyFilters(activeMountToken = mountToken) {
     applySearch();
 
   } catch (err) {
-    if (isCurrentMount(activeMountToken)) showError(err.message);
+    if (isCurrentMount(activeMountToken) && !preserve) showError(err.message);
+    else console.error('Could not update card statistics', err);
   } finally {
+    if (isCurrentMount(activeMountToken)) tableWrap?.classList.remove('stats-updating');
     if (isCurrentMount(activeMountToken) && btn) {
       btn.disabled = false;
       btn.textContent = 'Apply filters';

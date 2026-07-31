@@ -175,13 +175,21 @@ function isDefault(p) {
 function snapshotUrl() { return `${API_ROOT}/${VIEW_SLUG[view]}/default-${isMW ? 'mw' : 'base'}.json`; }
 
 async function loadData(activeToken) {
-  renderLoading();
+  const content = document.getElementById('conservationContent');
+  const preserve = rows.length > 0;
+  if (preserve) content?.classList.add('stats-updating');
+  else renderLoading();
   try {
     const p = params();
     const payload = await loadStats(p, isDefault(p) ? snapshotUrl() : null);
     if (!mounted || activeToken !== token) return;
     rows = payload.data || []; render();
-  } catch (error) { if (mounted && activeToken === token) renderError(error); }
+  } catch (error) {
+    if (mounted && activeToken === token && !preserve) renderError(error);
+    else console.error('Could not update conservation statistics', error);
+  } finally {
+    if (mounted && activeToken === token) content?.classList.remove('stats-updating');
+  }
 }
 function render() {
   document.getElementById('conservationMeta').textContent = '';
