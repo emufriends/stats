@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260731-3';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260801-1';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor } from './color-scales.js?v=20260710-3';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
@@ -6,7 +6,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260731-3';
+} from './snapshot-cache.js?v=20260801-1';
 import {
   closeSidebarIfOpen,
   renderShell,

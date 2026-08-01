@@ -1227,10 +1227,29 @@ change groups. The groups are action-upgrade percentages; action counts;
 Universities/Partner zoos; X-token gained/spent; Kiosks/Pavilions; all icon
 metrics; and singleton groups for every other metric. The first selection asks
 the backend for its complete group, so later compatible selections are local.
+Every General metric has a deterministic group-local color; legend dots and
+lines use the same resolver, and selecting or removing another metric never
+reassigns colors. The palette contains 16 distinct colors so every icon metric
+can remain unique. General and Comparison remember their legend scroll
+positions independently across selection rerenders and completed requests.
 Comparison requires two to five identities, each with at least 250 filtered
 games, permits exactly one metric, and draws one color-coded line per player.
 Both graphs default to game-count x coordinates, can switch locally to UTC date
-coordinates, and show only the hovered line's formatted rolling value.
+coordinates, and show only the hovered line's formatted rolling value. In
+game-count mode the final filtered game is `0`, earlier games are negative, and
+the shared domain starts at the negative largest player game count. A
+1,500-game history therefore spans `-1500` to `0`; its line begins at `-1400`
+because games 1-99 do not yet have a complete rolling window. Date mode remains
+timestamp-based. The footer reads `Rolling average over 100 games` and
+underlines the active axis choice; General displays the selected alias above
+the plot.
+
+Percent-formatted histories use a hard 100% upper domain, including the four
+spending-share metrics whose labels omit `%`. If any plotted value falls below
+20%, the lower domain is exactly 0%; otherwise it retains normal padding without
+crossing zero. Plot paths are clipped to the chart. Turns always includes an
+emphasized horizontal gridline and tick at 30, while Break% always includes the
+same treatment at 50%.
 
 The 250-game restriction applies only to opening or retaining graph mode; table
 filters remain unrestricted. While a graph is active, a proposed filter is

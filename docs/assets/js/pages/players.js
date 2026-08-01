@@ -1,5 +1,5 @@
 import { divergingRangeColor } from '../color-scales.js?v=20260711-1';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260731-3';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260801-1';
 import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260713-4';
 
 export const id = 'players';
@@ -13,7 +13,16 @@ const SNAPSHOT_URL = dataset => `${API_ROOT}/general/default-${dataset ? 'mw' : 
 const ARENA_MANIFEST_URL = `${API_ROOT}/arena/manifest.json`;
 const ARENA_BUNDLE_URL = `${API_ROOT}/arena-top-100/all-seasons.json`;
 const ARENA_LINE_COLORS = ['#42d392', '#60a5fa', '#f59e0b', '#c084fc', '#fb7185'];
-const HISTORY_LINE_COLORS = ['#42d392', '#60a5fa', '#f59e0b', '#c084fc', '#fb7185', '#22d3ee', '#f97316', '#a3e635'];
+// General metric colors are assigned by the metric's fixed position inside its
+// compatibility group. The longest group contains all 16 icon metrics, so a
+// 16-color palette prevents colors from changing or repeating as lines are
+// selected and deselected.
+const HISTORY_LINE_COLORS = [
+  '#42d392', '#60a5fa', '#f59e0b', '#c084fc',
+  '#fb7185', '#22d3ee', '#f97316', '#a3e635',
+  '#e879f9', '#facc15', '#38bdf8', '#fb923c',
+  '#a78bfa', '#2dd4bf', '#f43f5e', '#84cc16',
+];
 const PLAYER_GRAPH_MIN_GAMES = 250;
 // The aggregate table intentionally keeps its compact display shape. This map
 // connects those existing labels to the prepared-table keys used by history.
@@ -200,6 +209,9 @@ let historyAbortController = null;
 let historyRequest = 0;
 let historyHover = null;
 let historyRenderState = null;
+let historyLegendScrollTop = { general: 0, comparison: 0 };
+let historyLegendFocusMetric = { general: '', comparison: '' };
+let historyLegendSelectionScrollLock = { general: null, comparison: null };
 let committedFilters = null;
 
 function onGlobalModeFilterChange(event) {
@@ -247,6 +259,9 @@ export function mount({ dataset = 1 } = {}) {
   historyError = '';
   historyHover = null;
   historyRenderState = null;
+  historyLegendScrollTop = { general: 0, comparison: 0 };
+  historyLegendFocusMetric = { general: '', comparison: '' };
+  historyLegendSelectionScrollLock = { general: null, comparison: null };
   committedFilters = null;
   Object.assign(window, {
     setPlayersView, resetPlayersFilters, applyPlayersFilters,
@@ -264,6 +279,7 @@ export function mount({ dataset = 1 } = {}) {
     togglePlayersHistoryMetric, clearPlayersHistoryMetrics,
     setPlayersHistoryAxis, onPlayersHistoryGraphMove,
     clearPlayersHistoryGraphHover, closePlayersHistoryModal,
+    prepareHistoryLegendSelection,
   });
   renderMapChips();
   syncTabs();
@@ -1042,6 +1058,54 @@ function historyMetricCatalog() {
   }).filter(Boolean);
 }
 
+function historyMetricColor(metricKey, catalog = historyMetricCatalog()) {
+  const metric = catalog.find(item => item.key === metricKey);
+  if (!metric) return HISTORY_LINE_COLORS[0];
+  const groupIndex = catalog
+    .filter(item => item.group === metric.group)
+    .findIndex(item => item.key === metricKey);
+  return HISTORY_LINE_COLORS[Math.max(0, groupIndex) % HISTORY_LINE_COLORS.length];
+}
+
+function captureHistoryLegendState(targetView = view) {
+  const list = document.getElementById('playersHistoryLegendList');
+  if (list && !Number.isFinite(historyLegendSelectionScrollLock[targetView])) {
+    historyLegendScrollTop[targetView] = list.scrollTop;
+  }
+  const focused = document.activeElement?.closest?.('.players-history-legend-item');
+  if (focused?.dataset?.metric) historyLegendFocusMetric[targetView] = focused.dataset.metric;
+}
+
+function prepareHistoryLegendSelection() {
+  const list = document.getElementById('playersHistoryLegendList');
+  if (!list || !['general', 'comparison'].includes(view)) return;
+  historyLegendSelectionScrollLock[view] = list.scrollTop;
+  historyLegendScrollTop[view] = list.scrollTop;
+}
+
+function restoreHistoryLegendState(targetView = view) {
+  const list = document.getElementById('playersHistoryLegendList');
+  if (!list) return;
+  const locked = historyLegendSelectionScrollLock[targetView];
+  const desiredScroll = Number.isFinite(locked) ? locked : historyLegendScrollTop[targetView] || 0;
+  list.scrollTop = desiredScroll;
+  list.addEventListener('scroll', () => {
+    if (Number.isFinite(historyLegendSelectionScrollLock[targetView])) return;
+    historyLegendScrollTop[targetView] = list.scrollTop;
+  }, { passive: true });
+  const focusMetric = historyLegendFocusMetric[targetView];
+  if (focusMetric) {
+    const focusTarget = list.querySelector(`[data-metric="${CSS.escape(focusMetric)}"]`);
+    focusTarget?.focus?.({ preventScroll: true });
+  }
+  list.scrollTop = desiredScroll;
+  requestAnimationFrame(() => {
+    list.scrollTop = desiredScroll;
+    historyLegendScrollTop[targetView] = desiredScroll;
+    historyLegendSelectionScrollLock[targetView] = null;
+  });
+}
+
 function showPlayersHistoryModal(message) {
   const modal = document.getElementById('playersHistoryModal');
   const text = document.getElementById('playersHistoryModalMessage');
@@ -1183,9 +1247,11 @@ async function ensurePlayersHistory() {
 function renderPlayersHistoryGraph() {
   const host = document.getElementById('playersContent');
   if (!host || !historyGraphView[view]) return;
+  captureHistoryLegendState(view);
   updatePlayersMeta();
   host.innerHTML = `<div class="players-history-graph-shell">
     <div class="players-history-chart" id="playersHistoryChart">
+      ${view === 'general' ? `<div class="players-history-player-heading">${escapeHtml(selectedPlayer || '')}</div>` : ''}
       <div class="players-arena-graph-tooltip" id="playersHistoryGraphTooltip" role="status" aria-live="polite"></div>
       <div class="players-history-chart-status" id="playersHistoryChartStatus"></div>
     </div>
@@ -1213,6 +1279,7 @@ function renderPlayersHistoryGraphStatus() {
 function renderPlayersHistoryLegend() {
   const host = document.getElementById('playersHistoryLegendList');
   if (!host) return;
+  if (host.childElementCount) captureHistoryLegendState(view);
   const catalog = historyMetricCatalog();
   const selected = historySelectedMetrics[view];
   const selectedList = catalog.filter(item => selected.has(item.key));
@@ -1220,12 +1287,12 @@ function renderPlayersHistoryLegend() {
   host.innerHTML = catalog.map(metric => {
     const active = selected.has(metric.key);
     const compatible = view === 'comparison' || !activeGroup || metric.group === activeGroup;
-    const colorIndex = selectedList.findIndex(item => item.key === metric.key);
     const dotColor = active
-      ? HISTORY_LINE_COLORS[Math.max(0, colorIndex) % HISTORY_LINE_COLORS.length]
+      ? historyMetricColor(metric.key, catalog)
       : compatible && activeGroup ? '#ffffff' : 'transparent';
-    return `<button type="button" class="players-history-legend-item ${active ? 'active' : ''} ${compatible ? '' : 'incompatible'}" data-metric="${escapeAttr(metric.key)}" onclick="togglePlayersHistoryMetric(this.dataset.metric)" ${compatible ? '' : 'disabled'}><span class="players-history-metric-dot" style="background:${dotColor}"></span><span>${escapeHtml(metric.label)}</span></button>`;
+    return `<button type="button" class="players-history-legend-item ${active ? 'active' : ''} ${compatible ? '' : 'incompatible'}" data-metric="${escapeAttr(metric.key)}" onpointerdown="prepareHistoryLegendSelection()" onmousedown="event.preventDefault()" onclick="togglePlayersHistoryMetric(this.dataset.metric)" ${compatible ? '' : 'disabled'}><span class="players-history-metric-dot" style="background:${dotColor}"></span><span>${escapeHtml(metric.label)}</span></button>`;
   }).join('');
+  restoreHistoryLegendState(view);
 }
 
 function svgPathForHistory(points) {
@@ -1246,6 +1313,28 @@ function historyDateLabel(timestamp) {
   return new Date(timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
 }
 
+function historyGameCount(player) {
+  const explicit = Number(player?.game_count);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const gameNumbers = (player?.game_numbers || []).map(Number).filter(Number.isFinite);
+  return gameNumbers.length ? Math.max(...gameNumbers) : 0;
+}
+
+function uniqueHistoryTicks(values) {
+  return values
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+    .filter((value, index, sorted) => index === 0 || Math.abs(value - sorted[index - 1]) > 1e-7);
+}
+
+function historyYAxisLabel(value, isPercent, isReference = false) {
+  const rounded = Math.round(value);
+  const text = isReference || Math.abs(value - rounded) < 1e-7
+    ? String(rounded)
+    : Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1);
+  return isPercent ? `${text}%` : text;
+}
+
 function renderPlayersHistoryGraphCanvas() {
   const host = document.getElementById('playersHistoryChart');
   if (!host) return;
@@ -1263,15 +1352,17 @@ function renderPlayersHistoryGraphCanvas() {
   const innerWidth = width - margin.left - margin.right;
   const innerHeight = height - margin.top - margin.bottom;
   const metricMap = new Map((payload.metrics || []).map(item => [item.key, item]));
+  const catalog = historyMetricCatalog();
   const series = [];
   if (view === 'general') {
     const player = payload.players?.[0];
-    selectedMetrics.forEach((metricKey, index) => {
+    selectedMetrics.forEach(metricKey => {
       const values = player?.series?.[metricKey] || [];
       series.push({
         id: metricKey, label: metricMap.get(metricKey)?.label || metricKey,
         format: metricMap.get(metricKey)?.format || 'number',
-        color: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length],
+        color: historyMetricColor(metricKey, catalog),
+        gameCount: historyGameCount(player),
         gameNumbers: player?.game_numbers || [], timestamps: player?.timestamps || [], values,
       });
     });
@@ -1281,38 +1372,77 @@ function renderPlayersHistoryGraphCanvas() {
       id: player.name, label: player.name,
       format: metricMap.get(metricKey)?.format || 'number',
       color: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length],
+      gameCount: historyGameCount(player),
       gameNumbers: player.game_numbers || [], timestamps: player.timestamps || [],
       values: player.series?.[metricKey] || [],
     }));
   }
   const useDate = historyAxisMode[view] === 'date';
-  const allX = series.flatMap(item => (useDate ? item.timestamps.map(Date.parse) : item.gameNumbers.map(Number))).filter(Number.isFinite);
   const allY = series.flatMap(item => item.values.map(Number)).filter(Number.isFinite);
-  if (!allX.length || !allY.length) return;
-  let xMin = Math.min(...allX); let xMax = Math.max(...allX);
-  let yMin = Math.min(...allY); let yMax = Math.max(...allY);
+  if (!allY.length) return;
+  let xMin; let xMax;
+  if (useDate) {
+    const allX = series.flatMap(item => item.timestamps.map(Date.parse)).filter(Number.isFinite);
+    if (!allX.length) return;
+    xMin = Math.min(...allX); xMax = Math.max(...allX);
+  } else {
+    const maxGameCount = Math.max(...series.map(item => item.gameCount).filter(Number.isFinite), 1);
+    xMin = -maxGameCount; xMax = 0;
+  }
+  const isPercent = series.length > 0 && series.every(item => item.format === 'percent');
+  const referenceValue = selectedMetrics.includes('turns')
+    ? 30
+    : selectedMetrics.includes('break_pct') ? 50 : null;
+  let domainMin = Math.min(...allY); let domainMax = Math.max(...allY);
+  if (Number.isFinite(referenceValue)) {
+    domainMin = Math.min(domainMin, referenceValue);
+    domainMax = Math.max(domainMax, referenceValue);
+  }
   if (xMax <= xMin) xMax = xMin + 1;
-  const yPad = Math.max((yMax - yMin) * .08, Math.abs(yMax || 1) * .02, .1);
-  yMin -= yPad; yMax += yPad;
-  if (yMax <= yMin) yMax = yMin + 1;
+  let yMin; let yMax;
+  if (isPercent) {
+    domainMin = Math.max(0, Math.min(100, domainMin));
+    domainMax = Math.max(0, Math.min(100, domainMax));
+    const yPad = Math.max((domainMax - domainMin) * .08, Math.abs(domainMax || 1) * .02, .1);
+    yMin = Math.min(...allY) < 20 ? 0 : Math.max(0, domainMin - yPad);
+    yMax = Math.min(100, domainMax + yPad);
+  } else {
+    const yPad = Math.max((domainMax - domainMin) * .08, Math.abs(domainMax || 1) * .02, .1);
+    yMin = domainMin - yPad; yMax = domainMax + yPad;
+  }
+  if (yMax <= yMin) {
+    if (isPercent && yMin >= 100) { yMin = 99; yMax = 100; }
+    else yMax = isPercent ? Math.min(100, yMin + 1) : yMin + 1;
+  }
   const x = value => margin.left + ((value - xMin) / (xMax - xMin)) * innerWidth;
   const y = value => margin.top + (1 - (value - yMin) / (yMax - yMin)) * innerHeight;
-  const yTicks = Array.from({ length: 6 }, (_, index) => yMin + (yMax - yMin) * index / 5);
+  const baseYTicks = Array.from({ length: 6 }, (_, index) => yMin + (yMax - yMin) * index / 5);
+  const referenceTolerance = Math.max((yMax - yMin) / 200, .05);
+  const yTicks = uniqueHistoryTicks([
+    ...baseYTicks.filter(value => !Number.isFinite(referenceValue) || Math.abs(value - referenceValue) > referenceTolerance),
+    referenceValue,
+  ]);
   const xTicks = Array.from({ length: 5 }, (_, index) => xMin + (xMax - xMin) * index / 4);
-  const grid = yTicks.map(value => `<g><line x1="${margin.left}" y1="${y(value)}" x2="${width - margin.right}" y2="${y(value)}"/><text x="${margin.left - 9}" y="${y(value) + 4}" text-anchor="end">${Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1)}</text></g>`).join('');
+  const grid = yTicks.map(value => {
+    const isReference = Number.isFinite(referenceValue) && Math.abs(value - referenceValue) < 1e-7;
+    return `<g><line class="${isReference ? 'players-history-reference-grid' : ''}" x1="${margin.left}" y1="${y(value)}" x2="${width - margin.right}" y2="${y(value)}"/><text x="${margin.left - 9}" y="${y(value) + 4}" text-anchor="end">${historyYAxisLabel(value, isPercent, isReference)}</text></g>`;
+  }).join('');
   const xGrid = xTicks.map(value => `<g><line x1="${x(value)}" y1="${margin.top}" x2="${x(value)}" y2="${height - margin.bottom}"/><text x="${x(value)}" y="${height - 18}" text-anchor="middle">${useDate ? historyDateLabel(value) : Math.round(value).toLocaleString('en-US')}</text></g>`).join('');
   const plotted = series.map(item => ({
     ...item,
     points: item.values.map((raw, index) => {
       const value = finiteNumber(raw);
-      const rawX = useDate ? Date.parse(item.timestamps[index]) : Number(item.gameNumbers[index]);
+      const gameNumber = Number(item.gameNumbers[index]);
+      const rawX = useDate ? Date.parse(item.timestamps[index]) : gameNumber - item.gameCount;
       return { value, rawX, x: Number.isFinite(rawX) ? x(rawX) : Number.NaN, y: Number.isFinite(value) ? y(value) : Number.NaN };
     }),
   }));
   const paths = plotted.map(item => `<path class="players-history-line" data-series="${escapeAttr(item.id)}" d="${svgPathForHistory(item.points)}" stroke="${item.color}"></path>`).join('');
-  host.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Trailing 100-game rolling averages" onmousemove="onPlayersHistoryGraphMove(event)" onmouseleave="clearPlayersHistoryGraphHover()"><g class="players-arena-grid">${grid}${xGrid}</g><line class="players-arena-axis" x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}"/><line class="players-arena-axis" x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}"/>${paths}<text class="players-arena-axis-title" transform="translate(15 ${height / 2}) rotate(-90)" text-anchor="middle">Value</text></svg>`);
-  const footerName = view === 'general' ? `<div class="players-history-footer-name">${escapeHtml(selectedPlayer || '')}</div>` : '';
-  host.insertAdjacentHTML('beforeend', `<div class="players-history-axis-footer">${footerName}<div class="players-history-axis-modes"><button type="button" class="${useDate ? '' : 'active'}" onclick="setPlayersHistoryAxis('count')">by game count</button><span>/</span><button type="button" class="${useDate ? 'active' : ''}" onclick="setPlayersHistoryAxis('date')">by date</button></div></div>`);
+  const svgMarkup = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Trailing 100-game rolling averages" onmousemove="onPlayersHistoryGraphMove(event)" onmouseleave="clearPlayersHistoryGraphHover()"><defs><clipPath id="playersHistoryPlotClip"><rect x="${margin.left}" y="${margin.top}" width="${innerWidth}" height="${innerHeight}"/></clipPath></defs><g class="players-arena-grid">${grid}${xGrid}</g><line class="players-arena-axis" x1="${margin.left}" y1="${height - margin.bottom}" x2="${width - margin.right}" y2="${height - margin.bottom}"/><line class="players-arena-axis" x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${height - margin.bottom}"/><g clip-path="url(#playersHistoryPlotClip)">${paths}</g><text class="players-arena-axis-title" transform="translate(15 ${height / 2}) rotate(-90)" text-anchor="middle">Value</text></svg>`;
+  const playerHeading = host.querySelector('.players-history-player-heading');
+  if (playerHeading) playerHeading.insertAdjacentHTML('afterend', svgMarkup);
+  else host.insertAdjacentHTML('afterbegin', svgMarkup);
+  host.insertAdjacentHTML('beforeend', `<div class="players-history-axis-footer"><div class="players-history-axis-modes"><span>Rolling average over 100 games (</span><button type="button" class="${useDate ? '' : 'active'}" onclick="setPlayersHistoryAxis('count')">by game count</button><span> / </span><button type="button" class="${useDate ? 'active' : ''}" onclick="setPlayersHistoryAxis('date')">by date</button><span>)</span></div></div>`);
   if (view === 'comparison') {
     host.insertAdjacentHTML('beforeend', `<div class="players-history-player-key">${plotted.map(item => `<span><i style="background:${item.color}"></i>${escapeHtml(item.label)}</span>`).join('')}</div>`);
   }
