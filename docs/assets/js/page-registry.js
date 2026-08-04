@@ -95,12 +95,18 @@ export const PAGES = {
     id: 'players',
     title: 'Players',
     navLabel: 'Players',
-    load: () => import('./pages/players.js?v=20260801-1'),
+    load: () => import('./pages/players.js?v=20260802-2'),
+  },
+  arena: {
+    id: 'arena',
+    title: 'Arena',
+    navLabel: 'Arena',
+    load: () => import('./pages/arena.js?v=20260801-1'),
   },
   records: {
     id: 'records',
     title: 'Records',
     navLabel: 'Records',
-    load: () => import('./pages/records.js?v=20260731-1'),
+    load: () => import('./pages/records.js?v=20260804-1'),
   },
 };

@@ -417,9 +417,10 @@ function filteredRecordsRows() {
     if (dateTo && String(row.game_date || '') > dateTo) return false;
     if (arenaOnly && !row.is_arena) return false;
     if (tournamentOnly && !row.is_tournament) return false;
-    const opponentElo = numericOrNull(row.opponent_elo);
-    // Spreadsheet records without source Elo metadata remain visible by design.
-    if (opponentElo != null && (opponentElo < opponentMin || (opponentMax != null && opponentElo > opponentMax))) return false;
+    // Match backend range semantics without mutating the snapshot value:
+    // missing Elo metadata behaves as zero only for filter comparisons.
+    const opponentElo = numericOrNull(row.opponent_elo) ?? 0;
+    if (opponentElo < opponentMin || (opponentMax != null && opponentElo > opponentMax)) return false;
     return true;
   }).sort(compareRecordRows);
 }

@@ -152,6 +152,7 @@ function syncControls() {
   document.querySelector('.conservation-completed-divider')?.classList.toggle('is-hidden', !showCompleted);
   document.querySelector('.conservation-switches')?.classList.toggle('is-cp-rewards', view === 'cp_rewards');
   document.querySelector('.conservation-switches')?.classList.toggle('is-projects', view === 'projects');
+  window.syncGlobalModeFilterGrouping?.();
 }
 
 function params() {

@@ -162,6 +162,7 @@ function syncControls() {
   document.querySelector('.build-compare-mode')?.classList.toggle('is-hidden', view !== 'hexes');
   document.getElementById('completedFilterGroup')?.classList.toggle('is-hidden', view === 'hexes');
   syncCompleted();
+  window.syncGlobalModeFilterGrouping?.();
 }
 function syncCompleted() {
   const input = document.getElementById('endGameToggle');

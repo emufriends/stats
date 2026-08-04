@@ -127,6 +127,7 @@ function syncControls() {
   document.querySelectorAll('.workers-mode button').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
   document.querySelectorAll('.workers-compare button').forEach(btn => btn.classList.toggle('active', btn.dataset.compare === compare));
   document.getElementById('workersCompletedSection')?.classList.toggle('is-hidden', view !== 'two_cp_worker');
+  window.syncGlobalModeFilterGrouping?.();
 }
 
 function value(id) { return document.getElementById(id)?.value ?? ''; }

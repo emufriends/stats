@@ -108,6 +108,13 @@ const sideNavContentHtml = `
       <span>Players</span>
     </a>
     <div class="nav-divider"></div>
+    <a class="side-nav-link" href="#/arena" data-page-id="arena">
+      <svg class="nav-icon nav-icon-arena" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <path d="M3 20h18M5 20v-7l3-4 4-2 4 2 3 4v7M8 20v-5h8v5M7 12h10M9 9l-2-4M15 9l2-4" />
+      </svg>
+      <span>Arena</span>
+    </a>
+    <div class="nav-divider"></div>
     <a class="side-nav-link" href="#/records" data-page-id="records">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
         <path d="M3 20h18M5 13h5v7H5v-7Zm9-3h5v10h-5V10Zm-7-2h10" />

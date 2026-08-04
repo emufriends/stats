@@ -797,6 +797,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      min-height: 20px;
     }
 
     .toggle-label {
@@ -861,6 +862,15 @@
     .global-mode-filter-group {
       display: grid;
       gap: 12px;
+      margin-bottom: 0;
+    }
+
+    .global-mode-completed-host {
+      margin-bottom: 0;
+    }
+
+    .global-mode-filter-shell.is-joined .global-mode-filter-group {
+      padding-top: 12px;
     }
 
     /* Apply button */
@@ -1424,7 +1434,7 @@
       flex-wrap: wrap;
       align-items: flex-start;
       gap: 16px 22px;
-      padding: 16px;
+      padding: 16px 20px;
       border-top: 1px solid var(--border);
     }
 
@@ -1465,13 +1475,13 @@
     }
 
     .attr-separator {
+      display: block;
       width: 2px;
       flex: 0 0 2px;
       align-self: stretch;
       min-height: 42px;
       background: var(--border-light);
-      opacity: 0.7;
-      margin: 0;
+      opacity: .7;
     }
 
     /* Disabled state shared by every group type. Disabling resets the group's
@@ -1498,6 +1508,11 @@
       display: flex;
       flex-wrap: wrap;
       gap: 5px;
+    }
+
+    .attr-group[data-attr-group="strength"] .attr-chip-row,
+    .attr-group[data-attr-group="size"] .attr-chip-row {
+      flex-wrap: nowrap;
     }
 
     .attr-chip-row .chip {
@@ -1780,7 +1795,7 @@
     }
 
     @media (max-width: 768px) {
-      .attributes-bar-body { gap: 14px 18px; }
+      .attributes-bar-body { gap: 16px 22px; }
     }
 
     /* ── Type column filter ───────────────────────────────────────────────────
@@ -3561,6 +3576,12 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
+    /* Arena owns one full-width tab. It intentionally reuses the Players tab
+       typography without inheriting Players' three-column grid. */
+    .arena-tabs {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
     /* Players keeps the same 24.6667px header slot as the other pages. The
        Arena season selector must fit inside that slot so entering/leaving the
        static Top 100 view cannot move the tabs or table vertically. */
@@ -3783,6 +3804,28 @@
       margin-bottom: 0;
     }
 
+    .players-performance-completed {
+      margin: 12px 0 0;
+      padding: 0;
+    }
+
+    .players-performance-mode-host { margin-bottom: 0; }
+
+    .global-mode-filter-shell.players-performance-joined .global-mode-filter-group {
+      padding-top: 12px;
+    }
+
+    .players-performance-map-controls {
+      width: 100%;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .players-performance-player-cell { padding: 0 6px !important; }
+    .players-performance-player-cell .players-search-wrap { width: 100%; }
+    .players-performance-table thead th { text-align: center; }
+    .players-performance-table td { text-align: center; }
+
     .players-arena-season-filter {
       margin-top: 12px;
     }
@@ -3895,7 +3938,7 @@
     .records-player-suggestions button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
     .records-player-suggestions button:hover { background: var(--bg-surface); color: var(--accent); }
     .records-suggestion-state { padding: 10px; color: var(--text-muted); font-size: 12px; }
-    .records-mode-filters { display: flex; flex-direction: column; gap: 12px; }
+    .records-mode-filters { display: flex; flex-direction: column; gap: 12px; margin-bottom: 0; }
     .records-icon-filter-wrap { position: relative; display: inline-flex; justify-content: center; }
     .records-icon-filter-button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 4px; border: 0; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; }
     .records-icon-filter-button.active { color: var(--accent-filter); }
@@ -4051,6 +4094,23 @@
       font-size: 12px;
     }
 
+    .players-history-chart-status button {
+      margin-left: 8px;
+      padding: 2px 8px;
+      border: 1px solid var(--border-light);
+      border-radius: 5px;
+      background: var(--bg-panel);
+      color: var(--accent);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .players-history-chart-status button:hover,
+    .players-history-chart-status button:focus-visible {
+      border-color: var(--accent);
+      outline: none;
+    }
+
     .players-history-axis-footer {
       display: flex;
       flex: 0 0 auto;
@@ -4158,7 +4218,7 @@
 
     .players-history-legend-item:hover:not(:disabled),
     .players-history-legend-item.active { background: var(--bg-hover); color: var(--text); }
-    .players-history-legend-item.incompatible { opacity: .32; cursor: not-allowed; }
+    .players-history-legend-item.incompatible { opacity: .32; cursor: pointer; }
     .players-history-metric-dot { width: 8px; height: 8px; border: 1px solid transparent; border-radius: 50%; }
     .players-history-legend-item:not(.incompatible) .players-history-metric-dot[style*="#ffffff"] { border-color: rgba(255,255,255,.35); }
 
@@ -5616,10 +5676,12 @@
          scroll sideways. This keeps the table visible instead of pushing it down. */
 
       .attributes-bar-body {
+        display: flex;
         flex-wrap: nowrap;
         align-items: flex-start;
+        justify-content: flex-start;
         gap: 16px 22px;
-        padding: 16px;
+        padding: 16px 20px;
         overflow-x: auto;
         overflow-y: visible;
         -webkit-overflow-scrolling: touch;
@@ -5653,7 +5715,19 @@
       }
 
       .attr-separator {
-        flex: 0 0 auto;
+        display: block;
+        width: 2px;
+        flex: 0 0 2px;
+        align-self: stretch;
+        min-height: 42px;
+        background: var(--border-light);
+        opacity: .7;
+      }
+
+      .attributes-bar-body > .attr-group {
+        min-height: 0;
+        padding: 0;
+        border-left: 0;
       }
     }
 

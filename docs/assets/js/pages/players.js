@@ -1,6 +1,7 @@
-import { divergingRangeColor } from '../color-scales.js?v=20260711-1';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260801-1';
-import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260713-4';
+import { deltaRangeColor, divergingRangeColor } from '../color-scales.js?v=20260711-2';
+import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-5';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260802-2';
+import { setFilterButtonDisabled } from '../layout.js?v=20260801-2';
 
 export const id = 'players';
 export const title = 'Players';
@@ -11,8 +12,6 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const INDEX_URL = dataset => `${API_ROOT}/index/default-${dataset ? 'mw' : 'base'}.json`;
 const SNAPSHOT_URL = dataset => `${API_ROOT}/general/default-${dataset ? 'mw' : 'base'}.json`;
 const ARENA_MANIFEST_URL = `${API_ROOT}/arena/manifest.json`;
-const ARENA_BUNDLE_URL = `${API_ROOT}/arena-top-100/all-seasons.json`;
-const ARENA_LINE_COLORS = ['#42d392', '#60a5fa', '#f59e0b', '#c084fc', '#fb7185'];
 // General metric colors are assigned by the metric's fixed position inside its
 // compatibility group. The longest group contains all 16 icon metrics, so a
 // 16-color palette prevents colors from changing or repeating as lines are
@@ -23,6 +22,10 @@ const HISTORY_LINE_COLORS = [
   '#e879f9', '#facc15', '#38bdf8', '#fb923c',
   '#a78bfa', '#2dd4bf', '#f43f5e', '#84cc16',
 ];
+// Comparison uses the history palette for player lines. Keep the selected
+// metric marker outside that palette so it can never imply that the metric
+// belongs to one particular player.
+const HISTORY_COMPARISON_METRIC_COLOR = '#d9f99d';
 const PLAYER_GRAPH_MIN_GAMES = 250;
 // The aggregate table intentionally keeps its compact display shape. This map
 // connects those existing labels to the prepared-table keys used by history.
@@ -93,6 +96,17 @@ const MAP_GROUPS = [
   ['beginner', 'Beginner Maps', BEGINNER_MAPS],
 ];
 const MAPS = MAP_GROUPS.flatMap(([, , maps]) => maps);
+const PERFORMANCE_MAPS = MAPS.map(([code, full]) => ({
+  code,
+  full,
+  key: `map_${String(code).toLowerCase()}`,
+}));
+const PERFORMANCE_MAP_GROUPS = {
+  mapPack1: new Set(['9', '10']),
+  mapPack2: new Set(['11', '12', '13', '14', 'T1']),
+  legacy: new Set(['1', '2', '3', '4', '5', '6', '7', '8']),
+  beginner: new Set(['A', '0']),
+};
 const POPULATIONS = ['player', 'all', 'winners', 'experts', 'masters'];
 const SPENDING_METRICS = new Set([
   'Money spent (Animals)', 'Money spent (Build)',
@@ -102,26 +116,14 @@ const SPENDING_METRICS = new Set([
 export const mainHtml = `
   <div class="main-header players-main-header">
     <div class="table-meta" id="playersMeta"></div>
-    <div class="players-arena-day-control is-hidden" id="playersArenaDayControl" aria-label="Arena graph day range">
-      <span>Day</span><input id="playersArenaDayStart" type="text" inputmode="numeric" pattern="[0-9]*" oninput="onArenaGraphDayInput(event, 'start')" aria-label="Arena graph start day">
-      <span>to Day</span><input id="playersArenaDayEnd" type="text" inputmode="numeric" pattern="[0-9]*" oninput="onArenaGraphDayInput(event, 'end')" aria-label="Arena graph end day">
-    </div>
-    <div class="players-arena-season-control is-hidden" id="playersArenaSeasonControl">
-      <label for="playersArenaSeasonSelect">Season</label>
-      <select id="playersArenaSeasonSelect" onchange="setPlayersArenaSeason(this.value)"></select>
-    </div>
+    <div class="table-meta players-performance-map-controls" id="playersPerformanceMapControls"></div>
   </div>
   <div class="attributes-bar endgames-tabs-bar players-tabs-bar">
     <div class="attributes-bar-header endgames-tabs-header">
       <div class="endgames-tabs players-tabs" role="tablist" aria-label="Players views">
         <button class="endgames-tab players-history-tab active" data-view="general" onclick="setPlayersView('general')"><span>General</span><span class="endgames-graph-toggle" id="playersGeneralGraphToggle" role="button" tabindex="0" title="Show graph" aria-label="Show General history graph" onclick="togglePlayersHistoryGraph(event, 'general')" onkeydown="onPlayersHistoryGraphKey(event, 'general')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M4 5v14"/><path d="M6.5 15.5 10 11l3.5 2.5L18 7"/></svg></span></button>
         <button class="endgames-tab players-history-tab" data-view="comparison" onclick="setPlayersView('comparison')"><span>Comparison</span><span class="endgames-graph-toggle" id="playersComparisonGraphToggle" role="button" tabindex="0" title="Show graph" aria-label="Show Comparison history graph" onclick="togglePlayersHistoryGraph(event, 'comparison')" onkeydown="onPlayersHistoryGraphKey(event, 'comparison')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M4 5v14"/><path d="M6.5 15.5 10 11l3.5 2.5L18 7"/></svg></span></button>
-        <button class="endgames-tab players-arena-tab" data-view="arena_top_100" onclick="setPlayersView('arena_top_100')">
-          <span>Arena Top 100</span>
-          <span class="endgames-graph-toggle" id="playersArenaGraphToggle" role="button" tabindex="0" title="Show graph" aria-label="Show Arena rating graph" onclick="togglePlayersArenaGraph(event)" onkeydown="onPlayersArenaGraphKey(event)">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M4 5v14"/><path d="M6.5 15.5 10 11l3.5 2.5L18 7"/></svg>
-          </span>
-        </button>
+        <button class="endgames-tab" data-view="performance_by_map" onclick="setPlayersView('performance_by_map')"><span>Performance by map</span></button>
       </div>
     </div>
   </div>
@@ -155,6 +157,9 @@ export const sidebarHtml = `
   <div class="filter-group players-arena-filter"><div class="players-arena-season-filter" id="playersArenaSeasonFilter">
     <div class="players-arena-season-heading"><span class="filter-label">Arena Seasons</span><span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllPlayersArenaSeasons()">all</span> / <span class="map-toggle-link" onclick="selectNonePlayersArenaSeasons()">none</span>)</span></div>
     <div class="chip-grid players-arena-season-chips" id="playersArenaSeasonChips"></div>
+  </div>
+  <div class="filter-group players-performance-completed is-hidden" id="playersPerformanceCompleted">
+    <div class="toggle-row"><span class="toggle-label">Completed games only</span><label class="toggle"><input type="checkbox" id="playersCompletedOnly" /><span class="toggle-track"></span></label></div>
   </div></div>
   <div class="filter-action-stack"><button class="apply-btn" onclick="applyPlayersFilters()">Apply filters</button></div>`;
 
@@ -164,6 +169,7 @@ let isMW = 1;
 let view = 'general';
 let selectedPlayer = null;
 let selectedPlayers = [];
+let performancePlayers = [];
 let activeSearchSlot = 0;
 let playerNames = [];
 let playerIndexState = 'idle';
@@ -175,6 +181,7 @@ let comparisonSearchController = null;
 let comparisonSearchRequest = 0;
 let comparisonMatches = [];
 let selectedMaps = MAPS.map(([, full]) => full);
+let performanceMapModes = { mapPack1: 'include', mapPack2: 'include', legacy: 'exclude', beginner: 'exclude' };
 let rows = [];
 let playerGameCount = 0;
 let playerSelectedGameCount = 0;
@@ -184,29 +191,32 @@ let comparisonCounts = [];
 let statsAbortController = null;
 let statsLoading = false;
 let arenaManifest = null;
-let arenaBundle = null;
 let arenaLoadState = 'loading';
 let arenaLoadError = '';
 let selectedArenaSeasons = [];
-let selectedTop100Season = null;
-let arenaGraphView = false;
-let arenaGraphSelected = new Set();
-let arenaGraphSearch = '';
-let arenaGraphDayStart = 1;
-let arenaGraphDayEnd = null;
-let arenaGraphHover = null;
-let arenaGraphRenderState = null;
-let arenaTableSort = { field: 'end', direction: 'desc' };
 let arenaAssetRequest = 0;
 let historyGraphView = { general: false, comparison: false };
 let historySelectedMetrics = { general: new Set(), comparison: new Set() };
 let historyAxisMode = { general: 'count', comparison: 'count' };
 let historyPayload = { general: null, comparison: null };
 let historyPayloadKey = { general: '', comparison: '' };
-let historyLoading = false;
-let historyError = '';
-let historyAbortController = null;
-let historyRequest = 0;
+const HISTORY_REQUEST_TIMEOUT_MS = 15000;
+function freshHistoryRequestState() {
+  return {
+    loading: false,
+    error: '',
+    controller: null,
+    requestId: 0,
+    pendingKey: '',
+    pendingPromise: null,
+    timeoutId: null,
+    timedOut: false,
+  };
+}
+let historyRequests = {
+  general: freshHistoryRequestState(),
+  comparison: freshHistoryRequestState(),
+};
 let historyHover = null;
 let historyRenderState = null;
 let historyLegendScrollTop = { general: 0, comparison: 0 };
@@ -242,21 +252,17 @@ export function mount({ dataset = 1 } = {}) {
   selectedMaps = MAPS.map(([, full]) => full);
   rows = [];
   selectedArenaSeasons = [];
-  selectedTop100Season = null;
-  arenaGraphView = false;
-  arenaGraphSelected = new Set();
-  arenaGraphSearch = '';
-  arenaGraphDayStart = 1;
-  arenaGraphDayEnd = null;
-  arenaGraphHover = null;
-  arenaTableSort = { field: 'end', direction: 'desc' };
+  performancePlayers = [];
+  performanceMapModes = { mapPack1: 'include', mapPack2: 'include', legacy: 'exclude', beginner: 'exclude' };
   historyGraphView = { general: false, comparison: false };
   historySelectedMetrics = { general: new Set(), comparison: new Set() };
   historyAxisMode = { general: 'count', comparison: 'count' };
   historyPayload = { general: null, comparison: null };
   historyPayloadKey = { general: '', comparison: '' };
-  historyLoading = false;
-  historyError = '';
+  historyRequests = {
+    general: freshHistoryRequestState(),
+    comparison: freshHistoryRequestState(),
+  };
   historyHover = null;
   historyRenderState = null;
   historyLegendScrollTop = { general: 0, comparison: 0 };
@@ -270,13 +276,10 @@ export function mount({ dataset = 1 } = {}) {
     onPlayersSearchInput, clearPlayersSearch, retryPlayersIndex,
     togglePlayersArenaSeason,
     selectAllPlayersArenaSeasons, selectNonePlayersArenaSeasons,
-    setPlayersArenaSeason, togglePlayersArenaGraph, onPlayersArenaGraphKey,
-    setPlayersArenaGraphSearch, togglePlayersArenaGraphPlayer,
-    onPlayersArenaGraphMove, clearPlayersArenaGraphHover, onArenaGraphDayInput,
-    selectPlayersArenaTopFive, clearPlayersArenaGraphSelection, selectPlayersArenaRandom,
-    sortArenaTable,
+    setPlayersPerformanceMapMode, resetPlayersPerformanceMapModes,
     togglePlayersHistoryGraph, onPlayersHistoryGraphKey,
     togglePlayersHistoryMetric, clearPlayersHistoryMetrics,
+    retryPlayersHistory,
     setPlayersHistoryAxis, onPlayersHistoryGraphMove,
     clearPlayersHistoryGraphHover, closePlayersHistoryModal,
     prepareHistoryLegendSelection,
@@ -286,7 +289,7 @@ export function mount({ dataset = 1 } = {}) {
   window.addEventListener('arknova:global-mode-filter-change', onGlobalModeFilterChange);
   syncDateLastControls();
   loadPlayerIndex();
-  loadArenaAssets();
+  loadArenaManifest();
   loadData(token);
 }
 
@@ -297,23 +300,18 @@ export function unmount() {
   cancelComparisonSearch();
   statsAbortController?.abort();
   statsAbortController = null;
-  historyAbortController?.abort();
-  historyAbortController = null;
+  cancelHistoryRequest('general');
+  cancelHistoryRequest('comparison');
   closePlayersHistoryModal();
   hideTooltip();
   closeSuggestions();
-  setTopbarDatasetLock(null);
   setFilterButtonDisabled(false);
   window.removeEventListener('arknova:global-mode-filter-change', onGlobalModeFilterChange);
 }
 
 export function setDataset(value) {
+  if (view === 'general' || view === 'comparison') cancelHistoryRequest(view);
   isMW = Number(value) === 0 ? 0 : 1;
-  if (view === 'arena_top_100') {
-    syncArenaDatasetAndControls();
-    renderArenaTop100();
-    return;
-  }
   // Selected names are analysis context and remain valid when the dataset
   // changes. A name with no observations in the new dataset simply returns an
   // empty Player value; only the dataset-specific autocomplete index reloads.
@@ -334,27 +332,32 @@ export function setDataset(value) {
 
 function setPlayersView(next) {
   const previous = view;
-  view = ['general', 'comparison', 'arena_top_100'].includes(next) ? next : 'general';
+  view = ['general', 'comparison', 'performance_by_map'].includes(next) ? next : 'general';
+  if (previous !== view && (previous === 'general' || previous === 'comparison')) {
+    cancelHistoryRequest(previous);
+  }
   closeSuggestions();
   syncTabs();
-  if (view === 'arena_top_100') {
-    enterArenaTop100();
-    return;
-  }
-  if (previous === 'arena_top_100') leaveArenaTop100();
-  loadData(++token);
+  if (view === 'performance_by_map' && performancePlayers.length === 0) {
+    rows = [];
+    statsLoading = false;
+    renderTable();
+  } else loadData(++token);
 }
 
 function syncTabs() {
   document.querySelectorAll('.players-tabs .endgames-tab').forEach(button => {
     button.classList.toggle('active', button.dataset.view === view);
   });
-  const control = document.getElementById('playersArenaSeasonControl');
-  control?.classList.toggle('is-hidden', view !== 'arena_top_100');
   window.setGlobalModeFilterVisibility?.({
     arena: false,
-    tournament: view !== 'arena_top_100',
+    tournament: true,
   });
+  document.getElementById('playersPerformanceCompleted')?.classList.toggle('is-hidden', view !== 'performance_by_map');
+  document.querySelector('.players-arena-filter')?.classList.toggle('players-performance-mode-host', view === 'performance_by_map');
+  document.querySelector('.global-mode-filter-shell')?.classList.toggle('players-performance-joined', view === 'performance_by_map');
+  window.syncGlobalModeFilterGrouping?.();
+  renderPerformanceControls();
   ['general', 'comparison'].forEach(tabView => {
     const toggle = document.getElementById(`players${tabView === 'general' ? 'General' : 'Comparison'}GraphToggle`);
     toggle?.classList.toggle('active', Boolean(historyGraphView[tabView]));
@@ -377,18 +380,22 @@ function params() {
     stats_page: 'players',
     players_view: view,
     is_mw: isMW,
-    maps: selectedMaps,
+    maps: view === 'performance_by_map' ? MAPS.map(([, full]) => full) : selectedMaps,
     opponent_elo_min: value('playersOpponentEloMin') === '' ? 0 : Number(value('playersOpponentEloMin')),
     opponent_elo_max: value('playersOpponentEloMax') === '' ? null : Number(value('playersOpponentEloMax')),
     date_from: dateFromInput?.disabled ? null : (value('playersDateFrom') || null),
     date_to: dateToInput?.disabled ? null : (value('playersDateTo') || null),
     players_player: view === 'general' ? selectedPlayer : null,
-    players_players: view === 'comparison' ? selectedPlayers : [],
+    players_players: view === 'comparison' ? selectedPlayers : view === 'performance_by_map' ? performancePlayers : [],
     last_x_games: (
       last === ''
       || (view === 'general' && !selectedPlayer)
       || (view === 'comparison' && selectedPlayers.length === 0)
+      || (view === 'performance_by_map' && performancePlayers.length === 0)
     ) ? null : Number(last),
+    completed_only: view === 'performance_by_map'
+      ? Boolean(document.getElementById('playersCompletedOnly')?.checked)
+      : false,
     players_arena_only: selectedArenaSeasons.length > 0,
     players_arena_seasons: selectedArenaSeasons.length > 0 ? [...selectedArenaSeasons] : [],
   };
@@ -404,6 +411,7 @@ function capturePlayersFilterState() {
     maps: [...selectedMaps],
     arenaSeasons: [...selectedArenaSeasons],
     tournamentOnly: Boolean(document.getElementById('globalTournamentOnly')?.checked),
+    completedOnly: Boolean(document.getElementById('playersCompletedOnly')?.checked),
   };
 }
 
@@ -418,6 +426,8 @@ function restorePlayersFilterState(state) {
   selectedMaps = [...state.maps];
   selectedArenaSeasons = [...state.arenaSeasons];
   window.setGlobalTournamentOnly?.(state.tournamentOnly);
+  const completed = document.getElementById('playersCompletedOnly');
+  if (completed) completed.checked = Boolean(state.completedOnly);
   renderMapChips();
   renderArenaSeasonFilter();
   syncDateLastControls();
@@ -430,41 +440,26 @@ function isDefault(request) {
     && selectedMaps.length === MAPS.length && !request.players_arena_only;
 }
 
-async function loadArenaAssets() {
+async function loadArenaManifest() {
   const requestId = ++arenaAssetRequest;
   arenaLoadState = 'loading';
   arenaLoadError = '';
   updatePlayersMeta();
-  const manifestPromise = loadSnapshot(ARENA_MANIFEST_URL).catch(() => null);
-  const bundlePromise = loadSnapshot(ARENA_BUNDLE_URL).catch(() => fetchStats({
-    stats_page: 'players', players_view: 'arena_top_100', is_mw: isMW,
-  }));
   try {
-    const [manifestPayload, bundlePayload] = await Promise.all([manifestPromise, bundlePromise]);
+    const manifestPayload = await loadSnapshot(ARENA_MANIFEST_URL);
     if (!mounted || requestId !== arenaAssetRequest) return;
-    if (!bundlePayload || !Array.isArray(bundlePayload.seasons) || !bundlePayload.data) {
-      throw new Error('Arena Top 100 bundle has an invalid response shape.');
-    }
-    arenaBundle = bundlePayload;
-    arenaManifest = manifestPayload?.seasons ? manifestPayload : {
-      seasons: bundlePayload.seasons.map(item => ({ ...item, started: true, top_100_available: true })),
-      latest_by_mode: {},
-      latest_top_100: bundlePayload.latest_season,
-    };
+    if (!manifestPayload?.seasons) throw new Error('Arena season manifest is invalid.');
+    arenaManifest = manifestPayload;
     arenaLoadState = 'ready';
     arenaLoadError = '';
-    selectedTop100Season ||= arenaBundle.latest_season || arenaBundle.seasons[0]?.season || null;
     renderArenaSeasonFilter();
-    syncArenaSeasonSelect();
-    if (view === 'arena_top_100') enterArenaTop100();
-    else updatePlayersMeta();
+    updatePlayersMeta();
   } catch (error) {
     if (!mounted || requestId !== arenaAssetRequest) return;
     arenaLoadState = 'error';
     arenaLoadError = error?.message || String(error);
     renderArenaSeasonFilter();
-    if (view === 'arena_top_100') renderArenaTop100();
-    else updatePlayersMeta();
+    updatePlayersMeta();
   }
 }
 
@@ -562,7 +557,7 @@ function applyPlayersPayload(payload) {
   rows = Array.isArray(payload.data) ? payload.data : [];
   if (view === 'comparison') {
     comparisonCounts = Array.isArray(payload.players) ? payload.players : [];
-  } else {
+  } else if (view === 'general') {
     playerGameCount = Number(payload.player_game_count) || 0;
     playerSelectedGameCount = Number(payload.player_selected_game_count) || 0;
     playerAssociatedGameCount = Number(payload.player_associated_game_count) || 0;
@@ -593,6 +588,7 @@ function currentGraphEligibility(targetView = view) {
 }
 
 function invalidateHistory(targetView = view) {
+  cancelHistoryRequest(targetView);
   historyPayload[targetView] = null;
   historyPayloadKey[targetView] = '';
   historyHover = null;
@@ -600,15 +596,17 @@ function invalidateHistory(targetView = view) {
 }
 
 async function loadData(activeToken, { proposedGraphFilters = false, recheckGraphAfterLoad = false } = {}) {
-  if (view === 'arena_top_100') {
+  if (view === 'performance_by_map' && performancePlayers.length === 0) {
     statsAbortController?.abort();
+    rows = [];
     statsLoading = false;
-    renderArenaTop100();
+    renderTable();
     return;
   }
   if (view === 'comparison' && selectedPlayers.length === 0) {
     if (historyGraphView.comparison) {
       historyGraphView.comparison = false;
+      invalidateHistory('comparison');
       syncTabs();
       showPlayersHistoryModal('Please select at least two players');
     }
@@ -662,6 +660,7 @@ async function loadData(activeToken, { proposedGraphFilters = false, recheckGrap
       const eligibility = currentGraphEligibility();
       if (!eligibility.ok) {
         historyGraphView[view] = false;
+        cancelHistoryRequest(view);
         syncTabs();
         showPlayersHistoryModal(eligibility.message);
       }
@@ -699,6 +698,7 @@ function publicPlayersError(error) {
 
 function renderTable() {
   if (historyGraphView[view] && (view === 'general' || view === 'comparison')) renderPlayersHistoryGraph();
+  else if (view === 'performance_by_map') renderPerformanceTable();
   else if (view === 'comparison') renderComparisonTable();
   else renderGeneralTable();
 }
@@ -741,6 +741,109 @@ function renderComparisonTable() {
     <tbody>${rows.map(row => comparisonRow(row)).join('')}</tbody></table>
    </div></div><div id="playersSuggestions" class="players-suggestions" role="listbox" aria-label="Matching players"></div>`;
    renderSuggestions();
+}
+
+function performanceMapCategory(map) {
+  return Object.entries(PERFORMANCE_MAP_GROUPS).find(([, codes]) => codes.has(map.code))?.[0] || null;
+}
+
+function visiblePerformanceMaps() {
+  const onlyCategory = Object.entries(performanceMapModes).find(([, mode]) => mode === 'only')?.[0] || null;
+  return PERFORMANCE_MAPS.filter(map => {
+    const category = performanceMapCategory(map);
+    if (onlyCategory) return category === onlyCategory;
+    return !category || performanceMapModes[category] === 'include';
+  });
+}
+
+function performanceColumnLayout(mapCount) {
+  const playerUnits = 13;
+  const mapUnits = 87 / 15;
+  const totalUnits = playerUnits + mapUnits * Math.max(mapCount, 1);
+  return {
+    totalWidthPct: Math.max(100, totalUnits),
+    playerWidthPct: playerUnits / totalUnits * 100,
+    mapWidthPct: mapUnits / totalUnits * 100,
+  };
+}
+
+function renderPerformanceControls() {
+  const host = document.getElementById('playersPerformanceMapControls');
+  if (!host) return;
+  host.innerHTML = view !== 'performance_by_map' ? '' : `<div class="maps-metrics-options players-performance-options">
+    ${performanceMapOption('Map Pack 1', 'Maps 9 & 10', 'mapPack1')}
+    ${performanceMapOption('Map Pack 2', 'Maps 11-14 & T1', 'mapPack2')}
+    ${performanceMapOption('Legacy Maps', 'Maps 1-8 (non-alternate map version)', 'legacy')}
+    ${performanceMapOption('Beginner Maps', 'Maps A & 0', 'beginner')}
+    <button type="button" class="reset-btn maps-metrics-reset-btn" onclick="resetPlayersPerformanceMapModes()">Reset</button>
+  </div>`;
+}
+
+function performanceMapOption(label, tooltipText, category) {
+  const options = [['exclude', '&minus;', 'Exclude'], ['include', 'O', 'Include'], ['only', '+', 'Only']];
+  return `<div class="maps-metrics-option"><span>${label}<span class="col-tip" data-tip="${escapeAttr(tooltipText)}">?</span></span>
+    <div class="maps-visibility-control" role="group" aria-label="${escapeAttr(`${label} visibility`)}">
+      ${options.map(([mode, symbol, tip]) => `<button type="button" class="maps-custom-tip ${performanceMapModes[category] === mode ? 'active' : ''}" aria-pressed="${performanceMapModes[category] === mode}" data-tip="${tip}" onclick="setPlayersPerformanceMapMode('${category}', '${mode}')">${symbol}</button>`).join('')}
+    </div></div>`;
+}
+
+function setPlayersPerformanceMapMode(category, mode) {
+  if (!(category in performanceMapModes) || !['exclude', 'include', 'only'].includes(mode)) return;
+  if (mode === 'only') Object.keys(performanceMapModes).forEach(key => { performanceMapModes[key] = key === category ? 'only' : 'exclude'; });
+  else {
+    if (performanceMapModes[category] === 'only') Object.keys(performanceMapModes).forEach(key => { performanceMapModes[key] = 'exclude'; });
+    performanceMapModes[category] = mode;
+  }
+  renderPerformanceTable();
+}
+
+function resetPlayersPerformanceMapModes() {
+  performanceMapModes = { mapPack1: 'include', mapPack2: 'include', legacy: 'exclude', beginner: 'exclude' };
+  renderPerformanceTable();
+}
+
+function performanceColorRange(maps) {
+  const values = rows.flatMap(row => maps.map(map => ({
+    value: finiteNumber(row[map.key]),
+    count: Number(row[`${map.key}_ci95_n`] ?? row[`count_${map.key}`] ?? 0),
+  }))).filter(item => item.count >= 50 && Number.isFinite(item.value)).map(item => Math.max(-2, Math.min(2, item.value)));
+  return values.length ? { min: Math.min(...values), max: Math.max(...values) } : { min: null, max: null };
+}
+
+function performanceCell(row, map, range) {
+  const value = finiteNumber(row?.[map.key]);
+  if (!Number.isFinite(value)) return '<td class="players-performance-value">-</td>';
+  const n = Number(row?.[`${map.key}_ci95_n`] ?? row?.[`count_${map.key}`] ?? 0);
+  const display = formatSignedDeltaAdaptive(value);
+  if (n < 50) return `<td class="delta sponsor-delta-insufficient players-performance-value" data-tip="Insufficient data (fewer than 50 observations).">${display}</td>`;
+  return `<td class="delta delta-ci-cell players-performance-value" data-ci-low="${escapeAttr(row[`${map.key}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${map.key}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(n)}" data-ci-color-min="${escapeAttr(range.min ?? '')}" data-ci-color-max="${escapeAttr(range.max ?? '')}" style="color:${deltaRangeColor(value, range.min, range.max)}">${display}</td>`;
+}
+
+function renderPerformanceTable() {
+  const host = document.getElementById('playersContent');
+  if (!host) return;
+  renderPerformanceControls();
+  updatePlayersMeta();
+  const maps = visiblePerformanceMaps();
+  const layout = performanceColumnLayout(maps.length);
+  const range = performanceColorRange(maps);
+  const searchDisabled = playerIndexState !== 'ready';
+  const placeholder = playerIndexState === 'loading' ? 'Loading players...' : playerIndexState === 'error' ? 'Player list unavailable' : 'Search player';
+  const body = Array.from({ length: 8 }, (_, slot) => {
+    const name = performancePlayers[slot] || '';
+    const row = name ? rows.find(item => item.player === name) : null;
+    const action = playerIndexState === 'error'
+      ? '<button type="button" class="players-search-retry" onclick="retryPlayersIndex()" aria-label="Retry loading player list" title="Retry loading player list">&#8635;</button>'
+      : name ? `<button type="button" class="players-search-clear" data-slot="${slot}" onclick="clearPlayersSearch(event)" aria-label="Clear player">&times;</button>` : '';
+    const search = `<div class="players-search-wrap"><span class="players-search-icon" aria-hidden="true">&#128269;</span><input id="playersPerformanceSearch${slot}" data-slot="${slot}" type="search" value="${escapeAttr(name)}" placeholder="${placeholder}" oninput="onPlayersSearchInput(event)" autocomplete="off" ${searchDisabled ? 'disabled' : ''}/>${action}</div>`;
+    return `<tr><td class="players-performance-player-cell">${search}</td>${maps.map(map => performanceCell(row, map, range)).join('')}</tr>`;
+  }).join('');
+  host.innerHTML = `<div class="table-wrap players-table-wrap players-performance-table-wrap"><div class="table-scroll">
+    <table class="maps-table maps-metrics-table players-performance-table" style="width:${layout.totalWidthPct}%">
+      <thead><tr><th style="width:${layout.playerWidthPct}%">Player</th>${maps.map(map => `<th class="maps-map-header maps-custom-tip" data-tip="${escapeAttr(mapTooltipLabel(map.full))}" style="width:${layout.mapWidthPct}%">${escapeHtml(map.code)}</th>`).join('')}</tr></thead>
+      <tbody>${body}</tbody>
+    </table></div></div><div id="playersSuggestions" class="players-suggestions" role="listbox" aria-label="Matching players"></div>`;
+  renderSuggestions();
 }
 
 function playerRow(row, columnsWithPlayer) {
@@ -815,6 +918,8 @@ function resetPlayersFilters() {
   selectedArenaSeasons = [];
   selectedMaps = MAPS.map(([, full]) => full);
   window.setGlobalTournamentOnly?.(false);
+  const completed = document.getElementById('playersCompletedOnly');
+  if (completed) completed.checked = false;
   renderMapChips(); renderArenaSeasonFilter(); syncDateLastControls();
   loadData(++token, { proposedGraphFilters: historyGraphView[view] });
 }
@@ -853,12 +958,13 @@ function onPlayersSearchInput(event) {
   activeSearchSlot = Number.isFinite(slot) ? slot : 0;
   if (view === 'general' && selectedPlayer) selectedPlayer = null;
   if (view === 'comparison' && selectedPlayers[slot]) selectedPlayers = selectedPlayers.filter((_, index) => index !== slot);
+  if (view === 'performance_by_map' && performancePlayers[slot]) performancePlayers = performancePlayers.filter((_, index) => index !== slot);
   updatePlayersMeta();
   suggestionsOpen = String(event.target.value || '').trim().length >= 3;
   renderSuggestions(event.target.value);
 }
 
-function renderSuggestions(term = value(view === 'general' ? 'playersSearch' : `playersSearch${activeSearchSlot}`)) {
+function renderSuggestions(term = value(view === 'general' ? 'playersSearch' : view === 'performance_by_map' ? `playersPerformanceSearch${activeSearchSlot}` : `playersSearch${activeSearchSlot}`)) {
   const host = document.getElementById('playersSuggestions');
   if (!host) return;
   const normalized = String(term || '').trim().toLocaleLowerCase();
@@ -868,7 +974,7 @@ function renderSuggestions(term = value(view === 'general' ? 'playersSearch' : `
   }
   if (!suggestionsOpen || normalized.length < 3) { closeSuggestions(); return; }
   if (playerIndexState !== 'ready') return;
-  if (view === 'comparison') {
+  if (view === 'comparison' || view === 'performance_by_map') {
     scheduleComparisonSuggestions(String(term || '').trim());
     return;
   }
@@ -898,11 +1004,12 @@ function cancelComparisonSearch() {
 function scheduleComparisonSuggestions(term) {
   cancelComparisonSearch();
   const normalized = String(term || '').trim();
-  if (!mounted || view !== 'comparison' || normalized.length < 3) return;
+  if (!mounted || !['comparison', 'performance_by_map'].includes(view) || normalized.length < 3) return;
   const requestId = ++comparisonSearchRequest;
   const requestedDataset = isMW;
   const requestedSlot = activeSearchSlot;
-  const selectedAtRequest = selectedPlayers.slice();
+  const requestedView = view;
+  const selectedAtRequest = (view === 'performance_by_map' ? performancePlayers : selectedPlayers).slice();
   const host = document.getElementById('playersSuggestions');
   if (host) {
     host.innerHTML = '';
@@ -915,7 +1022,7 @@ function scheduleComparisonSuggestions(term) {
     try {
       const payload = await fetchStats({
         stats_page: 'players',
-        players_view: 'comparison',
+        players_view: requestedView,
         players_search: true,
         players_search_term: normalized,
         players_players: selectedAtRequest,
@@ -923,7 +1030,7 @@ function scheduleComparisonSuggestions(term) {
       }, { signal: controller.signal });
       if (
         !mounted
-        || view !== 'comparison'
+        || view !== requestedView
         || requestId !== comparisonSearchRequest
         || requestedDataset !== isMW
         || requestedSlot !== activeSearchSlot
@@ -964,13 +1071,17 @@ function closeSuggestions() {
 function selectPlayer(name, slot = activeSearchSlot) {
   const exact = String(name);
   if (!playerNames.includes(exact)) return;
-  if (view === 'comparison' && !comparisonMatches.includes(exact)) return;
+  if ((view === 'comparison' || view === 'performance_by_map') && !comparisonMatches.includes(exact)) return;
   if (view === 'general') {
     selectedPlayer = exact;
   } else if (view === 'comparison') {
     const next = selectedPlayers.filter(Boolean);
     next.push(exact);
     selectedPlayers = next.slice(0, 5);
+  } else if (view === 'performance_by_map') {
+    const next = performancePlayers.filter(Boolean);
+    next.push(exact);
+    performancePlayers = next.slice(0, 8);
   }
   suggestionsOpen = false;
   closeSuggestions();
@@ -980,7 +1091,8 @@ function selectPlayer(name, slot = activeSearchSlot) {
 function clearPlayersSearch(event) {
   const slot = Number(event?.currentTarget?.dataset?.slot || 0);
   if (view === 'general') selectedPlayer = null;
-  else selectedPlayers = selectedPlayers.filter((_, index) => index !== slot);
+  else if (view === 'comparison') selectedPlayers = selectedPlayers.filter((_, index) => index !== slot);
+  else if (view === 'performance_by_map') performancePlayers = performancePlayers.filter((_, index) => index !== slot);
   closeSuggestions();
   if (historyGraphView[view]) {
     historyGraphView[view] = false;
@@ -1000,11 +1112,7 @@ function updatePlayersMeta(errorMessage = '') {
   const meta = document.getElementById('playersMeta');
   if (!meta) return;
   if (errorMessage) meta.textContent = `Could not update player statistics: ${errorMessage}`;
-  else if (view === 'arena_top_100') {
-    if (arenaLoadState === 'loading') meta.textContent = 'Loading static Arena season statistics...';
-    else if (arenaLoadState === 'error') meta.textContent = `Could not load Arena Top 100${arenaLoadError ? `: ${arenaLoadError}` : ''}`;
-    else meta.textContent = '';
-  }
+  else if (view === 'performance_by_map') meta.textContent = statsLoading ? 'Updating player statistics...' : '';
   else if (statsLoading) meta.textContent = 'Updating player statistics...';
   else if (playerIndexState === 'loading') meta.textContent = 'Loading player list...';
   else if (playerIndexState === 'error') meta.textContent = `Could not load player list${playerIndexError ? `: ${playerIndexError}` : ''}. Use the retry button in the Player header.`;
@@ -1126,6 +1234,7 @@ function togglePlayersHistoryGraph(event, targetView) {
   if (view !== targetView || !['general', 'comparison'].includes(targetView)) return;
   if (historyGraphView[targetView]) {
     historyGraphView[targetView] = false;
+    cancelHistoryRequest(targetView);
     historyHover = null;
     syncTabs();
     renderTable();
@@ -1166,7 +1275,14 @@ function togglePlayersHistoryMetric(metricKey) {
   }
   const selected = new Set(historySelectedMetrics.general);
   const activeMetric = catalog.find(item => selected.has(item.key));
-  if (activeMetric && activeMetric.group !== metric.group) return;
+  // A cross-group click starts the newly chosen group immediately. This keeps
+  // every legend item usable while preserving the one-group-at-a-time rule.
+  if (activeMetric && activeMetric.group !== metric.group) {
+    historySelectedMetrics.general = new Set([metricKey]);
+    invalidateHistory('general');
+    renderPlayersHistoryGraph();
+    return;
+  }
   if (selected.has(metricKey)) selected.delete(metricKey);
   else selected.add(metricKey);
   historySelectedMetrics.general = selected;
@@ -1212,36 +1328,98 @@ async function ensurePlayersHistory() {
   const metricKeys = historyRequestMetrics();
   if (!metricKeys.length || !historyGraphView[view]) return;
   const targetView = view;
+  const requestState = historyRequests[targetView];
   const request = playersHistoryRequest(metricKeys);
   const key = historyRequestCacheKey(request);
-  if (historyPayload[targetView] && historyPayloadKey[targetView] === key) return;
-  const requestId = ++historyRequest;
-  historyAbortController?.abort();
-  const controller = new AbortController();
-  historyAbortController = controller;
-  historyLoading = true;
-  historyError = '';
-  renderPlayersHistoryGraphStatus();
-  try {
-    const payload = await fetchStats(request, { signal: controller.signal });
-    if (!mounted || requestId !== historyRequest || view !== targetView || !historyGraphView[targetView]) return;
-    if (payload?.players_history !== true || !Array.isArray(payload.metrics) || !Array.isArray(payload.players)) {
-      throw new Error('History response has an invalid shape.');
-    }
-    historyPayload[targetView] = payload;
-    historyPayloadKey[targetView] = key;
-    historyLoading = false;
-    historyError = '';
-    renderPlayersHistoryGraph();
-  } catch (error) {
-    if (error?.name === 'AbortError') return;
-    if (!mounted || requestId !== historyRequest || view !== targetView) return;
-    historyLoading = false;
-    historyError = publicPlayersError(error);
+  if (historyPayload[targetView] && historyPayloadKey[targetView] === key) {
+    requestState.loading = false;
+    requestState.error = '';
     renderPlayersHistoryGraphStatus();
-  } finally {
-    if (historyAbortController === controller) historyAbortController = null;
+    return historyPayload[targetView];
   }
+  // Legend rerenders can ask for the same compatibility group repeatedly.
+  // Reuse that request instead of aborting it and subscribing to the same
+  // already-cancelled promise through the shared filtered-request cache.
+  if (requestState.pendingPromise && requestState.pendingKey === key) {
+    return requestState.pendingPromise;
+  }
+  cancelHistoryRequest(targetView);
+  const requestId = ++requestState.requestId;
+  const controller = new AbortController();
+  requestState.controller = controller;
+  requestState.pendingKey = key;
+  requestState.loading = true;
+  requestState.error = '';
+  requestState.timedOut = false;
+  requestState.timeoutId = window.setTimeout(() => {
+    if (requestState.requestId !== requestId || requestState.controller !== controller) return;
+    requestState.timedOut = true;
+    controller.abort();
+  }, HISTORY_REQUEST_TIMEOUT_MS);
+  renderPlayersHistoryGraphStatus();
+  const pendingPromise = (async () => {
+    try {
+      // This request owns its abort signal. Do not reuse an in-flight promise
+      // whose original caller may have cancelled its underlying fetch.
+      const payload = await fetchStats(request, {
+        signal: controller.signal,
+        shareInFlight: false,
+      });
+      if (requestState.requestId !== requestId || requestState.controller !== controller) return null;
+      if (payload?.players_history !== true || !Array.isArray(payload.metrics) || !Array.isArray(payload.players)) {
+        throw new Error('History response has an invalid shape.');
+      }
+      historyPayload[targetView] = payload;
+      historyPayloadKey[targetView] = key;
+      requestState.loading = false;
+      requestState.error = '';
+      if (mounted && view === targetView && historyGraphView[targetView]) renderPlayersHistoryGraph();
+      return payload;
+    } catch (error) {
+      if (requestState.requestId !== requestId || requestState.controller !== controller) return null;
+      requestState.loading = false;
+      requestState.error = requestState.timedOut
+        ? 'The history request timed out.'
+        : error?.name === 'AbortError' ? '' : publicPlayersError(error);
+      if (mounted && view === targetView && historyGraphView[targetView]) renderPlayersHistoryGraphStatus();
+      return null;
+    } finally {
+      if (requestState.requestId === requestId && requestState.controller === controller) {
+        if (requestState.timeoutId !== null) window.clearTimeout(requestState.timeoutId);
+        requestState.timeoutId = null;
+        requestState.controller = null;
+        requestState.pendingKey = '';
+        requestState.pendingPromise = null;
+        requestState.loading = false;
+        requestState.timedOut = false;
+        if (mounted && view === targetView && historyGraphView[targetView]) renderPlayersHistoryGraphStatus();
+      }
+    }
+  })();
+  requestState.pendingPromise = pendingPromise;
+  return pendingPromise;
+}
+
+function cancelHistoryRequest(targetView, { clearError = true } = {}) {
+  const requestState = historyRequests[targetView];
+  if (!requestState) return;
+  requestState.requestId += 1;
+  if (requestState.timeoutId !== null) window.clearTimeout(requestState.timeoutId);
+  requestState.timeoutId = null;
+  requestState.controller?.abort();
+  requestState.controller = null;
+  requestState.pendingKey = '';
+  requestState.pendingPromise = null;
+  requestState.loading = false;
+  requestState.timedOut = false;
+  if (clearError) requestState.error = '';
+}
+
+function retryPlayersHistory() {
+  if (!historyGraphView[view] || !['general', 'comparison'].includes(view)) return;
+  historyRequests[view].error = '';
+  renderPlayersHistoryGraphStatus();
+  void ensurePlayersHistory();
 }
 
 function renderPlayersHistoryGraph() {
@@ -1268,10 +1446,13 @@ function renderPlayersHistoryGraph() {
 function renderPlayersHistoryGraphStatus() {
   const host = document.getElementById('playersHistoryChartStatus');
   if (!host) return;
+  const requestState = historyRequests[view];
   const selected = historySelectedMetrics[view].size;
   if (!selected) host.textContent = 'Select a metric from the legend.';
-  else if (historyLoading) host.textContent = 'Loading rolling averages...';
-  else if (historyError) host.textContent = `Could not load history: ${historyError}`;
+  else if (requestState.loading && requestState.controller) host.textContent = 'Loading rolling averages...';
+  else if (requestState.error) {
+    host.innerHTML = `<span>Could not load history: ${escapeHtml(requestState.error)}</span><button type="button" onclick="retryPlayersHistory()">Retry</button>`;
+  }
   else host.textContent = '';
   host.classList.toggle('is-hidden', host.textContent === '');
 }
@@ -1286,11 +1467,14 @@ function renderPlayersHistoryLegend() {
   const activeGroup = view === 'general' ? selectedList[0]?.group : null;
   host.innerHTML = catalog.map(metric => {
     const active = selected.has(metric.key);
-    const compatible = view === 'comparison' || !activeGroup || metric.group === activeGroup;
+    const compatible = view === 'general' && Boolean(activeGroup) && metric.group === activeGroup;
+    const muted = view === 'comparison'
+      ? selected.size > 0 && !active
+      : Boolean(activeGroup) && !compatible;
     const dotColor = active
-      ? historyMetricColor(metric.key, catalog)
-      : compatible && activeGroup ? '#ffffff' : 'transparent';
-    return `<button type="button" class="players-history-legend-item ${active ? 'active' : ''} ${compatible ? '' : 'incompatible'}" data-metric="${escapeAttr(metric.key)}" onpointerdown="prepareHistoryLegendSelection()" onmousedown="event.preventDefault()" onclick="togglePlayersHistoryMetric(this.dataset.metric)" ${compatible ? '' : 'disabled'}><span class="players-history-metric-dot" style="background:${dotColor}"></span><span>${escapeHtml(metric.label)}</span></button>`;
+      ? view === 'comparison' ? HISTORY_COMPARISON_METRIC_COLOR : historyMetricColor(metric.key, catalog)
+      : compatible ? '#ffffff' : 'transparent';
+    return `<button type="button" class="players-history-legend-item ${active ? 'active' : ''} ${muted ? 'incompatible' : ''}" data-metric="${escapeAttr(metric.key)}" onpointerdown="prepareHistoryLegendSelection()" onmousedown="event.preventDefault()" onclick="togglePlayersHistoryMetric(this.dataset.metric)"><span class="players-history-metric-dot" style="background:${dotColor}"></span><span>${escapeHtml(metric.label)}</span></button>`;
   }).join('');
   restoreHistoryLegendState(view);
 }
@@ -1333,6 +1517,35 @@ function historyYAxisLabel(value, isPercent, isReference = false) {
     ? String(rounded)
     : Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1);
   return isPercent ? `${text}%` : text;
+}
+
+function historyYAxisScale(yMin, yMax, referenceValue, count = 6) {
+  if (!Number.isFinite(referenceValue) || referenceValue <= yMin || referenceValue >= yMax) {
+    return {
+      min: yMin,
+      max: yMax,
+      ticks: Array.from({ length: count }, (_, index) => yMin + (yMax - yMin) * index / (count - 1)),
+    };
+  }
+  // Anchor the complete scale on the gameplay reference. Every candidate uses
+  // one common numeric step; choose the allocation that covers the data with
+  // the least added padding. This makes 30 Turns / 50% genuine, equidistant
+  // ticks instead of extra lines inserted into an unrelated scale.
+  const intervals = count - 1;
+  let best = null;
+  for (let below = 1; below < intervals; below += 1) {
+    const above = intervals - below;
+    const step = Math.max((referenceValue - yMin) / below, (yMax - referenceValue) / above);
+    const min = referenceValue - below * step;
+    const max = referenceValue + above * step;
+    const padding = (yMin - min) + (max - yMax);
+    if (!best || padding < best.padding) best = { below, above, step, min, max, padding };
+  }
+  const ticks = Array.from(
+    { length: count },
+    (_, index) => referenceValue + (index - best.below) * best.step,
+  );
+  return { min: best.min, max: best.max, ticks };
 }
 
 function renderPlayersHistoryGraphCanvas() {
@@ -1414,14 +1627,21 @@ function renderPlayersHistoryGraphCanvas() {
     if (isPercent && yMin >= 100) { yMin = 99; yMax = 100; }
     else yMax = isPercent ? Math.min(100, yMin + 1) : yMin + 1;
   }
+  const referenceScale = historyYAxisScale(yMin, yMax, referenceValue, referenceValue === 50 ? 7 : 6);
+  yMin = referenceScale.min;
+  yMax = referenceScale.max;
+  if (isPercent) { yMin = Math.max(0, yMin); yMax = Math.min(100, yMax); }
   const x = value => margin.left + ((value - xMin) / (xMax - xMin)) * innerWidth;
-  const y = value => margin.top + (1 - (value - yMin) / (yMax - yMin)) * innerHeight;
-  const baseYTicks = Array.from({ length: 6 }, (_, index) => yMin + (yMax - yMin) * index / 5);
-  const referenceTolerance = Math.max((yMax - yMin) / 200, .05);
-  const yTicks = uniqueHistoryTicks([
-    ...baseYTicks.filter(value => !Number.isFinite(referenceValue) || Math.abs(value - referenceValue) > referenceTolerance),
-    referenceValue,
-  ]);
+  const labeledYMax = yMax;
+  // When percentages reach their natural 100% ceiling, reserve an unlabeled
+  // 12% visual gutter above the 100% gridline. A proportional pixel gutter is
+  // stable even for a narrow 93-100 range, where a literal 110% domain would
+  // otherwise waste most of the chart. The ceiling remains the final label.
+  const scaledYMax = isPercent && labeledYMax >= 100 - 1e-7
+    ? yMin + (labeledYMax - yMin) / .88
+    : labeledYMax;
+  const y = value => margin.top + (1 - (value - yMin) / (scaledYMax - yMin)) * innerHeight;
+  const yTicks = uniqueHistoryTicks(referenceScale.ticks.filter(value => value >= yMin - 1e-7 && value <= labeledYMax + 1e-7));
   const xTicks = Array.from({ length: 5 }, (_, index) => xMin + (xMax - xMin) * index / 4);
   const grid = yTicks.map(value => {
     const isReference = Number.isFinite(referenceValue) && Math.abs(value - referenceValue) < 1e-7;
@@ -1911,8 +2131,8 @@ function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;')
 const escapeAttr = escapeHtml;
 const tooltip = document.getElementById('col-tooltip');
 function hideTooltip() { if (tooltip) tooltip.style.display = 'none'; }
-document.addEventListener('mouseover', event => { if (!mounted || !tooltip) return; const source = event.target.closest?.('.players-value-cell, .col-tip'); if (!source || !source.dataset.tip) return; tooltip.textContent = source.dataset.tip; tooltip.style.display = 'block'; tooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 8))}px`; tooltip.style.top = `${event.clientY + 18}px`; });
-document.addEventListener('mouseout', event => { if (mounted && tooltip && event.target.closest?.('.players-value-cell, .col-tip')) tooltip.style.display = 'none'; });
+document.addEventListener('mouseover', event => { if (!mounted || !tooltip) return; const source = event.target.closest?.('.players-value-cell, .players-performance-value, .col-tip, .maps-custom-tip'); if (!source || !source.dataset.tip) return; tooltip.textContent = source.dataset.tip; tooltip.style.display = 'block'; tooltip.style.left = `${Math.max(8, Math.min(event.clientX + 12, window.innerWidth - tooltip.offsetWidth - 8))}px`; tooltip.style.top = `${event.clientY + 18}px`; });
+document.addEventListener('mouseout', event => { if (mounted && tooltip && event.target.closest?.('.players-value-cell, .players-performance-value, .col-tip, .maps-custom-tip')) tooltip.style.display = 'none'; });
 document.addEventListener('click', event => {
   if (!mounted) return;
   const option = event.target.closest?.('.players-suggestions button[data-player]');

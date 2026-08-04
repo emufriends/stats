@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260801-1';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260804-1';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor } from './color-scales.js?v=20260710-3';
 import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
 import {
@@ -6,7 +6,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260801-1';
+} from './snapshot-cache.js?v=20260804-1';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -16,7 +16,7 @@ import {
   setTopbarDataset,
   toggleNavCollapse,
   toggleSidebar,
-} from './layout.js?v=20260719-1';
+} from './layout.js?v=20260801-2';
 
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;
@@ -84,10 +84,19 @@ function installGlobalModeFilters(pageId) {
     ${players ? '' : globalModeToggle('globalArenaOnly', 'Arena games only', 'arena')}
     ${globalModeToggle('globalTournamentOnly', 'Tournament games only', 'tournament')}
   </div>`;
-  const finalDivider = actions.previousElementSibling?.matches('hr.divider')
+  let finalDivider = actions.previousElementSibling?.matches('hr.divider')
     ? actions.previousElementSibling
     : null;
-  (finalDivider || actions).parentNode.insertBefore(wrapper, finalDivider || actions);
+  if (!finalDivider) {
+    finalDivider = document.createElement('hr');
+    finalDivider.className = 'divider global-mode-final-divider';
+    actions.parentNode.insertBefore(finalDivider, actions);
+  }
+  const anchor = finalDivider || actions;
+  const leadingDivider = document.createElement('hr');
+  leadingDivider.className = 'divider global-mode-filter-divider';
+  anchor.parentNode.insertBefore(leadingDivider, anchor);
+  anchor.parentNode.insertBefore(wrapper, anchor);
   wrapper.addEventListener('change', event => {
     const input = event.target.closest('input[data-mode-kind]');
     if (!input) return;
@@ -103,7 +112,32 @@ function installGlobalModeFilters(pageId) {
       detail: { kind: input.dataset.modeKind, checked: input.checked },
     }));
   });
+  window.requestAnimationFrame(() => window.syncGlobalModeFilterGrouping?.());
 }
+
+window.syncGlobalModeFilterGrouping = () => {
+  const wrapper = document.querySelector('.global-mode-filter-shell');
+  const leadingDivider = document.querySelector('.global-mode-filter-divider');
+  if (!wrapper || !leadingDivider) return;
+  // Match the exact toggle label before resolving its group. Some sidebars
+  // nest the Performance-only Completed toggle inside an Arena-season group;
+  // searching group descendants made that outer group look completed even
+  // while the actual toggle was hidden.
+  const completedLabel = [...document.querySelectorAll('#sidebar .toggle-label')].find(label => (
+    label.textContent.trim() === 'Completed games only'
+  ));
+  const completedGroup = completedLabel?.closest('.filter-group') || null;
+  const completedVisible = Boolean(completedGroup)
+    && !completedGroup.hidden
+    && !completedGroup.classList.contains('is-hidden')
+    && window.getComputedStyle(completedGroup).display !== 'none';
+  const existingSectionDivider = completedGroup?.previousElementSibling?.matches('hr.divider')
+    && !completedGroup.previousElementSibling.classList.contains('is-hidden')
+    && window.getComputedStyle(completedGroup.previousElementSibling).display !== 'none';
+  completedGroup?.classList.toggle('global-mode-completed-host', completedVisible);
+  wrapper.classList.toggle('is-joined', completedVisible);
+  leadingDivider.hidden = wrapper.hidden || completedVisible || Boolean(existingSectionDivider);
+};
 
 window.setGlobalModeFilterVisibility = ({ arena = true, tournament = true } = {}) => {
   const arenaRow = document.getElementById('globalArenaOnly')?.closest('.global-mode-toggle-row');
@@ -112,6 +146,7 @@ window.setGlobalModeFilterVisibility = ({ arena = true, tournament = true } = {}
   if (tournamentRow) tournamentRow.hidden = !tournament;
   const group = document.querySelector('.global-mode-filter-shell');
   if (group) group.hidden = !arena && !tournament;
+  window.syncGlobalModeFilterGrouping?.();
 };
 
 window.setGlobalTournamentOnly = value => {
