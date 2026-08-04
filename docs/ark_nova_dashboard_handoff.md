@@ -5,7 +5,7 @@ Output:
 # Ark Nova Statistics Dashboard Handoff
 
 Date: 2026-06-21  
-Last updated: 2026-07-31  
+Last updated: 2026-08-04
 Project owner: pr0paganda-panda / Panda  
 Current repository: https://github.com/emufriends/stats
 
@@ -59,6 +59,15 @@ Its obsolete `Triggered endgame` predictor was removed because trigger status
 is now an eligibility rule rather than an outcome. Frequency is condition
 observations divided by all completed observations in the current scope. The
 current row counts are 21 for MW and 19 for Base.
+
+## Global Elo range-filter semantics
+
+Missing `elo` and `opponent_elo` values are treated as numeric zero only while
+evaluating minimum/maximum Elo filters. The stored/prepared value remains null,
+so this rule does not fabricate Elo values for averages, thresholds, labels, or
+other statistics. An empty minimum input is also normalized to zero; an empty
+maximum remains unrestricted. Consequently, rows with missing Elo metadata are
+included when the active range contains zero and excluded by positive minimums.
 
 ## Current Local Folders
 
@@ -1350,9 +1359,9 @@ classification still use the exact source timestamp. Some manually extrapolated 
 are absent from Full Sample by definition. Those rows remain valid with their
 sheet-native dataset, map, player, and date, while unavailable enrichment fields
 are stored as null (`source_enriched = false`). They therefore participate in
-the default, player, map, date, and dataset populations. Elo bounds apply only
-to enriched manual rows, because treating unknown Elo as a failed range check
-would silently erase the exact early concessions the sheet exists to restore.
+the default, player, map, date, and dataset populations. For Elo range filters,
+the unavailable value follows the dashboard-wide null-as-zero comparison rule;
+it remains null in the snapshot and is never presented as measured Elo.
 Source-absent rows cannot satisfy Arena-only, whose required rating metadata is
 unavailable. Tournament filtering remains possible because it is an independent
 table-ID lookup. A contradictory upstream match is never treated as
@@ -1440,9 +1449,8 @@ loads a view snapshot once and performs Player, Maps, Opponent Elo, Date Range,
 Arena-only, Tournament-only, Type, pagination, and row-count changes locally;
 applying or resetting Records filters never calls the Cloud Function or
 BigQuery. An empty Elo minimum means zero and an empty maximum means no upper
-bound. Rows with unavailable opponent Elo deliberately survive any Elo range,
-because excluding them would erase the manual exceptions the sheet exists to
-restore.
+bound. Missing opponent Elo is compared as zero, so such rows remain visible
+only when the active range contains zero.
 
 The pack has a
 schema version; a frontend may reuse the previous successful pack only when its

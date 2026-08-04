@@ -6,7 +6,7 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 8;
+const DEFAULT_PACK_SCHEMA_VERSION = 9;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
