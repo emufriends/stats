@@ -309,7 +309,7 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, Icons, Predictors, Build, Conservation, Scoring, Workers, Players, Arena, and Records. Home has no rail item; the topbar logo links to it. Arena is active at `#/arena` between Players and Records. Only MW Action Cards remains a placeholder; all Records and Players views are active.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, MW Action Cards, Icons, Predictors, Build, Conservation, Scoring, Workers, Players, Arena, and Records. Home has no rail item; the topbar logo links to it. MW Action Cards is active at `#/mw-action-cards`; General and Draft are functional and the three later tabs are styled placeholders.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Rail icons are either complete inline `<svg>...</svg>` elements or the Build PNG mask span. Keep every inline SVG wrapper balanced when reordering nav items; paths/circles outside an opening SVG are silently discarded by the browser.
 - Header topbar includes:
@@ -403,6 +403,75 @@ Round filtering is Cards-only. When fewer than all rounds are selected:
 
 - Backend aggregation changes.
 - Some stats become unavailable/hidden/disabled because they are not meaningful in played-round context.
+
+### MW Action Cards Page
+
+Files:
+
+```text
+assets/js/pages/mw-action-cards.js
+backend: main.py (`stats_page: "mw_action_cards"`)
+```
+
+The route is `#/mw-action-cards`. It is permanently locked to Marine Worlds;
+Base is disabled while the page is mounted. The five equal tabs are General,
+Draft, By map, Synergies, and Matchups. General and Draft are functional and
+render one combined payload locally; switching between them makes no request.
+The final three tabs are placeholders that make no request.
+
+Marine Worlds can replace two of the five normal action cards with enhanced
+special cards. Each player begins the draft with three: choose one and pass two,
+choose one of the two received and pass the remaining card, then receive the
+last returned card. The player chooses two of those resulting three cards for
+the game, and the two cannot share an action type.
+
+`MW_ACTION_CARD_CATALOG` in backend `main.py` is the canonical mapping. Draft
+telemetry uses backend identifiers such as `Sponsors 1`, while selected cards
+are represented by the action-specific numeric fields (for example,
+`Sponsors_Action_Card_Number = 1`). The frontend presents the catalog's
+colloquial name, so `Sponsors 1` is displayed as `Trade`.
+
+General has one fixed 20-card catalog and displays global rank, Type, colloquial
+Card name, overall picked-player Delta Elo, Delta Elo when the corresponding
+action was upgraded, Delta Elo when it remained basic, selected-player Elo, and
+Picked%. Only the overall Delta Elo body value is bold. Each Delta population
+has its own 95% CI and +/-2-clamped zero-centered color range. Upgrade state is
+read from the matching `Upgraded_*_action_card` field; a null flag is treated as
+false, matching Actions.
+
+Draft displays global rank, Type, Card, Picked%, Drafted% (1st), Drafted% (2nd),
+and Undrafted%. Picked is its default sort. General and Draft retain independent
+sort state. The Type header filter is local and does not recalculate global
+ranks or color ranges. Picked percentages use the Cards blue playrate bars;
+draft-stage percentages use the same bars with a violet-blue scale.
+
+Telemetry completeness is deliberately strict. An eligible table must be MW,
+contain exactly two distinct player observations, and both observations must
+have valid values for all five `*_Action_Card_Number` fields and all three draft
+fields. Numeric values must be integers 0-4 (zero is the normal action card),
+and draft strings must be canonical special-card names such as `Animals 2`.
+One null, blank, malformed, or out-of-range value on either player excludes the
+whole table from every MW Action Cards metric. The derivative tables are rebuilt
+daily, so repaired source telemetry becomes eligible automatically. Source
+BigQuery tables remain read-only.
+
+Player-level Delta uses source `elo_delta`, while the visible `Elo` column uses
+the selected player's `pre_match_elo`. For game-level draft rates, Player and
+Opponent Elo form an unordered pairing: a table qualifies when either player can
+occupy the Player role and the other can occupy the Opponent role while satisfying
+their respective bounds. Map filters still require both player rows to use a
+selected map. Every table contributes at most once per card and category. The
+default MW snapshot is:
+
+```text
+card-stats/mw-action-cards/general/default-mw.json
+```
+
+It contains every General and Draft field and is included in the atomic default
+pack; no Base snapshot exists. Sidebar
+defaults are both Elo minima 300, Date From `2025-01-01`, all 15 Standard Maps,
+and Completed/Arena/Tournament off. Completed means non-conceded and triggered
+endgame; Arena and Tournament are mutually exclusive.
 
 ### Opening Hand Page
 
@@ -568,19 +637,35 @@ Endgames filters:
 The daily refresh also publishes `card-stats/home/defaults.js`, containing both MW and Base payloads in `window.__ARK_NOVA_HOME_DEFAULTS__`. `index.html` loads this small asset before the app so default Home and MW/Base switching render immediately. Filtered requests still use the API, while the JSON snapshots remain the fallback.
 
 Home's backend-owned observation table is partitioned by game date and clustered
-by dataset, map, player Elo, and integer-normalized opponent Elo. The read-only
-Full Sample may expose opponent Elo as `FLOAT64`; daily preparation safely casts
-that filter field to `INT64` because dashboard Elo bounds are integers and
-BigQuery does not permit clustering directly on floating-point columns.
+by dataset, map, Arena season, and Tournament state. Canonical Elo values remain
+`FLOAT64`; they are never rounded merely to make them clustering dimensions.
 
 Elo range filtering follows one dashboard-wide missing-value rule. A null
-`elo` or `opponent_elo` is evaluated as `0` only while testing minimum and
+`pre_match_elo` or `opponent_pre_match_elo` is evaluated as `0` only while testing minimum and
 maximum bounds. Consequently, a blank/zero minimum retains observations with
 missing Elo metadata, a positive minimum excludes them, and a maximum-only
 filter includes them as zero. Prepared/source values remain null: Elo averages,
 display values, Elo delta calculations, and Experts/Masters classification are
 never populated with synthetic zeroes. Once an upstream Elo value is restored,
 the next refresh naturally places that observation in its real range.
+
+### Canonical Elo semantics
+
+Unless a label explicitly says otherwise, `Elo` everywhere in the dashboard
+means the player's `pre_match_elo`: their rating before that game. `Opponent
+Elo` is derived from the unique opposing player row's `pre_match_elo`; the
+legacy same-row `opponent_elo` is not used. Tables without one unambiguous
+opponent receive a null opponent rating, with the null-filter behavior above.
+The legacy Full Sample fields `elo` and `opponent_elo` are excluded at the
+prepared Full Sample boundary and must not be used by executable analytical
+code or backend-owned derivatives.
+
+The source `elo_delta` remains canonical. Source reconciliation verifies
+`elo_delta = post_match_elo - pre_match_elo` whenever all three fields exist.
+Public request names such as `player_elo_min`, visible Elo labels, and response
+keys such as `avg_elo` remain stable; their values follow these pre-match
+semantics. Spreadsheet-owned Peak Elo leaderboards are independent historical
+metrics and are not changed by this Full Sample migration.
 
 On phones, Home keeps the navigation rail expanded and reserves its width in the layout. Leaving Home automatically unlocks and collapses the rail so it returns to overlay behavior on other pages.
 
@@ -883,7 +968,7 @@ Exception: if keeping backend open-source, move `main.py` to `backend/main.py`, 
 
 ## What To Do Next
 
-Likely next product step: continue responsive/mobile polish for the newer pages or revisit the deferred Action Cards page.
+Likely next product step: implement By map, Synergies, or Matchups for MW Action Cards, or continue responsive/mobile polish for the newer pages.
 
 Before adding many pages, decide whether to:
 
@@ -1344,8 +1429,10 @@ prevent overlap.
 General and Comparison Arena filters use the prepared row's exact
 `arena_season`, with partition-pruning bounds extended through the effective
 end. Arena Top 100 uses the same effective interval for Games, Winrate, Peak,
-Opp. Elo, PR, Turns, PPT, and rating histories. Games, Winrate, Peak, Opp. Elo,
-PR, and rating histories retain all matched Arena games, including concessions
+Opp. Elo, PR, Turns, PPT, and rating histories. Peak and graph progression use
+`post_match_arena_rating`; Opp. Elo and the opponent component of PR use the
+opponent player's canonical pre-match Elo. Games, Winrate, Peak, Opp. Elo, PR,
+and rating histories retain all matched Arena games, including concessions
 or games without a triggered endgame. Only Turns and PPT use the canonical
 completed-game subset. Public day numbering and
 official season dates remain based on `end_utc`; the final graph day extends

@@ -4011,6 +4011,82 @@
       color: var(--accent);
     }
 
+    /* MW Action Cards ------------------------------------------------------
+       General and Draft share one fixed 20-row MW-only catalog payload. Tabs
+       retain the shared geometry; percentage columns reuse Cards' bars. */
+    .mw-action-cards-tabs {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      width: 100%;
+    }
+
+    .mw-action-cards-tabs .endgames-tab {
+      width: 100%;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .mw-action-cards-main-header {
+      min-height: 24.6667px;
+    }
+
+    .mw-action-cards-table th,
+    .mw-action-cards-table td {
+      text-align: center;
+    }
+
+    .mw-action-cards-table .mw-action-delta-primary {
+      font-weight: 600;
+    }
+
+    .mw-action-cards-table .mw-action-delta-secondary {
+      font-weight: 400;
+    }
+
+    .mw-action-cards-table .mw-action-type-popup {
+      min-width: 142px;
+    }
+
+    .mw-action-type-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 76px;
+      padding: 2px 7px;
+      border: 1px solid var(--border-light);
+      border-radius: 999px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .mw-action-type-animals { color: #d4b768; border-color: #66572d; background: #2e291a; }
+    .mw-action-type-association { color: #70cfa9; border-color: #315f50; background: #19362e; }
+    .mw-action-type-build { color: #d99672; border-color: #654333; background: #34231d; }
+    .mw-action-type-cards { color: #77afe4; border-color: #34516e; background: #1c2c3d; }
+    .mw-action-type-sponsors { color: #a9a4ed; border-color: #514d7d; background: #282641; }
+
+    .mw-action-rate-cell {
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .mw-action-rate-cell .playrate-bar-wrap {
+      min-width: 24px;
+    }
+
+    .mw-action-rate-cell .playrate-val {
+      flex-basis: 49px;
+      min-width: 49px;
+      width: 49px;
+      font-size: 11px;
+    }
+
+    @media (max-width: 768px) {
+      .mw-action-cards-tabs .endgames-tab { padding-inline: 6px; }
+    }
+
     .players-arena-table .players-arena-name {
       padding-left: 12px;
       overflow: hidden;
@@ -5792,5 +5868,73 @@
   .players-arena-table-wrap,
   .players-arena-table-wrap .table-scroll {
     max-height: calc(100vh - 198px);
+  }
+}
+
+/* MW Action Cards keeps its requested percentage geometry on phones. The
+   generic Cards table rules target the same #statsTable id and otherwise hide
+   the rank or assign widths for the unrelated nine-column Cards schema. */
+@media (max-width: 600px) {
+  .mw-action-cards-tabs .endgames-tab {
+    padding-inline: 2px;
+    font-size: 8px;
+    letter-spacing: .08em;
+  }
+
+  #statsTable.mw-action-cards-table:has(tbody .rank-cell) th:nth-child(1),
+  #statsTable.mw-action-cards-table:has(tbody .rank-cell) td:nth-child(1) {
+    display: table-cell !important;
+    width: 5% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    left: auto !important;
+  }
+
+  #statsTable.mw-action-cards-table th:nth-child(2),
+  #statsTable.mw-action-cards-table td:nth-child(2),
+  #statsTable.mw-action-cards-table th:nth-child(3),
+  #statsTable.mw-action-cards-table td:nth-child(3) {
+    width: 15% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    left: auto !important;
+    box-shadow: none;
+  }
+
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(4),
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(4),
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(5),
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(5),
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(6),
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(6) {
+    width: 12% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(7),
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(7) {
+    width: 10% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(8),
+  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(8) {
+    width: 19% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  #statsTable.mw-action-cards-table.mw-action-cards-draft-table th:nth-child(n+4),
+  #statsTable.mw-action-cards-table.mw-action-cards-draft-table td:nth-child(n+4) {
+    width: 16.25% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  #statsTable.mw-action-cards-table tbody td:nth-child(1),
+  #statsTable.mw-action-cards-table tbody td:nth-child(2) {
+    position: static !important;
   }
 }

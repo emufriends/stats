@@ -61,6 +61,12 @@ export const PAGES = {
     navLabel: 'Actions',
     load: () => import('./pages/actions.js?v=20260731-2'),
   },
+  'mw-action-cards': {
+    id: 'mw-action-cards',
+    title: 'MW Action Cards',
+    navLabel: 'MW Action Cards',
+    load: () => import('./pages/mw-action-cards.js?v=20260810-3'),
+  },
   predictors: {
     id: 'predictors',
     title: 'Predictors',
