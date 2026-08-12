@@ -12201,6 +12201,7 @@ def get_card_stats(request):
         or debug_timing
         or params.get("refresh_prepared") is True
         or params.get("refresh_mw_action_cards_prepared") is True
+        or params.get("refresh_mw_action_cards") is True
         or params.get("refresh_players_prepared") is True
         or params.get("daily_refresh") is True
         or params.get("refresh_default_pack") is True
@@ -12230,6 +12231,46 @@ def get_card_stats(request):
             return _json_http_response(payload, 200, headers, request)
         except Exception as exc:
             logging.exception("Failed to refresh prepared MW Action Cards tables")
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 500, headers, request
+            )
+
+    if params.get("refresh_mw_action_cards") is True:
+        try:
+            prepared = _refresh_prepared_mw_action_card_tables()
+            snapshots = {
+                "general": _refresh_default_snapshot_from_prepared(
+                    1, STATS_PAGE_MW_ACTION_CARDS,
+                    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
+                ),
+                "by_map": _refresh_default_snapshot_from_prepared(
+                    1, STATS_PAGE_MW_ACTION_CARDS,
+                    mw_action_cards_view=MW_ACTION_CARDS_VIEW_BY_MAP,
+                ),
+                "synergies": _refresh_default_snapshot_from_prepared(
+                    1, STATS_PAGE_MW_ACTION_CARDS,
+                    mw_action_cards_view=MW_ACTION_CARDS_VIEW_SYNERGIES,
+                ),
+            }
+            data_version = _read_data_version()
+            snapshots_ok = all(item.get("status") == "ok" for item in snapshots.values())
+            default_pack = (
+                bool(data_version)
+                and snapshots_ok
+                and _write_default_snapshot_pack(data_version)
+            )
+            payload = {
+                "status": "ok" if prepared.get("status") == "ok" and default_pack else "error",
+                "data_version": data_version,
+                "prepared": prepared,
+                "snapshots": snapshots,
+                "default_pack": "ok" if default_pack else "error",
+            }
+            return _json_http_response(
+                payload, 200 if payload["status"] == "ok" else 500, headers, request
+            )
+        except Exception as exc:
+            logging.exception("Failed to refresh MW Action Cards")
             return _json_http_response(
                 {"status": "error", "message": str(exc)}, 500, headers, request
             )
