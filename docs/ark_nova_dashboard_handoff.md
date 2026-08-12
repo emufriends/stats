@@ -309,7 +309,7 @@ Recent visual state:
 - Header logo/wordmark from old design has been integrated.
 - `Nova` wordmark color is `#BAFFE0`.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
-- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, MW Action Cards, Icons, Predictors, Build, Conservation, Scoring, Workers, Players, Arena, and Records. Home has no rail item; the topbar logo links to it. MW Action Cards is active at `#/mw-action-cards`; General and Draft are functional and the three later tabs are styled placeholders.
+- Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, MW Action Cards, Icons, Predictors, Build, Conservation, Scoring, Workers, Players, Arena, and Records. Home has no rail item; the topbar logo links to it. MW Action Cards is active at `#/mw-action-cards`; all four tabs are functional.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Rail icons are either complete inline `<svg>...</svg>` elements or the Build PNG mask span. Keep every inline SVG wrapper balanced when reordering nav items; paths/circles outside an opening SVG are silently discarded by the browser.
 - Header topbar includes:
@@ -414,10 +414,9 @@ backend: main.py (`stats_page: "mw_action_cards"`)
 ```
 
 The route is `#/mw-action-cards`. It is permanently locked to Marine Worlds;
-Base is disabled while the page is mounted. The five equal tabs are General,
-Draft, By map, Synergies, and Matchups. General and Draft are functional and
-render one combined payload locally; switching between them makes no request.
-The final three tabs are placeholders that make no request.
+Base is disabled while the page is mounted. The four equal tabs are General,
+Draft, By map, and Synergies. General and Draft render one combined payload
+locally. By map and Synergies each have a complete daily snapshot.
 
 Marine Worlds can replace two of the five normal action cards with enhanced
 special cards. Each player begins the draft with three: choose one and pass two,
@@ -455,23 +454,54 @@ whole table from every MW Action Cards metric. The derivative tables are rebuilt
 daily, so repaired source telemetry becomes eligible automatically. Source
 BigQuery tables remain read-only.
 
+By map has the CP-by-map 18-column framework: rank, colloquial Action Card,
+the 15 Standard Maps, and overall Delta. Only games where both players used the
+same map enter this view. Every map and overall cell is an average `elo_delta`
+with sample count, sample standard deviation, and 95% CI. Raw shows the estimate;
+vs. avg subtracts that card's raw overall Delta from each map while leaving the
+final Delta column raw. The table defaults to overall Delta descending. Its graph
+plots maps on the x-axis, supports local line search/selection and hover values,
+and makes no request when graph mode or Raw/vs. avg changes. The sidebar Maps
+section is hidden because maps are the table dimensions.
+
+Synergies uses one unordered pair per eligible player-game. The two selected
+special cards must have distinct action types and are canonicalized in
+`MW_ACTION_CARD_CATALOG` order, producing 160 possible combinations. The values
+under each card name are its standalone filtered average `elo_delta`.
+`Delta (Sum) = Delta Card 1 + Delta Card 2`, `Delta (Actual)` is the observed
+pair average, and `Synergy = Delta (Actual) - Delta (Sum)`. Elo is average
+`pre_match_elo`; Picked is the player-game observation count. Delta Actual has a
+95% CI. Searches may project either pair member into the requested display slot.
+
+Synergies defaults Minimum picks to 1000 and keeps Type, both card
+searches, Minimum, sorting, Rows, and pagination entirely local. Global ranks
+are recalculated after Minimum picks, then retained while Type/search filters
+hide rows. The Minimum control uses the shared warning animation when matching
+rows exist below the threshold. Its compact daily rollup retains rating, map,
+date, completion, Arena, and Tournament dimensions plus count, sum, squared-sum,
+and Elo moments, so filtered requests reconstruct weighted averages and CIs
+without scanning raw gameplay rows.
+
 Player-level Delta uses source `elo_delta`, while the visible `Elo` column uses
 the selected player's `pre_match_elo`. For game-level draft rates, Player and
 Opponent Elo form an unordered pairing: a table qualifies when either player can
 occupy the Player role and the other can occupy the Opponent role while satisfying
 their respective bounds. Map filters still require both player rows to use a
 selected map. Every table contributes at most once per card and category. The
-default MW snapshot is:
+default MW snapshots are:
 
 ```text
 card-stats/mw-action-cards/general/default-mw.json
+card-stats/mw-action-cards/by-map/default-mw.json
+card-stats/mw-action-cards/synergies/default-mw.json
 ```
 
-It contains every General and Draft field and is included in the atomic default
-pack; no Base snapshot exists. Sidebar
-defaults are both Elo minima 300, Date From `2025-01-01`, all 15 Standard Maps,
-and Completed/Arena/Tournament off. Completed means non-conceded and triggered
-endgame; Arena and Tournament are mutually exclusive.
+The General asset contains every General and Draft field. All three assets are
+included in the atomic default pack; no Base snapshots exist. Sidebar defaults
+are Elo minimum 300, Date From `2025-01-01`, all 15 Standard Maps, and
+Completed/Arena/Tournament off. All views use separate 300+ Player and Opponent ranges.
+Completed means non-conceded and triggered endgame; Arena and Tournament are
+mutually exclusive.
 
 ### Opening Hand Page
 
@@ -968,7 +998,7 @@ Exception: if keeping backend open-source, move `main.py` to `backend/main.py`, 
 
 ## What To Do Next
 
-Likely next product step: implement By map, Synergies, or Matchups for MW Action Cards, or continue responsive/mobile polish for the newer pages.
+Likely next product step: continue the remaining requested dashboard views or responsive/mobile polish for the newer pages.
 
 Before adding many pages, decide whether to:
 

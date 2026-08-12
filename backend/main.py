@@ -101,8 +101,8 @@ RECORDS_ELO_LEADERBOARD_SHEET_URL = os.environ.get(
 )
 RECORDS_MANUAL_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-manual-source.json"
 RECORDS_ELO_LEADERBOARD_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-elo-leaderboard-source.json"
-FILTER_CACHE_VERSION = "v30-mw-action-card-draft"
-DEFAULT_PACK_SCHEMA_VERSION = 12
+FILTER_CACHE_VERSION = "v34-mw-action-cards-four-view"
+DEFAULT_PACK_SCHEMA_VERSION = 15
 PLAYERS_HISTORY_WINDOW = 100
 PLAYERS_GRAPH_MIN_GAMES = 250
 STATS_PAGE_CARDS = "cards"
@@ -227,13 +227,11 @@ MW_ACTION_CARDS_VIEW_GENERAL = "general"
 MW_ACTION_CARDS_VIEW_DRAFT = "draft"
 MW_ACTION_CARDS_VIEW_BY_MAP = "by_map"
 MW_ACTION_CARDS_VIEW_SYNERGIES = "synergies"
-MW_ACTION_CARDS_VIEW_MATCHUPS = "matchups"
 VALID_MW_ACTION_CARDS_VIEWS = {
     MW_ACTION_CARDS_VIEW_GENERAL,
     MW_ACTION_CARDS_VIEW_DRAFT,
     MW_ACTION_CARDS_VIEW_BY_MAP,
     MW_ACTION_CARDS_VIEW_SYNERGIES,
-    MW_ACTION_CARDS_VIEW_MATCHUPS,
 }
 # Marine Worlds replaces two of a player's five normal action cards with
 # enhanced variants. Draft telemetry uses canonical backend keys such as
@@ -534,6 +532,14 @@ PREPARED_MW_ACTION_CARD_PLAYERS_TABLE = os.environ.get(
 PREPARED_MW_ACTION_CARD_DRAFTS_TABLE = os.environ.get(
     "PREPARED_MW_ACTION_CARD_DRAFTS_TABLE",
     "ark-nova-stats-dashboard.dashboard_cache.mw_action_card_draft_observations",
+)
+PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE = os.environ.get(
+    "PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.mw_action_card_map_daily_aggregates",
+)
+PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE = os.environ.get(
+    "PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.mw_action_card_synergy_daily_aggregates",
 )
 TOURNAMENT_TABLES_CACHE_TABLE = os.environ.get(
     "TOURNAMENT_TABLES_CACHE_TABLE",
@@ -893,7 +899,7 @@ def _parse_mw_action_cards_view(raw_value):
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_MW_ACTION_CARDS_VIEWS:
         raise ValueError(
-            "mw_action_cards_view must be general, draft, by_map, synergies, or matchups"
+            "mw_action_cards_view must be general, draft, by_map, or synergies"
         )
     return value
 
@@ -970,6 +976,7 @@ def _cache_blob_name(
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
 ):
     dataset = "mw" if int(is_mw) == 1 else "base"
     if stats_page == STATS_PAGE_HOME:
@@ -1004,7 +1011,12 @@ def _cache_blob_name(
         view_slug = records_view.replace("_", "-")
         return f"{CACHE_PREFIX}/records/{view_slug}/default-{dataset}.json"
     if stats_page == STATS_PAGE_MW_ACTION_CARDS:
-        return f"{CACHE_PREFIX}/mw-action-cards/general/default-mw.json"
+        view_slug = (
+            MW_ACTION_CARDS_VIEW_GENERAL
+            if mw_action_cards_view == MW_ACTION_CARDS_VIEW_DRAFT
+            else mw_action_cards_view
+        ).replace("_", "-")
+        return f"{CACHE_PREFIX}/mw-action-cards/{view_slug}/default-mw.json"
     if stats_page == STATS_PAGE_COMBINATIONS:
         view_slug = combinations_view.replace("_", "-")
         return f"{CACHE_PREFIX}/combinations/{view_slug}/default-{dataset}.json"
@@ -1922,12 +1934,14 @@ def _read_cached_snapshot(
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
 ):
     return _read_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view,
+            mw_action_cards_view
         ),
         "hit",
     )
@@ -1949,12 +1963,14 @@ def _write_cached_snapshot(
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
 ):
     return _write_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view,
+            mw_action_cards_view
         ),
         payload,
         "refreshed",
@@ -2034,7 +2050,11 @@ def _default_snapshot_pack_blob_names():
             f"{CACHE_PREFIX}/combinations/card-round/default-{dataset}.json",
             f"{CACHE_PREFIX}/combinations/card-endgame/default-{dataset}.json",
         ])
-    names.append(f"{CACHE_PREFIX}/mw-action-cards/general/default-mw.json")
+    names.extend([
+        f"{CACHE_PREFIX}/mw-action-cards/general/default-mw.json",
+        f"{CACHE_PREFIX}/mw-action-cards/by-map/default-mw.json",
+        f"{CACHE_PREFIX}/mw-action-cards/synergies/default-mw.json",
+    ])
     return names
 
 
@@ -2139,6 +2159,7 @@ def _is_default_cache_request(
     players_players=None,
     last_x_games=None,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
     records_player=None,
     records_arena_only=False,
     records_tournament_only=False,
@@ -3942,7 +3963,7 @@ def _refresh_prepared_mw_action_card_tables():
     catalog AS ({catalog_sql}),
     selected AS (
       SELECT
-        f.table_id, f.player, f.Map, f.game_date,
+        f.table_id, f.player, f.Map, opponent.Map AS opponent_map, f.game_date,
         f.table_conceded, f.end_game_triggered, f.arena_season,
         f.is_tournament, f.pre_match_elo, f.opponent_pre_match_elo, f.elo_delta,
         picked.card_type, picked.card_number,
@@ -3958,6 +3979,8 @@ def _refresh_prepared_mw_action_card_tables():
         ) AS upgraded
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       JOIN eligible_tables e USING(table_id)
+      JOIN `{PREPARED_FULL_STATS_TABLE}` opponent
+        ON opponent.table_id = f.table_id AND opponent.player != f.player
       CROSS JOIN UNNEST([
         STRUCT('Animals' AS card_type, SAFE_CAST(f.Animals_Action_Card_Number AS INT64) AS card_number),
         STRUCT('Association', SAFE_CAST(f.Association_Action_Card_Number AS INT64)),
@@ -3970,7 +3993,7 @@ def _refresh_prepared_mw_action_card_tables():
     SELECT
       1 AS is_mw,
       c.card_order, c.card_type, c.card_number, c.card_name, c.card_key,
-      s.table_id, s.player, s.Map, s.game_date,
+      s.table_id, s.player, s.Map, s.opponent_map, s.game_date,
       s.table_conceded, s.end_game_triggered, s.arena_season,
       s.is_tournament, s.pre_match_elo, s.opponent_pre_match_elo, s.elo_delta,
       s.upgraded
@@ -4039,26 +4062,106 @@ def _refresh_prepared_mw_action_card_tables():
       p.p1_first, p.p2_first, p.p1_second, p.p2_second, p.p1_third, p.p2_third
     )
     """
+    map_aggregate_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY card_key, Map, arena_season, is_tournament
+    AS
+    SELECT
+      game_date, Map, pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_order, card_key, card_type, card_number, card_name,
+      COUNT(*) AS observation_count,
+      COUNT(elo_delta) AS delta_count,
+      SUM(elo_delta) AS delta_sum,
+      SUM(POW(elo_delta, 2)) AS delta_sum_squares
+    FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}`
+    WHERE Map = opponent_map AND Map IN UNNEST({json.dumps(VALID_MAPS)})
+    GROUP BY
+      game_date, Map, pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_order, card_key, card_type, card_number, card_name
+    """
+    synergy_aggregate_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY card_1_key, card_2_key, Map, arena_season
+    AS
+    WITH player_pairs AS (
+      SELECT
+        table_id, player, game_date, Map, opponent_map,
+        pre_match_elo, opponent_pre_match_elo, elo_delta,
+        table_conceded, end_game_triggered, arena_season, is_tournament,
+        ARRAY_AGG(STRUCT(
+          card_order, card_key, card_type, card_number, card_name
+        ) ORDER BY card_order) AS cards
+      FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}`
+      GROUP BY
+        table_id, player, game_date, Map, opponent_map,
+        pre_match_elo, opponent_pre_match_elo, elo_delta,
+        table_conceded, end_game_triggered, arena_season, is_tournament
+      HAVING COUNT(*) = 2 AND COUNT(DISTINCT card_type) = 2
+    ), observations AS (
+      SELECT
+        game_date, Map, opponent_map, pre_match_elo, opponent_pre_match_elo,
+        table_conceded, end_game_triggered, arena_season, is_tournament,
+        cards[OFFSET(0)].card_order AS card_1_order,
+        cards[OFFSET(0)].card_key AS card_1_key,
+        cards[OFFSET(0)].card_type AS card_1_type,
+        cards[OFFSET(0)].card_number AS card_1_number,
+        cards[OFFSET(0)].card_name AS card_1_name,
+        cards[OFFSET(1)].card_order AS card_2_order,
+        cards[OFFSET(1)].card_key AS card_2_key,
+        cards[OFFSET(1)].card_type AS card_2_type,
+        cards[OFFSET(1)].card_number AS card_2_number,
+        cards[OFFSET(1)].card_name AS card_2_name,
+        elo_delta
+      FROM player_pairs
+    )
+    SELECT
+      game_date, Map, opponent_map, pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_1_order, card_1_key, card_1_type, card_1_number, card_1_name,
+      card_2_order, card_2_key, card_2_type, card_2_number, card_2_name,
+      COUNT(*) AS observation_count,
+      COUNT(elo_delta) AS delta_count,
+      SUM(elo_delta) AS delta_sum,
+      SUM(POW(elo_delta, 2)) AS delta_sum_squares,
+      COUNT(pre_match_elo) AS elo_count,
+      SUM(pre_match_elo) AS elo_sum
+    FROM observations
+    GROUP BY
+      game_date, Map, opponent_map, pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_1_order, card_1_key, card_1_type, card_1_number, card_1_name,
+      card_2_order, card_2_key, card_2_type, card_2_number, card_2_name
+    """
     client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
     started_at = time.perf_counter()
     player_job = client.query(player_query, location=BIGQUERY_LOCATION)
-    player_job.result()
     draft_job = client.query(draft_query, location=BIGQUERY_LOCATION)
+    player_job.result()
+    aggregate_jobs = {
+        "map": client.query(map_aggregate_query, location=BIGQUERY_LOCATION),
+        "synergy": client.query(synergy_aggregate_query, location=BIGQUERY_LOCATION),
+    }
     draft_job.result()
+    for job in aggregate_jobs.values():
+        job.result()
+    all_jobs = [player_job, draft_job, *aggregate_jobs.values()]
     return {
         "status": "ok",
         "player_table": PREPARED_MW_ACTION_CARD_PLAYERS_TABLE,
         "draft_table": PREPARED_MW_ACTION_CARD_DRAFTS_TABLE,
+        "map_table": PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE,
+        "synergy_table": PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE,
         "total_ms": _ms_since(started_at),
         "player_job_id": player_job.job_id,
         "draft_job_id": draft_job.job_id,
-        "job_total_bytes_processed": (
-            int(player_job.total_bytes_processed or 0)
-            + int(draft_job.total_bytes_processed or 0)
+        "job_total_bytes_processed": sum(
+            int(job.total_bytes_processed or 0) for job in all_jobs
         ),
-        "job_total_slot_ms": (
-            int(player_job.slot_millis or 0) + int(draft_job.slot_millis or 0)
-        ),
+        "job_total_slot_ms": sum(int(job.slot_millis or 0) for job in all_jobs),
     }
 
 
@@ -9043,26 +9146,168 @@ def _build_mw_action_cards_query(
     completed_only,
     arena_only,
     tournament_only,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
 ):
-    parameters = [
-        bigquery.ArrayQueryParameter("selected_maps", "STRING", selected_maps),
-    ]
+    parameters = []
+    if mw_action_cards_view != MW_ACTION_CARDS_VIEW_BY_MAP:
+        parameters.append(bigquery.ArrayQueryParameter("selected_maps", "STRING", selected_maps))
+    for name, value in (
+        ("player_elo_min", player_elo_min),
+        ("player_elo_max", player_elo_max),
+        ("opponent_elo_min", opponent_elo_min),
+        ("opponent_elo_max", opponent_elo_max),
+    ):
+        if value is not None:
+            parameters.append(bigquery.ScalarQueryParameter(name, "INT64", value))
+    if date_from is not None:
+        parameters.append(bigquery.ScalarQueryParameter("date_from", "DATE", date_from))
+    if date_to is not None:
+        parameters.append(bigquery.ScalarQueryParameter("date_to", "DATE", date_to))
 
-    def add_bound(clauses, field, parameter_name, value, operator):
-        if value is None:
-            return
-        clauses.append(f"COALESCE({field}, 0) {operator} @{parameter_name}")
-        parameters.append(bigquery.ScalarQueryParameter(parameter_name, "INT64", value))
+    def rating_bounds(alias):
+        clauses = []
+        for field, name, value, operator in (
+            ("pre_match_elo", "player_elo_min", player_elo_min, ">="),
+            ("pre_match_elo", "player_elo_max", player_elo_max, "<="),
+            ("opponent_pre_match_elo", "opponent_elo_min", opponent_elo_min, ">="),
+            ("opponent_pre_match_elo", "opponent_elo_max", opponent_elo_max, "<="),
+        ):
+            if value is not None:
+                clauses.append(f"COALESCE({alias}.{field}, 0) {operator} @{name}")
+        return clauses
 
-    player_where = ["p.Map IN UNNEST(@selected_maps)"]
+    def common_where(alias, map_mode="own"):
+        clauses = rating_bounds(alias)
+        if map_mode in ("own", "both"):
+            clauses.append(f"{alias}.Map IN UNNEST(@selected_maps)")
+        if map_mode == "both":
+            clauses.append(f"{alias}.opponent_map IN UNNEST(@selected_maps)")
+        if date_from is not None:
+            clauses.append(f"{alias}.game_date >= @date_from")
+        if date_to is not None:
+            clauses.append(f"{alias}.game_date <= @date_to")
+        if completed_only:
+            clauses.append(f"({_completed_game_sql(alias)})")
+        if arena_only:
+            clauses.append(f"{alias}.arena_season IS NOT NULL")
+        if tournament_only:
+            clauses.append(f"COALESCE({alias}.is_tournament, FALSE) = TRUE")
+        return clauses or ["TRUE"]
+
+    if mw_action_cards_view == MW_ACTION_CARDS_VIEW_BY_MAP:
+        where_sql = " AND ".join(common_where("a", map_mode="none"))
+        map_columns = []
+        for map_item in ALL_MAPS_FOR_METRICS[:15]:
+            key = map_item["key"]
+            full = map_item["full"].replace("'", "''")
+            map_columns.extend([
+                f"ROUND(MAX(IF(m.Map = '{full}', m.delta_mean, NULL)), 3) AS {key}",
+                f"MAX(IF(m.Map = '{full}', m.delta_mean, NULL)) AS {key}_ci_mean",
+                f"MAX(IF(m.Map = '{full}', m.delta_sd, NULL)) AS {key}_ci_sd",
+                f"COALESCE(MAX(IF(m.Map = '{full}', m.delta_n, NULL)), 0) AS {key}_ci_n",
+            ])
+        return f"""
+        WITH filtered AS (
+          SELECT *
+          FROM `{PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE}` a
+          WHERE {where_sql}
+        ), per_map AS (
+          SELECT
+            card_key, Map,
+            SAFE_DIVIDE(SUM(delta_sum), SUM(delta_count)) AS delta_mean,
+            SQRT(GREATEST(0, SAFE_DIVIDE(
+              SUM(delta_sum_squares)
+                - SAFE_DIVIDE(POW(SUM(delta_sum), 2), SUM(delta_count)),
+              SUM(delta_count) - 1
+            ))) AS delta_sd,
+            SUM(delta_count) AS delta_n
+          FROM filtered
+          GROUP BY card_key, Map
+        ), overall AS (
+          SELECT
+            card_key,
+            SAFE_DIVIDE(SUM(delta_sum), SUM(delta_count)) AS delta_mean,
+            SQRT(GREATEST(0, SAFE_DIVIDE(
+              SUM(delta_sum_squares)
+                - SAFE_DIVIDE(POW(SUM(delta_sum), 2), SUM(delta_count)),
+              SUM(delta_count) - 1
+            ))) AS delta_sd,
+            SUM(delta_count) AS delta_n
+          FROM filtered
+          GROUP BY card_key
+        ), catalog AS ({_mw_action_card_catalog_sql()})
+        SELECT
+          c.card_order, c.card_type AS type, c.card_number, c.card_name,
+          {', '.join(map_columns)},
+          ROUND(o.delta_mean, 3) AS delta_overall,
+          o.delta_mean AS delta_overall_ci_mean,
+          o.delta_sd AS delta_overall_ci_sd,
+          COALESCE(o.delta_n, 0) AS delta_overall_ci_n
+        FROM catalog c
+        LEFT JOIN per_map m USING(card_key)
+        LEFT JOIN overall o USING(card_key)
+        GROUP BY
+          c.card_order, c.card_type, c.card_number, c.card_name,
+          o.delta_mean, o.delta_sd, o.delta_n
+        ORDER BY c.card_order
+        """, parameters
+
+    if mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES:
+        pair_where = " AND ".join(common_where("p", map_mode="own"))
+        standalone_where = " AND ".join(common_where("s", map_mode="own"))
+        return f"""
+        WITH standalone AS (
+          SELECT card_key, AVG(elo_delta) AS individual_delta
+          FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}` s
+          WHERE {standalone_where}
+          GROUP BY card_key
+        ), pair_agg AS (
+          SELECT
+            card_1_order, card_1_key, card_1_type, card_1_number, card_1_name,
+            card_2_order, card_2_key, card_2_type, card_2_number, card_2_name,
+            SAFE_DIVIDE(SUM(delta_sum), SUM(delta_count)) AS delta_actual,
+            SQRT(GREATEST(0, SAFE_DIVIDE(
+              SUM(delta_sum_squares)
+                - SAFE_DIVIDE(POW(SUM(delta_sum), 2), SUM(delta_count)),
+              SUM(delta_count) - 1
+            ))) AS delta_actual_ci_sd,
+            SUM(delta_count) AS delta_actual_ci_n,
+            SAFE_DIVIDE(SUM(elo_sum), SUM(elo_count)) AS avg_elo,
+            SUM(observation_count) AS n_picked
+          FROM `{PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE}` p
+          WHERE {pair_where}
+          GROUP BY
+            card_1_order, card_1_key, card_1_type, card_1_number, card_1_name,
+            card_2_order, card_2_key, card_2_type, card_2_number, card_2_name
+        )
+        SELECT
+          p.card_1_order, p.card_1_key, p.card_1_type, p.card_1_number, p.card_1_name,
+          ROUND(s1.individual_delta, 3) AS delta_1,
+          p.card_2_order, p.card_2_key, p.card_2_type, p.card_2_number, p.card_2_name,
+          ROUND(s2.individual_delta, 3) AS delta_2,
+          ROUND(s1.individual_delta + s2.individual_delta, 3) AS delta_combined,
+          ROUND(p.delta_actual, 3) AS delta_actual,
+          p.delta_actual AS delta_actual_ci_mean,
+          p.delta_actual_ci_sd,
+          p.delta_actual_ci_n,
+          ROUND(
+            p.delta_actual - (s1.individual_delta + s2.individual_delta), 3
+          ) AS interaction,
+          ROUND(p.avg_elo, 0) AS avg_elo,
+          p.n_picked,
+          CONCAT(p.card_1_type, ' + ', p.card_2_type) AS pair_type
+        FROM pair_agg p
+        JOIN standalone s1 ON p.card_1_key = s1.card_key
+        JOIN standalone s2 ON p.card_2_key = s2.card_key
+        ORDER BY interaction DESC, n_picked DESC,
+          p.card_1_order, p.card_2_order
+        """, parameters
+
+    player_where = common_where("p", map_mode="own")
     table_where = [
         "d.p1_map IN UNNEST(@selected_maps)",
         "d.p2_map IN UNNEST(@selected_maps)",
     ]
-    add_bound(player_where, "p.pre_match_elo", "player_elo_min", player_elo_min, ">=")
-    add_bound(player_where, "p.pre_match_elo", "player_elo_max", player_elo_max, "<=")
-    add_bound(player_where, "p.opponent_pre_match_elo", "opponent_elo_min", opponent_elo_min, ">=")
-    add_bound(player_where, "p.opponent_pre_match_elo", "opponent_elo_max", opponent_elo_max, "<=")
     # Draft percentages are table-level observations, so neither stored player
     # owns the Player/Opponent role. Match the requested Elo pairing in either
     # orientation: p1 as Player and p2 as Opponent, or the reverse. The player-
@@ -9094,21 +9339,14 @@ def _build_mw_action_cards_query(
             + " AND ".join(p2_as_player) + "))"
         )
     if date_from is not None:
-        player_where.append("p.game_date >= @date_from")
         table_where.append("d.game_date >= @date_from")
-        parameters.append(bigquery.ScalarQueryParameter("date_from", "DATE", date_from))
     if date_to is not None:
-        player_where.append("p.game_date <= @date_to")
         table_where.append("d.game_date <= @date_to")
-        parameters.append(bigquery.ScalarQueryParameter("date_to", "DATE", date_to))
     if completed_only:
-        player_where.append(f"({_completed_game_sql('p')})")
         table_where.append(f"({_completed_game_sql('d')})")
     if arena_only:
-        player_where.append("p.arena_season IS NOT NULL")
         table_where.append("d.arena_season IS NOT NULL")
     if tournament_only:
-        player_where.append("COALESCE(p.is_tournament, FALSE) = TRUE")
         table_where.append("COALESCE(d.is_tournament, FALSE) = TRUE")
 
     catalog_sql = _mw_action_card_catalog_sql()
@@ -9132,7 +9370,7 @@ def _build_mw_action_cards_query(
         COUNTIF(NOT p.upgraded AND p.elo_delta IS NOT NULL) AS delta_picked_basic_ci_n,
         ROUND(AVG(p.pre_match_elo), 0) AS elo_picked
       FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}` p
-      WHERE {' AND '.join(player_where)}
+       WHERE {' AND '.join(player_where)}
       GROUP BY p.card_key
     ),
     draft_stats AS (
@@ -9212,6 +9450,7 @@ def _query_card_stats(
     players_arena_only=False,
     players_arena_seasons=None,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
     records_player=None,
     records_arena_only=False,
     records_tournament_only=False,
@@ -9248,6 +9487,7 @@ def _query_card_stats(
             completed_only,
             arena_only,
             tournament_only,
+            mw_action_cards_view,
         )
     elif stats_page == STATS_PAGE_HOME:
         # Home is the deliberate all-map exception: Maps 1-8, A, and 0 remain
@@ -10247,28 +10487,64 @@ def _query_card_stats(
     if stats_page == STATS_PAGE_MW_ACTION_CARDS:
         schema_field_names = {field.name for field in results.schema}
         for row in results:
-            item = {
-                "card_order": row.card_order,
-                "type": row.type,
-                "card_number": row.card_number,
-                "card_name": row.card_name,
-                "delta_picked": row.delta_picked,
-                "delta_picked_upgraded": row.delta_picked_upgraded,
-                "delta_picked_basic": row.delta_picked_basic,
-                "elo_picked": row.elo_picked,
-                "available_n": row.available_n,
-                "picked_n": row.picked_n,
-                "picked_pct": row.picked_pct,
-                "drafted_first_n": row.drafted_first_n,
-                "drafted_first_pct": row.drafted_first_pct,
-                "drafted_second_n": row.drafted_second_n,
-                "drafted_second_pct": row.drafted_second_pct,
-                "undrafted_n": row.undrafted_n,
-                "undrafted_pct": row.undrafted_pct,
-            }
-            _attach_ci95(item, row, schema_field_names, "delta_picked")
-            _attach_ci95(item, row, schema_field_names, "delta_picked_upgraded")
-            _attach_ci95(item, row, schema_field_names, "delta_picked_basic")
+            if mw_action_cards_view == MW_ACTION_CARDS_VIEW_BY_MAP:
+                item = {
+                    "card_order": row.card_order,
+                    "type": row.type,
+                    "card_number": row.card_number,
+                    "card_name": row.card_name,
+                    "delta_overall": row.delta_overall,
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_overall")
+                for map_item in ALL_MAPS_FOR_METRICS[:15]:
+                    key = map_item["key"]
+                    item[key] = getattr(row, key, None)
+                    _attach_ci95(item, row, schema_field_names, key)
+            elif mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES:
+                item = {
+                    "card_1_order": row.card_1_order,
+                    "card_1_key": row.card_1_key,
+                    "card_1_type": row.card_1_type,
+                    "card_1_number": row.card_1_number,
+                    "card_1_name": row.card_1_name,
+                    "delta_1": row.delta_1,
+                    "card_2_order": row.card_2_order,
+                    "card_2_key": row.card_2_key,
+                    "card_2_type": row.card_2_type,
+                    "card_2_number": row.card_2_number,
+                    "card_2_name": row.card_2_name,
+                    "delta_2": row.delta_2,
+                    "delta_actual": row.delta_actual,
+                    "avg_elo": row.avg_elo,
+                    "n_picked": row.n_picked,
+                    "pair_type": row.pair_type,
+                    "delta_combined": row.delta_combined,
+                    "interaction": row.interaction,
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_actual")
+            else:
+                item = {
+                    "card_order": row.card_order,
+                    "type": row.type,
+                    "card_number": row.card_number,
+                    "card_name": row.card_name,
+                    "delta_picked": row.delta_picked,
+                    "delta_picked_upgraded": row.delta_picked_upgraded,
+                    "delta_picked_basic": row.delta_picked_basic,
+                    "elo_picked": row.elo_picked,
+                    "available_n": row.available_n,
+                    "picked_n": row.picked_n,
+                    "picked_pct": row.picked_pct,
+                    "drafted_first_n": row.drafted_first_n,
+                    "drafted_first_pct": row.drafted_first_pct,
+                    "drafted_second_n": row.drafted_second_n,
+                    "drafted_second_pct": row.drafted_second_pct,
+                    "undrafted_n": row.undrafted_n,
+                    "undrafted_pct": row.undrafted_pct,
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_picked")
+                _attach_ci95(item, row, schema_field_names, "delta_picked_upgraded")
+                _attach_ci95(item, row, schema_field_names, "delta_picked_basic")
             rows.append(item)
         iteration_ms = _ms_since(iteration_started_at)
         timing = {
@@ -11273,6 +11549,7 @@ def _refresh_default_snapshot_from_prepared(
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
     completed_only_override=None,
     cache_blob_override=None,
 ):
@@ -11313,6 +11590,7 @@ def _refresh_default_snapshot_from_prepared(
         "workers_view": workers_view,
         "players_view": players_view,
         "records_view": records_view,
+        "mw_action_cards_view": mw_action_cards_view,
         "records_player": None,
         "records_arena_only": False,
         "records_tournament_only": False,
@@ -11353,7 +11631,7 @@ def _refresh_default_snapshot_from_prepared(
         "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
         "records_view": records_view if stats_page == STATS_PAGE_RECORDS else None,
         "mw_action_cards_view": (
-            MW_ACTION_CARDS_VIEW_GENERAL if stats_page == STATS_PAGE_MW_ACTION_CARDS else None
+            mw_action_cards_view if stats_page == STATS_PAGE_MW_ACTION_CARDS else None
         ),
         "maps": (
             ALL_MAPS_FOR_METRICS
@@ -11386,6 +11664,8 @@ def _refresh_default_snapshot_from_prepared(
             if stats_page == STATS_PAGE_SCORING
             else f"{stats_page}_{workers_view}_default_snapshot"
             if stats_page == STATS_PAGE_WORKERS
+            else f"{stats_page}_{mw_action_cards_view}_default_snapshot"
+            if stats_page == STATS_PAGE_MW_ACTION_CARDS
             else f"{stats_page}_default_snapshot"
         ),
         "is_mw": int(is_mw),
@@ -11412,7 +11692,8 @@ def _refresh_default_snapshot_from_prepared(
         else _write_cached_snapshot(
             is_mw, payload, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view,
+            mw_action_cards_view
         )
     )
     return {
@@ -11434,7 +11715,7 @@ def _refresh_default_snapshot_from_prepared(
         "scoring_view": scoring_view if stats_page == STATS_PAGE_SCORING else None,
         "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
         "mw_action_cards_view": (
-            MW_ACTION_CARDS_VIEW_GENERAL if stats_page == STATS_PAGE_MW_ACTION_CARDS else None
+            mw_action_cards_view if stats_page == STATS_PAGE_MW_ACTION_CARDS else None
         ),
         "cache_status": "refreshed" if cache_write_ok else "cache_write_failed",
         "rows": len(rows),
@@ -11645,7 +11926,16 @@ def _run_daily_refresh():
         0, STATS_PAGE_PLAYERS, players_view=PLAYERS_VIEW_GENERAL
     )
     mw_action_cards_general = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_MW_ACTION_CARDS
+        1, STATS_PAGE_MW_ACTION_CARDS,
+        mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
+    )
+    mw_action_cards_by_map = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_MW_ACTION_CARDS,
+        mw_action_cards_view=MW_ACTION_CARDS_VIEW_BY_MAP,
+    )
+    mw_action_cards_synergies = _refresh_default_snapshot_from_prepared(
+        1, STATS_PAGE_MW_ACTION_CARDS,
+        mw_action_cards_view=MW_ACTION_CARDS_VIEW_SYNERGIES,
     )
     elo_leaderboard_snapshots = _refresh_records_elo_leaderboard_snapshots()
     records_snapshots = []
@@ -11732,7 +12022,8 @@ def _run_daily_refresh():
          workers_general_mw, workers_general_base,
          workers_two_cp_mw, workers_two_cp_base,
          players_general_mw, players_general_base,
-         mw_action_cards_general,
+         mw_action_cards_general, mw_action_cards_by_map,
+         mw_action_cards_synergies,
          *elo_leaderboard_snapshots,
          *records_snapshots,
         combinations_card_card_mw, combinations_card_card_base,
@@ -11836,6 +12127,8 @@ def _run_daily_refresh():
         "players_general_mw": players_general_mw,
         "players_general_base": players_general_base,
         "mw_action_cards_general": mw_action_cards_general,
+        "mw_action_cards_by_map": mw_action_cards_by_map,
+        "mw_action_cards_synergies": mw_action_cards_synergies,
         "combinations_card_card_mw": combinations_card_card_mw,
         "combinations_card_card_base": combinations_card_card_base,
         "combinations_card_round_mw": combinations_card_round_mw,
@@ -11907,6 +12200,7 @@ def get_card_stats(request):
         refresh_data
         or debug_timing
         or params.get("refresh_prepared") is True
+        or params.get("refresh_mw_action_cards_prepared") is True
         or params.get("refresh_players_prepared") is True
         or params.get("daily_refresh") is True
         or params.get("refresh_default_pack") is True
@@ -11929,6 +12223,16 @@ def get_card_stats(request):
         except Exception as exc:
             logging.exception("Failed to refresh prepared tables")
             return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
+
+    if params.get("refresh_mw_action_cards_prepared") is True:
+        try:
+            payload = _refresh_prepared_mw_action_card_tables()
+            return _json_http_response(payload, 200, headers, request)
+        except Exception as exc:
+            logging.exception("Failed to refresh prepared MW Action Cards tables")
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 500, headers, request
+            )
 
     if params.get("refresh_players_prepared") is True:
         try:
@@ -12580,10 +12884,11 @@ def get_card_stats(request):
         players_view,
         players_players,
         last_x_games,
-        records_view,
-        records_player,
-        records_arena_only,
-        records_tournament_only,
+        records_view=records_view,
+        mw_action_cards_view=mw_action_cards_view,
+        records_player=records_player,
+        records_arena_only=records_arena_only,
+        records_tournament_only=records_tournament_only,
     )
     if stats_page == STATS_PAGE_PLAYERS and players_arena_only:
         cacheable_default_request = False
@@ -12599,7 +12904,8 @@ def get_card_stats(request):
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
             build_view, predictors_view, actions_view
-            , conservation_view, scoring_view, workers_view, players_view, records_view
+            , conservation_view, scoring_view, workers_view, players_view, records_view,
+            mw_action_cards_view
         )
         if cached_payload:
             if stats_page == STATS_PAGE_MW_ACTION_CARDS:
@@ -12634,8 +12940,12 @@ def get_card_stats(request):
         scoring_view if stats_page == STATS_PAGE_SCORING else
         workers_view if stats_page == STATS_PAGE_WORKERS else
         # General and Draft render different columns from one combined payload;
-        # sharing this canonical subview prevents duplicate filtered caches.
-        MW_ACTION_CARDS_VIEW_GENERAL if stats_page == STATS_PAGE_MW_ACTION_CARDS else
+        # only those two share a canonical filtered cache.
+        (
+            MW_ACTION_CARDS_VIEW_GENERAL
+            if mw_action_cards_view == MW_ACTION_CARDS_VIEW_DRAFT
+            else mw_action_cards_view
+        ) if stats_page == STATS_PAGE_MW_ACTION_CARDS else
         {
             "view": players_view,
             "player": players_player,
@@ -12741,6 +13051,7 @@ def get_card_stats(request):
             "players_arena_only": players_arena_only,
             "players_arena_seasons": players_arena_seasons,
             "records_view": records_view,
+            "mw_action_cards_view": mw_action_cards_view,
             "records_player": records_player,
             "records_arena_only": records_arena_only,
             "records_tournament_only": records_tournament_only,
@@ -12890,6 +13201,7 @@ def get_card_stats(request):
                 is_mw, payload, stats_page, endgames_view, maps_view,
                 sponsor_endgames_view, combinations_view,
                 build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
+                , mw_action_cards_view
             )
             payload["cache_status"] = "refreshed" if refresh_data and cache_write_ok else "miss"
             if not cache_write_ok:

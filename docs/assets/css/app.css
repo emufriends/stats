@@ -4012,11 +4012,11 @@
     }
 
     /* MW Action Cards ------------------------------------------------------
-       General and Draft share one fixed 20-row MW-only catalog payload. Tabs
-       retain the shared geometry; percentage columns reuse Cards' bars. */
+       General/Draft share one payload; By map and Synergies use their own
+       complete daily snapshots and browser-local controls. */
     .mw-action-cards-tabs {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       width: 100%;
     }
 
@@ -4030,9 +4030,157 @@
       min-height: 24.6667px;
     }
 
+    .mw-action-main-controls,
+    .mw-action-pair-controls {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 14px;
+    }
+
+    .mw-action-map-mode[hidden],
+    .mw-action-pair-controls[hidden] {
+      display: none !important;
+    }
+
+    .mw-action-pair-controls label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--text-muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .mw-action-pair-controls input,
+    .mw-action-pair-controls select {
+      height: 25px;
+      border: 1px solid var(--border-light);
+      border-radius: 7px;
+      background: var(--bg-panel);
+      color: var(--text);
+      font: inherit;
+    }
+
+    .mw-action-pair-controls input { width: 70px; padding: 2px 7px; text-align: center; }
+    .mw-action-pair-controls select { min-width: 62px; padding: 2px 5px; }
+
+    .mw-action-map-mode {
+      height: 24.6667px;
+    }
+
     .mw-action-cards-table th,
     .mw-action-cards-table td {
       text-align: center;
+    }
+
+    .mw-action-cards-by-map-table,
+    .mw-action-pair-table {
+      width: 100%;
+      min-width: 900px;
+      table-layout: fixed;
+    }
+
+    #statsTable.mw-action-cards-by-map-table tbody td {
+      font-size: 12px;
+    }
+
+    .mw-action-sort-label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      max-width: 100%;
+    }
+
+    .mw-action-cards-by-map-table th,
+    .mw-action-cards-by-map-table td {
+      padding-inline: 4px;
+    }
+
+    .mw-action-cards-by-map-table .card-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mw-action-card-search-header .card-header-content,
+    .mw-action-pair-table .card-header-content {
+      justify-content: center;
+    }
+
+    .mw-action-card-search-header .card-search-btn {
+      position: absolute;
+      left: 8px;
+    }
+
+    .mw-action-card-search-header,
+    .mw-action-pair-table .combination-card-filter-header {
+      position: relative;
+    }
+
+    .mw-action-pair-table .combination-card-delta {
+      font-size: 10px;
+    }
+
+    .mw-pair-type-popup {
+      left: 0;
+      width: min(220px, calc(100vw - 16px));
+      max-width: min(220px, calc(100vw - 16px));
+      max-height: none;
+      padding: 8px;
+      box-sizing: border-box;
+      overflow: visible;
+    }
+
+    .mw-pair-type-popup.open {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .mw-pair-type-options {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 145px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .mw-pair-type-options .chip {
+      width: 100%;
+      min-height: 24px;
+      padding: 4px 8px;
+      overflow: hidden;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mw-pair-type-popup .combination-popup-actions {
+      grid-column: 1 / -1;
+    }
+
+    .mw-action-combination-type-badge {
+      max-width: 100%;
+    }
+
+    .mw-action-combination-type-badge .combination-type-part {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mw-action-map-chart-wrap .cp-dist-legend-controls {
+      flex-wrap: wrap;
+    }
+
+    .mw-action-legend-search {
+      width: 100%;
+      height: 27px;
+      margin-top: 5px;
     }
 
     .mw-action-cards-table .mw-action-delta-primary {
@@ -4041,6 +4189,10 @@
 
     .mw-action-cards-table .mw-action-delta-secondary {
       font-weight: 400;
+    }
+
+    .pagination[hidden] {
+      display: none !important;
     }
 
     .mw-action-cards-table .mw-action-type-popup {
@@ -4085,6 +4237,8 @@
 
     @media (max-width: 768px) {
       .mw-action-cards-tabs .endgames-tab { padding-inline: 6px; }
+      .mw-action-pair-controls { gap: 7px; }
+      .mw-action-pair-controls label { font-size: 10px; }
     }
 
     .players-arena-table .players-arena-name {
@@ -5881,8 +6035,10 @@
     letter-spacing: .08em;
   }
 
-  #statsTable.mw-action-cards-table:has(tbody .rank-cell) th:nth-child(1),
-  #statsTable.mw-action-cards-table:has(tbody .rank-cell) td:nth-child(1) {
+  #statsTable.mw-action-cards-general-table th:nth-child(1),
+  #statsTable.mw-action-cards-general-table td:nth-child(1),
+  #statsTable.mw-action-cards-draft-table th:nth-child(1),
+  #statsTable.mw-action-cards-draft-table td:nth-child(1) {
     display: table-cell !important;
     width: 5% !important;
     min-width: 0 !important;
@@ -5890,10 +6046,14 @@
     left: auto !important;
   }
 
-  #statsTable.mw-action-cards-table th:nth-child(2),
-  #statsTable.mw-action-cards-table td:nth-child(2),
-  #statsTable.mw-action-cards-table th:nth-child(3),
-  #statsTable.mw-action-cards-table td:nth-child(3) {
+  #statsTable.mw-action-cards-general-table th:nth-child(2),
+  #statsTable.mw-action-cards-general-table td:nth-child(2),
+  #statsTable.mw-action-cards-general-table th:nth-child(3),
+  #statsTable.mw-action-cards-general-table td:nth-child(3),
+  #statsTable.mw-action-cards-draft-table th:nth-child(2),
+  #statsTable.mw-action-cards-draft-table td:nth-child(2),
+  #statsTable.mw-action-cards-draft-table th:nth-child(3),
+  #statsTable.mw-action-cards-draft-table td:nth-child(3) {
     width: 15% !important;
     min-width: 0 !important;
     max-width: none !important;
@@ -5901,26 +6061,26 @@
     box-shadow: none;
   }
 
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(4),
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(4),
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(5),
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(5),
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(6),
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(6) {
+  #statsTable.mw-action-cards-general-table th:nth-child(4),
+  #statsTable.mw-action-cards-general-table td:nth-child(4),
+  #statsTable.mw-action-cards-general-table th:nth-child(5),
+  #statsTable.mw-action-cards-general-table td:nth-child(5),
+  #statsTable.mw-action-cards-general-table th:nth-child(6),
+  #statsTable.mw-action-cards-general-table td:nth-child(6) {
     width: 12% !important;
     min-width: 0 !important;
     max-width: none !important;
   }
 
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(7),
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(7) {
+  #statsTable.mw-action-cards-general-table th:nth-child(7),
+  #statsTable.mw-action-cards-general-table td:nth-child(7) {
     width: 10% !important;
     min-width: 0 !important;
     max-width: none !important;
   }
 
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) th:nth-child(8),
-  #statsTable.mw-action-cards-table:not(.mw-action-cards-draft-table) td:nth-child(8) {
+  #statsTable.mw-action-cards-general-table th:nth-child(8),
+  #statsTable.mw-action-cards-general-table td:nth-child(8) {
     width: 19% !important;
     min-width: 0 !important;
     max-width: none !important;
@@ -5933,8 +6093,10 @@
     max-width: none !important;
   }
 
-  #statsTable.mw-action-cards-table tbody td:nth-child(1),
-  #statsTable.mw-action-cards-table tbody td:nth-child(2) {
+  #statsTable.mw-action-cards-general-table tbody td:nth-child(1),
+  #statsTable.mw-action-cards-general-table tbody td:nth-child(2),
+  #statsTable.mw-action-cards-draft-table tbody td:nth-child(1),
+  #statsTable.mw-action-cards-draft-table tbody td:nth-child(2) {
     position: static !important;
   }
 }

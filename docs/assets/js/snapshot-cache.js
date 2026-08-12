@@ -6,7 +6,7 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 12;
+const DEFAULT_PACK_SCHEMA_VERSION = 13;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
@@ -65,6 +65,8 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['actions', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/actions/upgrades_by_map/frequency/default-mw.json'],
   ['actions', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/actions/upgrades_by_map/frequency/default-base.json'],
   ['mw-action-cards', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/mw-action-cards/general/default-mw.json'],
+  ['mw-action-cards', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/mw-action-cards/by-map/default-mw.json'],
+  ['mw-action-cards', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/mw-action-cards/synergies/default-mw.json'],
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/projects/default-mw.json'],
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/projects/default-base.json'],
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/project-rewards/default-mw.json'],
