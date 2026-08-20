@@ -10,7 +10,7 @@ import {
   relativeEloColor,
 } from '../color-scales.js?v=20260710-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260728-3';
+import { loadStats } from '../snapshot-cache.js?v=20260819-3';
 
 export const title = 'Endgames';
 export const navLabel = 'Endgames';

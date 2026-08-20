@@ -6,7 +6,7 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 13;
+const DEFAULT_PACK_SCHEMA_VERSION = 18;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
@@ -107,6 +107,7 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-round/default-base.json?v=20260629-13'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-endgame/default-mw.json?v=20260629-13'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-endgame/default-base.json?v=20260629-13'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-action-card/default-mw.json?v=20260819-1'],
 ];
 
 function dataVersion() {
@@ -212,11 +213,15 @@ export function peekSnapshot(url) {
 
 function withGlobalModeFilters(params) {
   const normalized = { ...params };
-  if (normalized.stats_page === 'records') return normalized;
-  const arena = document.getElementById('globalArenaOnly');
-  const tournament = document.getElementById('globalTournamentOnly');
-  normalized.arena_only = Boolean(arena?.checked);
-  normalized.tournament_only = Boolean(tournament?.checked);
+  if (normalized.stats_page !== 'records') {
+    const arena = document.getElementById('globalArenaOnly');
+    const tournament = document.getElementById('globalTournamentOnly');
+    normalized.arena_only = Boolean(arena?.checked);
+    normalized.tournament_only = Boolean(tournament?.checked);
+  }
+  const startingPositions = window.getGlobalStartingPositions?.() || [];
+  if (startingPositions.length === 1) normalized.starting_positions = startingPositions;
+  else delete normalized.starting_positions;
   return normalized;
 }
 
@@ -256,7 +261,7 @@ export function fetchStats(params, { signal, shareInFlight = true } = {}) {
 
 export async function loadStats(params, defaultUrl = null, options = {}) {
   const normalized = withGlobalModeFilters(params);
-  if (defaultUrl && !normalized.arena_only && !normalized.tournament_only) {
+  if (defaultUrl && !normalized.arena_only && !normalized.tournament_only && !normalized.starting_positions) {
     try { return await loadSnapshot(defaultUrl); } catch { return fetchStats(normalized, options); }
   }
   return fetchStats(normalized, options);

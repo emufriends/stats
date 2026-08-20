@@ -6,7 +6,7 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
-import { loadStats } from '../snapshot-cache.js?v=20260728-3';
+import { loadStats } from '../snapshot-cache.js?v=20260819-3';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 
 export const title = 'Opening Hand';
@@ -154,6 +154,9 @@ let typeBeforeSizeOnly = null;
 export function mount({ dataset = 1 } = {}) {
   bindWindowHandlers();
   isPageMounted = true;
+  // The shared phone stylesheet needs an explicit schema marker so its
+  // nine-column Card widths never leak into unrelated #statsTable matrices.
+  document.getElementById('statsTable')?.classList.add('opening-hand-table');
   const activeMountToken = ++mountToken;
   // The router recreates this page's DOM on every visit, while ES module state
   // persists. Reset DOM-backed state here so controls and data start aligned.

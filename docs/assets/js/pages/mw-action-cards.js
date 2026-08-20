@@ -6,10 +6,11 @@ import {
   numericRange,
   playrateColor,
   relativeEloColor,
-} from '../color-scales.js?v=20260812-2';
-import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-2';
-import { setTopbarDatasetLock } from '../layout.js?v=20260812-2';
-import { loadStats } from '../snapshot-cache.js?v=20260812-2';
+  synergyRangeColor,
+} from '../color-scales.js?v=20260812-9';
+import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
+import { setTopbarDatasetLock } from '../layout.js?v=20260812-9';
+import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260819-3';
 
 export const id = 'mw-action-cards';
 export const title = 'MW Action Cards';
@@ -112,6 +113,10 @@ let pairSearches = { synergies: ['', ''] };
 let minimumPicks = 1000;
 let rowsPerPage = 50;
 let currentPage = 1;
+let synergyCiTimer = 0;
+let synergyCiToken = 0;
+let synergyCiController = null;
+let synergyCiPendingKey = '';
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true; requestToken += 1; activeView = 'general';
@@ -140,6 +145,7 @@ export function mount({ dataset = 1 } = {}) {
 
 export function unmount() {
   mounted = false; requestToken += 1;
+  clearSynergyCiRequest();
   document.removeEventListener('click', closePopupsOnOutsideClick);
   document.removeEventListener('mouseover', showTooltip); document.removeEventListener('mousemove', moveTooltip); document.removeEventListener('mouseout', hideTooltip);
   window.removeEventListener('resize', repositionMwActionPopups);
@@ -156,6 +162,7 @@ function canonicalView(view = activeView) { return view === 'draft' ? 'general' 
 function rowsForView(view = activeView) { return viewRows[canonicalView(view)] || []; }
 
 function setMwActionCardsView(view) {
+  clearSynergyCiRequest();
   activeView = VIEWS.includes(view) ? view : 'general'; currentPage = 1;
   syncViewChrome();
   const canonical = canonicalView();
@@ -165,7 +172,7 @@ function setMwActionCardsView(view) {
 function syncViewChrome() {
   document.querySelectorAll('.mw-action-cards-tabs .endgames-tab').forEach(button => button.classList.toggle('active', button.dataset.view === activeView));
   const graphToggle = document.querySelector('.mw-action-cards-tabs [data-view="by_map"] .endgames-graph-toggle');
-  graphToggle?.classList.toggle('graph-active', activeView === 'by_map' && byMapGraph);
+  graphToggle?.classList.toggle('active', activeView === 'by_map' && byMapGraph);
   const mapMode = document.getElementById('mwActionMapMode'); if (mapMode) mapMode.hidden = activeView !== 'by_map';
   const pairControls = document.getElementById('mwActionPairControls'); if (pairControls) pairControls.hidden = activeView !== 'synergies';
   const hideMaps = activeView === 'by_map';
@@ -202,6 +209,7 @@ function isDefault(request, view) {
 }
 
 async function loadView(view, token) {
+  clearSynergyCiRequest();
   if (view !== 'by_map' && !selectedMaps.length) { viewRows[view] = []; render(); return; }
   const wrap = document.querySelector('.mw-action-cards-table-wrap');
   const preserve = rowsForView().length > 0;
@@ -266,7 +274,7 @@ function renderByMap() {
 function renderByMapHead() {
   setTableClasses('mw-action-cards-by-map-table');
   const head = document.getElementById('tableHead');
-  head.innerHTML = byMapGraph ? '' : `<tr><th style="width:4%">#</th><th style="width:16%">Action Card</th>${MAPS.map(([short, full, key]) => mapSortableHeader(key, short, mapTooltipLabel(full), '5%')).join('')}${sortableHeader('delta_overall', '&Delta;', '', '5%')}</tr>`;
+  head.innerHTML = byMapGraph ? '' : `<tr><th style="width:4%">#</th><th style="width:16%">Action Card</th>${MAPS.map(([short, full, key]) => mapSortableHeader(key, short, mapTooltipLabel(full), '5%')).join('')}${sortableHeader('delta_overall', 'Avg', '', '5%')}</tr>`;
 }
 
 function renderPairs() {
@@ -293,8 +301,9 @@ function renderPairs() {
     expected: cappedNumericRange(all, row => row[expectedField]), actual: cappedNumericRange(all, row => row.delta_actual),
     residual: cappedNumericRange(all, row => row[residualField]), elo: numericRange(all, row => row.avg_elo),
   };
-  document.getElementById('tableBody').innerHTML = page.map(row => `<tr><td class="rank-cell">${row.global_rank}</td>${pairCardCell(row.display_card_1, row.display_delta_1, ranges.delta_1)}${pairCardCell(row.display_card_2, row.display_delta_2, ranges.delta_2)}${simpleDeltaCell(row[expectedField], ranges.expected)}${deltaActualCell(row, ranges.actual)}${residualCell(row[residualField], ranges.residual)}${eloCell(row.avg_elo, ranges.elo)}<td class="n-cell">${formatInteger(row.n_picked)}</td>${pairTypeCell(row)}</tr>`).join('') || emptyRow(9);
+  document.getElementById('tableBody').innerHTML = page.map(row => `<tr><td class="rank-cell">${row.global_rank}</td>${pairCardCell(row.display_card_1, row.display_delta_1, ranges.delta_1, row, row.display_component_1)}${pairCardCell(row.display_card_2, row.display_delta_2, ranges.delta_2, row, row.display_component_2)}${simpleDeltaCell(row[expectedField], ranges.expected)}${deltaActualCell(row, ranges.actual)}${residualCell(row, ranges.residual)}${eloCell(row.avg_elo, ranges.elo)}<td class="n-cell">${formatInteger(row.n_picked)}</td>${pairTypeCell(row)}</tr>`).join('') || emptyRow(9);
   renderPagination(totalPages);
+  scheduleSynergyConfidenceIntervals(page);
 }
 
 function renderPairHead() {
@@ -424,10 +433,13 @@ function positionMwPairTypePopup(popup) {
   const anchor = document.getElementById('mwPairTypeHeader');
   if (!popup || !anchor) return;
   const margin = 8;
-  const width = Math.min(220, Math.max(0, window.innerWidth - margin * 2));
-  const height = popup.getBoundingClientRect().height || 190;
   const rect = anchor.getBoundingClientRect();
-  const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
+  const pickedRect = anchor.parentElement?.querySelector('th:nth-last-child(2)')?.getBoundingClientRect();
+  const combinedLeft = pickedRect?.left ?? rect.left;
+  const combinedRight = rect.right;
+  const width = Math.min(Math.max(0, combinedRight - combinedLeft), Math.max(0, window.innerWidth - margin * 2));
+  const height = popup.getBoundingClientRect().height || 190;
+  const left = Math.max(margin, Math.min(combinedRight - width, window.innerWidth - width - margin));
   const top = rect.bottom + height <= window.innerHeight - margin
     ? rect.bottom
     : Math.max(margin, rect.top - height);
@@ -499,7 +511,7 @@ function clearMwActionCardSearch(slot, event) { event?.stopPropagation(); if (sl
 function projectPairRow(row) {
   const [one, two] = pairSearches.synergies;
   const swap = (one && row.card_2_name === one) || (!one && two && row.card_1_name === two);
-  return { ...row, display_card_1: swap ? row.card_2_name : row.card_1_name, display_card_2: swap ? row.card_1_name : row.card_2_name, display_delta_1: swap ? row.delta_2 : row.delta_1, display_delta_2: swap ? row.delta_1 : row.delta_2 };
+  return { ...row, display_card_1: swap ? row.card_2_name : row.card_1_name, display_card_2: swap ? row.card_1_name : row.card_2_name, display_delta_1: swap ? row.delta_2 : row.delta_1, display_delta_2: swap ? row.delta_1 : row.delta_2, display_component_1: swap ? 'component_2' : 'component_1', display_component_2: swap ? 'component_1' : 'component_2' };
 }
 function pairSearchMatch(row) { const [one, two] = pairSearches[activeView]; return (!one || row.display_card_1 === one) && (!two || row.display_card_2 === two); }
 
@@ -543,13 +555,104 @@ function buildByMapChart(data) {
   legend.append(controls, list); chart.append(svg, tooltip); wrap.append(chart, legend); sync(); return wrap;
 }
 
-function mapDeltaCell(row, field, range, overall = false) { const value = byMapValue(row, field); if (value === null) return '<td class="unavailable-cell">-</td>'; const ci = byMapMode === 'raw' || overall ? ciAttrs(row, field, range) : ''; return `<td class="delta ${ci ? 'delta-ci-cell' : ''}"${ci} style="color:${deltaRangeColor(value, range.min, range.max)}">${formatSignedDeltaAdaptive(value, true)}</td>`; }
-function ciAttrs(row, field, range) { return ` data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(range?.min ?? '')}" data-ci-color-max="${escapeAttr(range?.max ?? '')}"`; }
+function mapDeltaCell(row, field, range, overall = false) { const value = byMapValue(row, field); if (value === null) return '<td class="unavailable-cell">-</td>'; const ci = byMapMode === 'raw' || overall ? ciAttrs(row, field, range, overall ? 'synergy' : '') : ''; const color = overall ? synergyRangeColor(value, range.min, range.max) : deltaRangeColor(value, range.min, range.max); return `<td class="delta ${overall ? 'mw-action-map-overall' : ''} ${ci ? 'delta-ci-cell' : ''}"${ci} style="color:${color}">${formatSignedDeltaAdaptive(value, true)}</td>`; }
+function ciAttrs(row, field, range, colorScale = '') { return ` data-ci-low="${escapeAttr(row[`${field}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${field}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${field}_ci95_n`] ?? '')}"${colorScale ? ` data-ci-color-scale="${colorScale}"` : ''} data-ci-color-min="${escapeAttr(range?.min ?? '')}" data-ci-color-max="${escapeAttr(range?.max ?? '')}"`; }
 function deltaCell(row, field, range, primary = false) { const value = finiteOrNull(row[field]); if (value === null) return '<td class="unavailable-cell">-</td>'; return `<td class="delta delta-ci-cell ${primary ? 'mw-action-delta-primary' : 'mw-action-delta-secondary'}"${ciAttrs(row, field, range)} style="color:${deltaRangeColor(value, range.min, range.max)}">${formatSignedDeltaAdaptive(value, true)}</td>`; }
 function simpleDeltaCell(raw, range) { const value = finiteOrNull(raw); return value === null ? '<td class="unavailable-cell">-</td>' : `<td class="delta" style="color:${deltaRangeColor(value, range.min, range.max)}">${formatSignedDeltaAdaptive(value, true)}</td>`; }
 function deltaActualCell(row, range) { const value = finiteOrNull(row.delta_actual); return value === null ? '<td class="unavailable-cell">-</td>' : `<td class="delta delta-ci-cell"${ciAttrs(row, 'delta_actual', range)} style="color:${deltaRangeColor(value, range.min, range.max)}">${formatSignedDeltaAdaptive(value, true)}</td>`; }
-function residualCell(raw, range) { const value = finiteOrNull(raw); return value === null ? '<td class="unavailable-cell">-</td>' : `<td class="combination-interaction" style="color:${deltaRangeColor(value, range.min, range.max)}">${formatSignedDeltaAdaptive(value, true)}</td>`; }
-function pairCardCell(name, delta, range) { const value = finiteOrNull(delta); return `<td class="combination-card-cell combination-card-with-delta"><span class="combination-card-name">${escapeHtml(name)}</span><span class="combination-card-delta" style="color:${value === null ? 'var(--text-muted)' : deltaRangeColor(value, range.min, range.max)}">(${value === null ? '-' : formatSignedDeltaAdaptive(value, true)})</span></td>`; }
+function residualCell(row, range) {
+  const value = finiteOrNull(row?.interaction);
+  if (value === null) return '<td class="unavailable-cell">-</td>';
+  const hasCi = Object.prototype.hasOwnProperty.call(row, 'interaction_ci95_method');
+  const attrs = hasCi
+    ? ` data-ci-low="${escapeAttr(row.interaction_ci95_low ?? '')}" data-ci-high="${escapeAttr(row.interaction_ci95_high ?? '')}" data-ci-n="${escapeAttr(row.interaction_ci95_cluster_n ?? 0)}" data-ci-color-scale="synergy" data-ci-color-min="${escapeAttr(range?.min ?? '')}" data-ci-color-max="${escapeAttr(range?.max ?? '')}"`
+    : '';
+  return `<td class="combination-interaction${hasCi ? ' delta-ci-cell' : ''}"${attrs} style="color:${synergyRangeColor(value, range.min, range.max)}">${formatSignedDeltaAdaptive(value, true)}</td>`;
+}
+
+function mwSynergyCiKey(row) {
+  return JSON.stringify([row.card_1_key, row.card_2_key]);
+}
+
+function clearSynergyCiRequest() {
+  window.clearTimeout(synergyCiTimer);
+  synergyCiTimer = 0;
+  synergyCiToken += 1;
+  synergyCiController?.abort();
+  synergyCiController = null;
+  synergyCiPendingKey = '';
+}
+
+function scheduleSynergyConfidenceIntervals(pageRows) {
+  window.clearTimeout(synergyCiTimer);
+  const missing = (pageRows || []).filter(row =>
+    !Object.prototype.hasOwnProperty.call(row, 'interaction_ci95_method')
+    || !Object.prototype.hasOwnProperty.call(row, 'component_1_ci95_n')
+    || !Object.prototype.hasOwnProperty.call(row, 'component_2_ci95_n')
+  );
+  if (!mounted || activeView !== 'synergies' || !missing.length) return;
+  const scope = params('synergies');
+  const descriptors = missing.slice(0, 100).map(row => ({
+    card_1_key: row.card_1_key,
+    card_2_key: row.card_2_key,
+  }));
+  const requestKey = JSON.stringify([scope, descriptors]);
+  if (synergyCiController && synergyCiPendingKey === requestKey) return;
+  synergyCiTimer = window.setTimeout(() => {
+    void loadSynergyConfidenceIntervals(scope, descriptors, requestKey);
+  }, 0);
+}
+
+async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
+  if (!mounted || activeView !== 'synergies' || !descriptors.length) return;
+  if (synergyCiController && synergyCiPendingKey !== requestKey) synergyCiController.abort();
+  if (synergyCiController && synergyCiPendingKey === requestKey) return;
+  const controller = new AbortController();
+  const token = ++synergyCiToken;
+  synergyCiController = controller;
+  synergyCiPendingKey = requestKey;
+  try {
+    const payload = await fetchStats({
+      ...scope,
+      synergy_ci: true,
+      synergy_ci_rows: descriptors,
+    }, { signal: controller.signal, shareInFlight: false });
+    if (!mounted || activeView !== 'synergies' || controller.signal.aborted || token !== synergyCiToken) return;
+    const ciByKey = new Map((payload.data || []).map(item => [item.row_key, item]));
+    (viewRows.synergies || []).forEach(row => {
+      const ci = ciByKey.get(mwSynergyCiKey(row));
+      if (ci) Object.assign(row, ci);
+    });
+    renderPairs();
+  } catch (error) {
+    if (error?.name === 'AbortError' || !mounted || token !== synergyCiToken) return;
+    console.warn('Could not load MW Action Cards Synergy confidence intervals', error);
+    const requested = new Set(descriptors.map(item => JSON.stringify([
+      item.card_1_key, item.card_2_key,
+    ])));
+    (viewRows.synergies || []).forEach(row => {
+      if (!requested.has(mwSynergyCiKey(row))) return;
+      row.interaction_ci95_low = null;
+      row.interaction_ci95_high = null;
+      row.interaction_ci95_cluster_n = 0;
+      row.interaction_ci95_method = 'unavailable';
+      row.component_1_ci95_low = null;
+      row.component_1_ci95_high = null;
+      row.component_1_ci95_n = 0;
+      row.component_2_ci95_low = null;
+      row.component_2_ci95_high = null;
+      row.component_2_ci95_n = 0;
+    });
+    renderPairs();
+  } finally {
+    if (token === synergyCiToken) {
+      synergyCiController = null;
+      synergyCiPendingKey = '';
+    }
+  }
+}
+
+function pairCardCell(name, delta, range, row = null, ciPrefix = '') { const value = finiteOrNull(delta); const hasCi = row && ciPrefix && Object.prototype.hasOwnProperty.call(row, `${ciPrefix}_ci95_n`); const attrs = hasCi ? ciAttrs(row, ciPrefix, range) : ''; return `<td class="combination-card-cell combination-card-with-delta"><span class="combination-card-name">${escapeHtml(name)}</span><span class="combination-card-delta${hasCi ? ' delta-ci-cell' : ''}"${attrs} style="color:${value === null ? 'var(--text-muted)' : deltaRangeColor(value, range.min, range.max)}">(${value === null ? '-' : formatSignedDeltaAdaptive(value, true)})</span></td>`; }
 function eloCell(raw, range) { const value = finiteOrNull(raw); return value === null ? '<td class="unavailable-cell">-</td>' : `<td class="elo-cell" style="color:${relativeEloColor(value, range.min, range.max)}">${Math.round(value).toLocaleString('en-US')}</td>`; }
 function typeCell(type) { return `<td class="mw-action-type-cell"><span class="mw-action-type-badge mw-action-type-${slug(type)}">${escapeHtml(type)}</span></td>`; }
 function pairTypeCell(row) { return `<td><span class="combination-type-badge mw-action-combination-type-badge" aria-label="${escapeAttr(row.pair_type || '')}"><span class="combination-type-part mw-action-type-${slug(row.card_1_type)}">${escapeHtml(row.card_1_type)}</span><span class="combination-type-separator" aria-hidden="true"></span><span class="combination-type-part mw-action-type-${slug(row.card_2_type)}">${escapeHtml(row.card_2_type)}</span></span></td>`; }

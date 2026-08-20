@@ -5,8 +5,9 @@ import {
   numericRange,
   relativeEloColor,
   synergyRangeColor,
-} from '../color-scales.js?v=20260707-1';
-import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
+} from '../color-scales.js?v=20260812-9';
+import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
+import { setTopbarDatasetLock } from '../layout.js?v=20260819-3';
 
 export const title = 'Combos';
 export const navLabel = 'Combos';
@@ -40,7 +41,9 @@ export const mainHtml = `
         <button class="endgames-tab" type="button" data-view="card_round"
                  onclick="setCombinationsView('card_round')">Card + Round</button>
         <button class="endgames-tab" type="button" data-view="card_endgame"
-                 onclick="setCombinationsView('card_endgame')">Card + Endgame</button>
+                  onclick="setCombinationsView('card_endgame')">Card + Endgame</button>
+        <button class="endgames-tab" type="button" data-view="card_action_card"
+                  onclick="setCombinationsView('card_action_card')">Card + Action Card</button>
       </div>
     </div>
   </div>
@@ -129,13 +132,14 @@ export const sidebarHtml = `
 
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-4';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
   card_map: 'card-map',
   card_round: 'card-round',
   card_endgame: 'card-endgame',
+  card_action_card: 'card-action-card',
 };
 const ROUNDS = ['1', '2', '3', '4', '5', '6+'];
 const MAPS = [
@@ -152,6 +156,20 @@ const PAIR_TYPES = [
   'Animal + Animal', 'Animal + Project', 'Animal + Sponsor',
   'Project + Project', 'Project + Sponsor', 'Sponsor + Sponsor',
 ];
+const ACTION_CARD_CATALOG = [
+  ['Animals 1', 'Ignore', 'Animals'], ['Animals 2', 'Hunter', 'Animals'],
+  ['Animals 3', 'Appeal', 'Animals'], ['Animals 4', 'Mark', 'Animals'],
+  ['Association 1', 'Duplicate', 'Association'], ['Association 2', 'Hire', 'Association'],
+  ['Association 3', 'X-token', 'Association'], ['Association 4', 'Determination', 'Association'],
+  ['Build 1', 'Pavilion', 'Build'], ['Build 2', 'Kiosk', 'Build'],
+  ['Build 3', '+1', 'Build'], ['Build 4', 'Terrain', 'Build'],
+  ['Cards 1', 'Keep', 'Cards'], ['Cards 2', 'Digging', 'Cards'],
+  ['Cards 3', 'Snap', 'Cards'], ['Cards 4', 'Clever', 'Cards'],
+  ['Sponsors 1', 'Trade', 'Sponsors'], ['Sponsors 2', 'Money', 'Sponsors'],
+  ['Sponsors 3', 'Sunbathing', 'Sponsors'], ['Sponsors 4', 'Marketing', 'Sponsors'],
+].map(([key, name, type]) => ({ key, name, type }));
+const CARD_ACTION_PAIR_TYPES = ['Animal', 'Project', 'Sponsor'].flatMap(cardType =>
+  ['Animals', 'Association', 'Build', 'Cards', 'Sponsors'].map(actionType => `${cardType} + ${actionType}`));
 const CARD_TYPES = ['animal', 'sponsor', 'project'];
 const COMBINATION_DEFAULT_MIN_PLAYS = 1000;
 
@@ -184,18 +202,24 @@ let serverMeta = null;
 let combinationRanges = null;
 let minimumDebounceTimer = 0;
 let serverRequestTimer = 0;
+let synergyCiTimer = 0;
+let synergyCiToken = 0;
+let synergyCiController = null;
+let synergyCiPendingKey = '';
+let datasetBeforeActionView = null;
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true;
   mountToken += 1;
   isMW = Number(dataset) === 0 ? 0 : 1;
   activeView = 'card_card';
+  datasetBeforeActionView = null;
   selectedMaps = MAPS.map(([, full]) => full);
   selectedRounds = new Set(ROUNDS);
   selectedHeaderMaps = new Set(MAPS.map(([, full]) => full));
   selectedHeaderRounds = new Set(ROUNDS);
-  selectedTypes = new Set(PAIR_TYPES);
   selectedCardTypes = new Set(CARD_TYPES);
+  selectedTypes = new Set(activePairTypes());
   selectedOne = '';
   selectedTwo = '';
   currentPage = 1;
@@ -218,11 +242,25 @@ export function mount({ dataset = 1 } = {}) {
 export function unmount() {
   mounted = false;
   mountToken += 1;
+  if (activeView === 'card_action_card') {
+    setTopbarDatasetLock(null);
+    if (datasetBeforeActionView !== null) {
+      const restore = datasetBeforeActionView;
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('arknova:set-dataset', {
+          detail: { value: restore },
+        }));
+      }, 0);
+    }
+  }
+  datasetBeforeActionView = null;
+  clearSynergyCiRequest();
   closeCombinationHeaderPopups();
   hideTooltip();
 }
 
 export function setDataset(value) {
+  clearSynergyCiRequest();
   isMW = Number(value) === 0 ? 0 : 1;
   selectedOne = '';
   selectedTwo = '';
@@ -230,6 +268,7 @@ export function setDataset(value) {
   selectedHeaderRounds = new Set(ROUNDS);
   selectedRounds = new Set(ROUNDS);
   selectedCardTypes = new Set(CARD_TYPES);
+  selectedTypes = new Set(activePairTypes());
   currentPage = 1;
   serverPaged = false;
   forceServerPaging = false;
@@ -279,6 +318,9 @@ function bindHandlers() {
 
 function setCombinationsView(view) {
   if (!Object.hasOwn(SNAPSHOT_VIEWS, view) || view === activeView) return;
+  const leavingActionCards = activeView === 'card_action_card';
+  const enteringActionCards = view === 'card_action_card';
+  clearSynergyCiRequest();
   activeView = view;
   selectedOne = '';
   selectedTwo = '';
@@ -290,7 +332,7 @@ function setCombinationsView(view) {
     selectedMaps = MAPS.map(([, full]) => full);
     renderMapChips();
   }
-  selectedTypes = new Set(PAIR_TYPES);
+  selectedTypes = new Set(activePairTypes());
   selectedCardTypes = new Set(CARD_TYPES);
   sortState = { col: 'interaction', dir: 'desc' };
   currentPage = 1;
@@ -300,7 +342,31 @@ function setCombinationsView(view) {
   combinationRanges = null;
   renderTabs();
   renderSidebarMapVisibility();
+  if (enteringActionCards) {
+    if (isMW !== 1) datasetBeforeActionView = isMW;
+    setTopbarDatasetLock(1);
+    if (isMW !== 1) {
+      window.dispatchEvent(new CustomEvent('arknova:set-dataset', { detail: { value: 1 } }));
+      return;
+    }
+  } else if (leavingActionCards) {
+    setTopbarDatasetLock(null);
+    if (datasetBeforeActionView !== null) {
+      const restore = datasetBeforeActionView;
+      datasetBeforeActionView = null;
+      window.dispatchEvent(new CustomEvent('arknova:set-dataset', { detail: { value: restore } }));
+      return;
+    }
+  }
   applyFilters(++mountToken);
+}
+
+function activePairTypes() {
+  return activeView === 'card_action_card' ? CARD_ACTION_PAIR_TYPES : PAIR_TYPES;
+}
+
+function isPairTableView() {
+  return ['card_card', 'card_endgame', 'card_action_card'].includes(activeView);
 }
 
 function renderTabs() {
@@ -381,6 +447,7 @@ function serverPagedParams(params) {
 }
 
 async function applyFilters(token = mountToken) {
+  clearSynergyCiRequest();
   forceServerPaging = false;
   currentPage = 1;
   renderLoading();
@@ -451,6 +518,7 @@ function scheduleServerPage(preserveHead = false) {
 }
 
 async function loadServerPage(preserveHead = false) {
+  clearSynergyCiRequest();
   const params = getParams();
   if (!shouldUseServerPaging(params)) {
     applyFilters(++mountToken);
@@ -538,7 +606,12 @@ function applyClientFilters({ preserveHead = false } = {}) {
   assignGlobalRanks(minimum);
   const candidatesBeforeMinimum = allData.filter(row => {
     const normalizedPairType = String(row.pair_type || '').replace(' vs. ', ' + ');
-    if (activeView === 'card_card' && !selectedTypes.has(normalizedPairType)) return false;
+    if ((activeView === 'card_card' || activeView === 'card_action_card') && !selectedTypes.has(normalizedPairType)) return false;
+    if (activeView === 'card_action_card') {
+      if (selectedOne && row.card_name !== selectedOne) return false;
+      if (selectedTwo && row.action_card_key !== selectedTwo) return false;
+      return true;
+    }
     if (activeView === 'card_map' || activeView === 'card_round' || activeView === 'card_endgame') {
       const normalizedCardType = String(row.card_type || '').toLowerCase();
       if (!selectedCardTypes.has(normalizedCardType)) return false;
@@ -563,7 +636,7 @@ function applyClientFilters({ preserveHead = false } = {}) {
   // the UI can distinguish "no pair exists" from "pairs exist below Minimum".
   // The scope is then retained for minimum, type, sort, and page interactions.
   if (
-    activeView === 'card_card'
+    (activeView === 'card_card' || activeView === 'card_action_card')
     && allData.length > 0
     && (selectedOne || selectedTwo)
     && candidatesBeforeMinimum.length === 0
@@ -632,6 +705,8 @@ function compareCombinationRows(a, b, projectSlots = true) {
 
   const stableFields = activeView === 'card_card'
     ? ['card_1', 'card_2', 'pair_type']
+    : activeView === 'card_action_card'
+      ? ['card_name', 'action_card_key', 'pair_type']
     : activeView === 'card_endgame'
       ? ['card_name', 'endgame_name', 'card_type']
       : ['card_name', activeView === 'card_map' ? 'map_name' : 'round_name', 'card_type'];
@@ -659,21 +734,25 @@ function projectPairRow(row) {
       cardTwo: row.card_2,
       deltaOne: row.delta_1,
       deltaTwo: row.delta_2,
+      componentOne: 'component_1',
+      componentTwo: 'component_2',
     };
   }
   return {
-    cardOne: row.card_2,
-    cardTwo: row.card_1,
-    deltaOne: row.delta_2,
-    deltaTwo: row.delta_1,
+      cardOne: row.card_2,
+      cardTwo: row.card_1,
+      deltaOne: row.delta_2,
+      deltaTwo: row.delta_1,
+      componentOne: 'component_2',
+      componentTwo: 'component_1',
   };
 }
 
 function buildDeltaRanges(data) {
-  if (activeView === 'card_card' || activeView === 'card_endgame') {
+  if (activeView === 'card_card' || activeView === 'card_endgame' || activeView === 'card_action_card') {
     return {
-      delta_1: combinationRange(activeView === 'card_endgame' ? 'delta_card' : 'delta_1', true) || cappedNumericRange(data, row => activeView === 'card_endgame' ? row.delta_card : row.delta_1),
-      delta_2: combinationRange(activeView === 'card_endgame' ? 'delta_endgame' : 'delta_2', true) || cappedNumericRange(data, row => activeView === 'card_endgame' ? row.delta_endgame : row.delta_2),
+      delta_1: combinationRange(activeView === 'card_card' ? 'delta_1' : 'delta_card', true) || cappedNumericRange(data, row => activeView === 'card_card' ? row.delta_1 : row.delta_card),
+      delta_2: combinationRange(activeView === 'card_card' ? 'delta_2' : activeView === 'card_endgame' ? 'delta_endgame' : 'delta_action', true) || cappedNumericRange(data, row => activeView === 'card_card' ? row.delta_2 : activeView === 'card_endgame' ? row.delta_endgame : row.delta_action),
       delta_combined: combinationRange('delta_combined', true) || cappedNumericRange(data, row => row.delta_combined),
       delta_actual: combinationRange('delta_actual', true) || cappedNumericRange(data, row => row.delta_actual),
     };
@@ -697,7 +776,7 @@ function sortCombinations(col) {
   if (sortState.col === col) sortState.dir = sortState.dir === 'desc' ? 'asc' : 'desc';
   else sortState = {
     col,
-    dir: ['card_1', 'card_2', 'card_name', 'map_name', 'round_name', 'pair_type', 'card_type'].includes(col)
+    dir: ['card_1', 'card_2', 'card_name', 'action_card_name', 'map_name', 'round_name', 'pair_type', 'card_type'].includes(col)
       ? 'asc'
       : 'desc',
   };
@@ -718,16 +797,17 @@ function renderTable(preserveHead = false) {
   const pageRows = serverPaged ? filteredData : filteredData.slice(start ? start - 1 : 0, end);
   tbody.innerHTML = pageRows.length
     ? pageRows.map(row => rowHtml(row, row.global_rank ?? '\u2014')).join('')
-    : `<tr><td colspan="${activeView === 'card_card' || activeView === 'card_endgame' ? 9 : 8}"><div class="state-overlay"><div class="state-title">No combinations found</div></div></td></tr>`;
+    : `<tr><td colspan="${isPairTableView() ? 9 : 8}"><div class="state-overlay"><div class="state-title">No combinations found</div></div></td></tr>`;
   renderPagination();
+  scheduleSynergyConfidenceIntervals(pageRows);
 }
 
 function renderHead() {
   const thead = document.getElementById('tableHead');
   if (!thead) return;
   const table = document.getElementById('statsTable');
-  table?.classList.toggle('combinations-pair-table', activeView === 'card_card' || activeView === 'card_endgame');
-  table?.classList.toggle('combinations-map-table', activeView !== 'card_card' && activeView !== 'card_endgame');
+  table?.classList.toggle('combinations-pair-table', isPairTableView());
+  table?.classList.toggle('combinations-map-table', !isPairTableView());
   if (activeView === 'card_endgame') {
     thead.innerHTML = `<tr>
       <th style="width:5%">#</th>
@@ -739,6 +819,20 @@ function renderHead() {
       ${header('avg_elo', 'Elo', 'average player elo for this card and endgame pair', '7%')}
       ${header('n_played', 'Played', 'n (card played and endgame scored)', '9%')}
       ${singleCardTypeFilterHeader('10%')}
+    </tr>`;
+    return;
+  }
+  if (activeView === 'card_action_card') {
+    thead.innerHTML = `<tr>
+      <th style="width:5%">#</th>
+      ${cardFilterHeader('Card', 1, '18%')}
+      ${cardFilterHeader('Action Card', 2, '18%')}
+      ${header('delta_combined', '\u0394 (Sum)', '\u0394 (Card) + \u0394 (Action Card)', '11%')}
+      ${header('delta_actual', '\u0394 (Actual)', 'average elo gain when the card was played and the action card was selected', '11%')}
+      ${header('interaction', 'Synergy', '\u0394 (Actual) - \u0394 (Sum)', '11%')}
+      ${header('avg_elo', 'Elo', 'average player elo for this card and action-card pair', '7%')}
+      ${header('n_played', 'Played', 'n (card played and action card selected)', '9%')}
+      ${pairTypeFilterHeader('10%')}
     </tr>`;
     return;
   }
@@ -779,28 +873,50 @@ function renderHead() {
       '\u0394 (Actual) - \u0394 (Combined)', '11%')}
     ${header('avg_elo', 'Elo', 'average player elo when both cards were played', '7%')}
     ${header('n_played', 'Played', 'n (both cards played)', '9%')}
-    <th class="type-filter-header combination-type-header ${selectedTypes.size === PAIR_TYPES.length ? '' : 'type-filter-active'}"
+    <th class="type-filter-header combination-type-header ${selectedTypes.size === activePairTypes().length ? '' : 'type-filter-active'}"
         style="width:10%" onclick="toggleCombinationTypePopup(event)">
       <span class="type-filter-label">Type
-        <span class="type-filter-indicator ${selectedTypes.size === PAIR_TYPES.length ? 'type-filter-icon' : ''}">${combinationTypeIndicatorHtml()}</span>
+        <span class="type-filter-indicator ${selectedTypes.size === activePairTypes().length ? 'type-filter-icon' : ''}">${combinationTypeIndicatorHtml()}</span>
       </span>
       <div class="type-filter-popup combination-type-popup" id="combinationTypePopup">
         <div class="combination-popup-actions map-select-all-none">
           <span class="map-toggle-link" onclick="selectAllCombinationTypes(event)">all</span> /
           <span class="map-toggle-link" onclick="selectNoneCombinationTypes(event)">none</span>
         </div>
-        ${PAIR_TYPES.map(type => `<button class="chip ${selectedTypes.has(type) ? 'active' : ''}"
-          data-type="${escapeAttr(type)}" onclick="toggleCombinationType(this.dataset.type, event)">${escapeHtml(type)}</button>`).join('')}
+        <div class="combination-type-options">
+          ${activePairTypes().map(type => `<button class="chip ${selectedTypes.has(type) ? 'active' : ''}"
+            data-type="${escapeAttr(type)}" onclick="toggleCombinationType(this.dataset.type, event)">${escapeHtml(type)}</button>`).join('')}
+        </div>
       </div>
     </th>
   </tr>`;
+}
+
+function pairTypeFilterHeader(width = '10%') {
+  const types = activePairTypes();
+  return `<th class="type-filter-header combination-type-header ${selectedTypes.size === types.length ? '' : 'type-filter-active'}"
+      style="width:${width}" onclick="toggleCombinationTypePopup(event)">
+    <span class="type-filter-label">Type
+      <span class="type-filter-indicator ${selectedTypes.size === types.length ? 'type-filter-icon' : ''}">${combinationTypeIndicatorHtml()}</span>
+    </span>
+    <div class="type-filter-popup combination-type-popup" id="combinationTypePopup">
+      <div class="combination-popup-actions map-select-all-none">
+        <span class="map-toggle-link" onclick="selectAllCombinationTypes(event)">all</span> /
+        <span class="map-toggle-link" onclick="selectNoneCombinationTypes(event)">none</span>
+      </div>
+      <div class="combination-type-options">
+        ${types.map(type => `<button class="chip ${selectedTypes.has(type) ? 'active' : ''}"
+          data-type="${escapeAttr(type)}" onclick="toggleCombinationType(this.dataset.type, event)">${escapeHtml(type)}</button>`).join('')}
+      </div>
+    </div>
+  </th>`;
 }
 
 function header(field, label, tooltip = '', width = '') {
   const active = sortState.col === field;
   const arrow = active ? (sortState.dir === 'desc' ? '\u2193' : '\u2191') : '\u2195';
   const labelHtml = `${label}${tooltip ? `<span class="col-tip" data-tip="${escapeAttr(tooltip)}">?</span>` : ''}`;
-  const isPairMetricHeader = (activeView === 'card_card' || activeView === 'card_endgame')
+  const isPairMetricHeader = isPairTableView()
     && ['delta_combined', 'delta_actual', 'interaction', 'avg_elo', 'n_played'].includes(field);
   if (isPairMetricHeader) {
     return `<th class="${active ? 'sorted' : ''}" style="${width ? `width:${width};` : ''}" onclick="sortCombinations('${field}')"><span class="combo-card-card-metric-header"><span class="combo-card-card-header-label">${labelHtml}</span><span class="sort-arrow ${active ? 'active' : ''}">${arrow}</span></span></th>`;
@@ -822,7 +938,7 @@ function cardFilterHeader(label, slot, width = '20%') {
     </div>
     <div class="combination-header-popup combination-card-popup" id="combinationCardPopup${slot}"
          onclick="event.stopPropagation()">
-       <input class="abilities-search-input" type="text" placeholder="${activeView === 'card_endgame' && slot === 2 ? 'Search endgames...' : 'Search cards...'}"
+       <input class="abilities-search-input" type="text" placeholder="${activeView === 'card_endgame' && slot === 2 ? 'Search endgames...' : activeView === 'card_action_card' && slot === 2 ? 'Search action cards...' : 'Search cards...'}"
              oninput="renderCombinationCardChoices(${slot}, this.value)" />
       <div class="combination-card-choice-list" id="combinationCardChoices${slot}"></div>
     </div>
@@ -904,14 +1020,27 @@ function roundFilterHeader(width = '20%') {
 }
 
 function rowHtml(row, rank) {
+  if (activeView === 'card_action_card') {
+    return `<tr>
+      <td class="rank-cell">${rank}</td>
+      ${combinedCardTd(row.card_name, row.delta_card, deltaRanges.delta_1, row, 'component_1')}
+      ${combinedCardTd(row.action_card_name, row.delta_action, deltaRanges.delta_2, row, 'component_2', false)}
+      ${deltaTd(row.delta_combined, null, '', deltaRanges.delta_combined)}
+      ${deltaTd(row.delta_actual, row, 'delta_actual', deltaRanges.delta_actual)}
+      ${interactionTd(row)}
+      <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
+      <td class="n-cell">${formatInteger(row.n_played)}</td>
+      <td>${cardActionTypeBadge(row.card_type, row.action_card_type)}</td>
+    </tr>`;
+  }
   if (activeView === 'card_endgame') {
     return `<tr>
       <td class="rank-cell">${rank}</td>
-      ${combinedCardTd(row.card_name, row.delta_card, deltaRanges.delta_1)}
-      ${combinedCardTd(row.endgame_name, row.delta_endgame, deltaRanges.delta_2)}
+       ${combinedCardTd(row.card_name, row.delta_card, deltaRanges.delta_1, row, 'component_1')}
+       ${combinedCardTd(row.endgame_name, row.delta_endgame, deltaRanges.delta_2, row, 'component_2')}
       ${deltaTd(row.delta_combined, null, '', deltaRanges.delta_combined)}
       ${deltaTd(row.delta_actual, row, 'delta_actual', deltaRanges.delta_actual)}
-      ${interactionTd(row.interaction)}
+      ${interactionTd(row)}
       <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
       <td class="n-cell">${formatInteger(row.n_played)}</td>
       <td>${singleTypeBadge(row.card_type)}</td>
@@ -921,7 +1050,7 @@ function rowHtml(row, rank) {
     const isMap = activeView === 'card_map';
     return `<tr>
       <td class="rank-cell">${rank}</td>
-      ${combinedCardTd(row.card_name, row.delta_general, deltaRanges.delta_general)}
+       ${combinedCardTd(row.card_name, row.delta_general, deltaRanges.delta_general, row, 'component_1')}
       <td>${escapeHtml(isMap ? formatMapName(row.map_name) : row.round_name)}</td>
       ${deltaTd(
         isMap ? row.delta_map : row.delta_round,
@@ -929,7 +1058,7 @@ function rowHtml(row, rank) {
         isMap ? 'delta_map' : 'delta_round',
         deltaRanges[isMap ? 'delta_map' : 'delta_round'],
       )}
-      ${interactionTd(row.interaction)}
+      ${interactionTd(row)}
       <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
       <td class="n-cell">${formatInteger(row.n_played)}</td>
       <td>${singleTypeBadge(row.card_type)}</td>
@@ -938,24 +1067,41 @@ function rowHtml(row, rank) {
   const projected = projectPairRow(row);
   return `<tr>
     <td class="rank-cell">${rank}</td>
-    ${combinedCardTd(projected.cardOne, projected.deltaOne, deltaRanges.delta_1)}
-    ${combinedCardTd(projected.cardTwo, projected.deltaTwo, deltaRanges.delta_2)}
+     ${combinedCardTd(projected.cardOne, projected.deltaOne, deltaRanges.delta_1, row, projected.componentOne)}
+     ${combinedCardTd(projected.cardTwo, projected.deltaTwo, deltaRanges.delta_2, row, projected.componentTwo)}
     ${deltaTd(row.delta_combined, null, '', deltaRanges.delta_combined)}${deltaTd(
       row.delta_actual, row, 'delta_actual', deltaRanges.delta_actual,
     )}
-    ${interactionTd(row.interaction)}
+    ${interactionTd(row)}
     <td class="elo-cell" style="color:${eloColor(row.avg_elo)}">${formatNumber(row.avg_elo, 0)}</td>
     <td class="n-cell">${formatInteger(row.n_played)}</td>
     <td>${pairTypeBadge(row.type_1, row.type_2)}</td>
   </tr>`;
 }
 
-function combinedCardTd(cardName, delta, range) {
+function combinedCardTd(cardName, delta, range, row = null, ciPrefix = '', applyTitleCase = true) {
   const value = Number(delta);
+  const hasCi = row && ciPrefix && Object.prototype.hasOwnProperty.call(row, `${ciPrefix}_ci95_n`);
+  const attrs = hasCi
+    ? ` data-ci-low="${escapeAttr(row[`${ciPrefix}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${ciPrefix}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${ciPrefix}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(range?.min ?? '')}" data-ci-color-max="${escapeAttr(range?.max ?? '')}"`
+    : '';
   return `<td class="combination-card-cell combination-card-with-delta">
-    <span class="combination-card-name">${escapeHtml(titleCase(cardName))}</span>
-    <span class="combination-card-delta" style="color:${deltaRangeColor(value, range?.min, range?.max)}">(${formatSigned(value)})</span>
+    <span class="combination-card-name">${escapeHtml(applyTitleCase ? titleCase(cardName) : cardName)}</span>
+    <span class="combination-card-delta${hasCi ? ' delta-ci-cell' : ''}"${attrs} style="color:${deltaRangeColor(value, range?.min, range?.max)}">(${formatSigned(value)})</span>
   </td>`;
+}
+
+function cardActionTypeBadge(rawCardType, rawActionType) {
+  const cardType = String(rawCardType || '').toLowerCase();
+  const actionType = String(rawActionType || '').toLowerCase();
+  const safeCard = ['animal', 'project', 'sponsor'].includes(cardType) ? cardType : 'unknown';
+  const safeAction = ['animals', 'association', 'build', 'cards', 'sponsors'].includes(actionType)
+    ? actionType : 'unknown';
+  return `<span class="combination-type-badge card-action-type-badge">
+    <span class="combination-type-part type-${safeCard}">${escapeHtml(titleCase(cardType || 'unknown'))}</span>
+    <span class="combination-type-separator" aria-hidden="true"></span>
+    <span class="combination-type-part mw-action-type-${safeAction}">${escapeHtml(titleCase(actionType || 'unknown'))}</span>
+  </span>`;
 }
 
 function singleTypeBadge(rawType) {
@@ -987,9 +1133,109 @@ function deltaTd(raw, row = null, prefix = '', range = null) {
   return `<td class="delta${ciClass}"${ciAttrs} style="color:${deltaRangeColor(value, range?.min, range?.max)}">${formatSigned(value)}</td>`;
 }
 
-function interactionTd(raw) {
-  const value = Number(raw);
-  return `<td class="combination-interaction" style="color:${interactionColor(value)}">${formatSigned(value)}</td>`;
+function interactionTd(row) {
+  const value = Number(row?.interaction);
+  const hasCi = Object.prototype.hasOwnProperty.call(row || {}, 'interaction_ci95_method');
+  const attrs = hasCi
+    ? ` data-ci-low="${escapeAttr(row.interaction_ci95_low ?? '')}" data-ci-high="${escapeAttr(row.interaction_ci95_high ?? '')}" data-ci-n="${escapeAttr(row.interaction_ci95_cluster_n ?? 0)}" data-ci-color-scale="synergy" data-ci-color-min="${escapeAttr(interactionRange.min ?? '')}" data-ci-color-max="${escapeAttr(interactionRange.max ?? '')}"`
+    : '';
+  return `<td class="combination-interaction${hasCi ? ' delta-ci-cell' : ''}"${attrs} style="color:${interactionColor(value)}">${formatSigned(value)}</td>`;
+}
+
+function synergyCiDescriptor(row) {
+  if (activeView === 'card_card') return { card_1: row.card_1, card_2: row.card_2 };
+  if (activeView === 'card_map') return { card_name: row.card_name, map_name: row.map_name };
+  if (activeView === 'card_round') return { card_name: row.card_name, round_name: row.round_name };
+  if (activeView === 'card_action_card') return { card_name: row.card_name, action_card_key: row.action_card_key };
+  return { card_name: row.card_name, endgame_name: row.endgame_name };
+}
+
+function synergyCiRowKey(row) {
+  if (activeView === 'card_card') return JSON.stringify([row.card_1, row.card_2]);
+  if (activeView === 'card_map') return JSON.stringify([row.card_name, row.map_name]);
+  if (activeView === 'card_round') return JSON.stringify([row.card_name, row.round_name]);
+  if (activeView === 'card_action_card') return JSON.stringify([row.card_name, row.action_card_key]);
+  return JSON.stringify([row.card_name, row.endgame_name]);
+}
+
+function clearSynergyCiRequest() {
+  window.clearTimeout(synergyCiTimer);
+  synergyCiTimer = 0;
+  synergyCiToken += 1;
+  synergyCiController?.abort();
+  synergyCiController = null;
+  synergyCiPendingKey = '';
+}
+
+function scheduleSynergyConfidenceIntervals(pageRows) {
+  window.clearTimeout(synergyCiTimer);
+  const missing = (pageRows || []).filter(row =>
+    !Object.prototype.hasOwnProperty.call(row, 'interaction_ci95_method')
+    || !Object.prototype.hasOwnProperty.call(row, 'component_1_ci95_n')
+    || !Object.prototype.hasOwnProperty.call(row, 'component_2_ci95_n')
+  );
+  if (!mounted || !missing.length) return;
+  const scope = getParams();
+  const descriptors = missing.slice(0, 100).map(synergyCiDescriptor);
+  const requestKey = JSON.stringify([scope, descriptors]);
+  if (synergyCiController && synergyCiPendingKey === requestKey) return;
+  synergyCiTimer = window.setTimeout(() => {
+    void loadSynergyConfidenceIntervals(scope, descriptors, requestKey);
+  }, 0);
+}
+
+async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
+  if (!mounted || !descriptors.length) return;
+  if (synergyCiController && synergyCiPendingKey !== requestKey) synergyCiController.abort();
+  if (synergyCiController && synergyCiPendingKey === requestKey) return;
+  const controller = new AbortController();
+  const token = ++synergyCiToken;
+  synergyCiController = controller;
+  synergyCiPendingKey = requestKey;
+  try {
+    const payload = await fetchStats({
+      ...scope,
+      synergy_ci: true,
+      synergy_ci_rows: descriptors,
+    }, { signal: controller.signal, shareInFlight: false });
+    if (!mounted || controller.signal.aborted || token !== synergyCiToken) return;
+    const ciByKey = new Map((payload.data || []).map(item => [item.row_key, item]));
+    allData.forEach(row => {
+      const ci = ciByKey.get(synergyCiRowKey(row));
+      if (!ci) return;
+      Object.assign(row, ci);
+    });
+    renderTable(true);
+  } catch (error) {
+    if (error?.name === 'AbortError' || !mounted || token !== synergyCiToken) return;
+    console.warn('Could not load Synergy confidence intervals', error);
+    const requested = new Set(descriptors.map(item => {
+      if (activeView === 'card_card') return JSON.stringify([item.card_1, item.card_2]);
+      if (activeView === 'card_map') return JSON.stringify([item.card_name, item.map_name]);
+      if (activeView === 'card_round') return JSON.stringify([item.card_name, item.round_name]);
+      if (activeView === 'card_action_card') return JSON.stringify([item.card_name, item.action_card_key]);
+      return JSON.stringify([item.card_name, item.endgame_name]);
+    }));
+    allData.forEach(row => {
+      if (!requested.has(synergyCiRowKey(row))) return;
+      row.interaction_ci95_low = null;
+      row.interaction_ci95_high = null;
+      row.interaction_ci95_cluster_n = 0;
+      row.interaction_ci95_method = 'unavailable';
+      row.component_1_ci95_low = null;
+      row.component_1_ci95_high = null;
+      row.component_1_ci95_n = 0;
+      row.component_2_ci95_low = null;
+      row.component_2_ci95_high = null;
+      row.component_2_ci95_n = 0;
+    });
+    renderTable(true);
+  } finally {
+    if (token === synergyCiToken) {
+      synergyCiController = null;
+      synergyCiPendingKey = '';
+    }
+  }
 }
 
 function renderPagination() {
@@ -1080,7 +1326,7 @@ function toggleCombinationType(type, event) {
 
 function selectAllCombinationTypes(event) {
   if (event) event.stopPropagation();
-  selectedTypes = new Set(PAIR_TYPES);
+  selectedTypes = new Set(activePairTypes());
   currentPage = 1;
   updateCombinationTypeHeader();
   applyClientFilters({ preserveHead: true });
@@ -1095,8 +1341,9 @@ function selectNoneCombinationTypes(event) {
 }
 
 function combinationTypeIndicatorHtml() {
-  if (selectedTypes.size === PAIR_TYPES.length) return '';
-  return `<span class="combination-type-dots count-${selectedTypes.size}" aria-label="${selectedTypes.size} of ${PAIR_TYPES.length} types selected">
+  const total = activePairTypes().length;
+  if (selectedTypes.size === total) return '';
+  return `<span class="combination-type-dots count-${selectedTypes.size}" aria-label="${selectedTypes.size} of ${total} types selected">
     ${Array.from({ length: selectedTypes.size }, () => '<i class="combination-type-dot"></i>').join('')}
   </span>`;
 }
@@ -1104,7 +1351,7 @@ function combinationTypeIndicatorHtml() {
 function updateCombinationTypeHeader() {
   const header = document.querySelector('.combination-type-header');
   if (!header) return;
-  const narrowed = selectedTypes.size !== PAIR_TYPES.length;
+  const narrowed = selectedTypes.size !== activePairTypes().length;
   header.classList.toggle('type-filter-active', narrowed);
   const indicator = header.querySelector('.type-filter-indicator');
   if (indicator) {
@@ -1159,6 +1406,17 @@ function renderCombinationCardChoices(slot, query = '') {
   if (!results) return;
   const needle = normalize(query);
   const isEndgameSlot = activeView === 'card_endgame' && slot === 2;
+  const isActionCardSlot = activeView === 'card_action_card' && slot === 2;
+  if (isActionCardSlot) {
+    const matches = ACTION_CARD_CATALOG.filter(card =>
+      !needle || normalize(card.name).includes(needle) || normalize(card.key).includes(needle));
+    results.innerHTML = matches.map(card =>
+      `<button class="combination-card-choice" type="button" data-card="${escapeAttr(card.key)}"
+        onclick="selectCombinationCard(${slot}, this.dataset.card)">${escapeHtml(card.name)}</button>`
+    ).join('');
+    if (!matches.length) results.innerHTML = '<div class="abilities-list-empty">No action cards match.</div>';
+    return;
+  }
   const catalogue = isEndgameSlot ? endgameCatalogue : cardCatalogue;
   const excluded = activeView === 'card_card' ? (slot === 1 ? selectedTwo : selectedOne) : '';
   const matches = catalogue.filter(card => {
@@ -1357,18 +1615,27 @@ function positionCombinationPairTypePopup(popup) {
   if (!played || !type) return;
   const playedRect = played.getBoundingClientRect();
   const typeRect = type.getBoundingClientRect();
-  const popupHeight = Number(popup.dataset.openHeight)
-    || popup.getBoundingClientRect().height
-    || popup.scrollHeight
-    || 120;
-  const anchoredTop = typeRect.bottom;
-  if (anchoredTop + popupHeight <= 0 || anchoredTop >= window.innerHeight) {
+  const margin = 8;
+  if (typeRect.bottom <= 0 || typeRect.top >= window.innerHeight) {
     popup.classList.remove('open');
     return;
   }
-  popup.style.left = `${playedRect.left}px`;
-  popup.style.top = `${typeRect.bottom}px`;
-  popup.style.width = `${typeRect.right - playedRect.left}px`;
+  const width = Math.min(
+    Math.max(172, typeRect.right - playedRect.left),
+    window.innerWidth - (margin * 2),
+  );
+  popup.style.width = `${width}px`;
+  const popupHeight = popup.getBoundingClientRect().height || popup.scrollHeight || 120;
+  const left = Math.max(margin, Math.min(typeRect.right - width, window.innerWidth - width - margin));
+  const below = typeRect.bottom;
+  const above = typeRect.top - popupHeight;
+  const top = below + popupHeight <= window.innerHeight - margin
+    ? below
+    : above >= margin
+      ? above
+      : Math.max(margin, window.innerHeight - popupHeight - margin);
+  popup.style.left = `${left}px`;
+  popup.style.top = `${top}px`;
 }
 
 function closeCombinationHeaderPopups() {
@@ -1524,13 +1791,13 @@ function renderLoading() {
   });
   hidePagination();
   const body = document.getElementById('tableBody');
-  if (body) body.innerHTML = `<tr><td colspan="${activeView === 'card_card' ? 9 : 8}"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching combinations...</div></div></td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="${isPairTableView() ? 9 : 8}"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching combinations...</div></div></td></tr>`;
 }
 
 function renderError(error) {
   hidePagination();
   const body = document.getElementById('tableBody');
-  if (body) body.innerHTML = `<tr><td colspan="${activeView === 'card_card' ? 9 : 8}"><div class="state-overlay"><div class="state-title">Could not load combinations</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div></td></tr>`;
+  if (body) body.innerHTML = `<tr><td colspan="${isPairTableView() ? 9 : 8}"><div class="state-overlay"><div class="state-title">Could not load combinations</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div></td></tr>`;
 }
 
 function interactionColor(value) {

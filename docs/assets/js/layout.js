@@ -196,6 +196,17 @@ export function setTopbarDatasetLock(value = null) {
   });
 }
 
+export function setTopbarDatasetCombined(active = true) {
+  document.querySelectorAll('.tab-btn').forEach(button => {
+    button.disabled = Boolean(active);
+    button.classList.toggle('dataset-combined', Boolean(active));
+    if (active) {
+      button.classList.add('active');
+      button.classList.remove('dataset-locked-out');
+    }
+  });
+}
+
 export function setFilterButtonDisabled(disabled) {
   const button = document.getElementById('filterToggleBtn');
   if (!button) return;

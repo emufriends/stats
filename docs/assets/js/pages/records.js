@@ -1,5 +1,6 @@
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-3';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
 import { mapTooltipLabel } from '../table-cells.js?v=20260712-4';
+import { setTopbarDatasetCombined } from '../layout.js?v=20260819-4';
 
 export const id = 'records';
 export const title = 'Records';
@@ -85,7 +86,6 @@ export const sidebarHtml = `
   <hr class="divider" /><div class="filter-action-stack"><button class="apply-btn" id="applyBtn" onclick="applyFiltersFromSidebar()">Apply filters</button></div>`;
 
 let mounted = false;
-let isMW = 1;
 let view = 'elo_leaderboard';
 let selectedMaps = DEFAULT_MAPS.map(([, full]) => full);
 let selectedPlayer = '';
@@ -113,7 +113,7 @@ const handlers = {
 export function mount({ dataset = 1 } = {}) {
   Object.assign(window, handlers);
   mounted = true;
-  isMW = Number(dataset) === 0 ? 0 : 1;
+  setTopbarDatasetCombined(true);
   view = 'elo_leaderboard';
   selectedMaps = DEFAULT_MAPS.map(([, full]) => full);
   selectedPlayer = '';
@@ -132,6 +132,7 @@ export function mount({ dataset = 1 } = {}) {
 
 export function unmount() {
   mounted = false;
+  setTopbarDatasetCombined(false);
   requestToken += 1;
   requestController?.abort();
   requestController = null;
@@ -141,15 +142,7 @@ export function unmount() {
 }
 
 export function setDataset(dataset) {
-  isMW = Number(dataset) === 0 ? 0 : 1;
-  // The Elo Leaderboard is sourced from one dataset-neutral Masters sheet.
-  // Keep the visible table stable when the global MW/Base switch changes.
-  if (view === 'elo_leaderboard' && rows.length) {
-    renderHead();
-    renderBody();
-    return;
-  }
-  loadRecords(++requestToken);
+  setTopbarDatasetCombined(true);
 }
 
 function renderTabs() {
@@ -409,6 +402,8 @@ function filteredRecordsRows() {
   const dateTo = document.getElementById('recordsDateTo')?.value.trim() || '';
   const arenaOnly = Boolean(document.getElementById('recordsArenaOnly')?.checked);
   const tournamentOnly = Boolean(document.getElementById('recordsTournamentOnly')?.checked);
+  const startingPositions = window.getGlobalStartingPositions?.() || [];
+  const startingPosition = startingPositions.length === 1 ? startingPositions[0] : '';
   return rows.filter(row => {
     if (!selectedMaps.includes(row.map_name)) return false;
     if (selectedPlayer && row.player !== selectedPlayer) return false;
@@ -417,6 +412,9 @@ function filteredRecordsRows() {
     if (dateTo && String(row.game_date || '') > dateTo) return false;
     if (arenaOnly && !row.is_arena) return false;
     if (tournamentOnly && !row.is_tournament) return false;
+    // Elo Leaderboard is a spreadsheet-owned player ranking rather than a
+    // player-game population, so starting position has no meaning there.
+    if (view !== 'elo_leaderboard' && startingPosition && row.starting_position !== startingPosition) return false;
     // Match backend range semantics without mutating the snapshot value:
     // missing Elo metadata behaves as zero only for filter comparisons.
     const opponentElo = numericOrNull(row.opponent_elo) ?? 0;
@@ -455,12 +453,36 @@ async function loadRecords(token) {
   requestController?.abort();
   requestController = new AbortController();
   try {
-    const dataset = view === 'elo_leaderboard' ? 'mw' : (isMW ? 'mw' : 'base');
-    const cacheKey = view === 'elo_leaderboard' ? `${view}:shared` : `${view}:${dataset}`;
+    const cacheKey = view === 'elo_leaderboard' ? `${view}:shared` : `${view}:combined`;
     let payload = snapshotRows.get(cacheKey);
     if (!payload) {
       renderLoading();
-      payload = await loadSnapshot(`${API_ROOT}/${API_VIEWS[view]}/default-${dataset}.json`);
+      if (view === 'elo_leaderboard') {
+        payload = await loadSnapshot(`${API_ROOT}/${API_VIEWS[view]}/default-mw.json`);
+      } else {
+        // Records is one cross-dataset leaderboard. Keep the compatible MW/Base
+        // assets independent at publication time, then combine them once here;
+        // every Records filter remains an in-memory operation afterward.
+        const [mwPayload, basePayload] = await Promise.all([
+          loadSnapshot(`${API_ROOT}/${API_VIEWS[view]}/default-mw.json`),
+          loadSnapshot(`${API_ROOT}/${API_VIEWS[view]}/default-base.json`),
+        ]);
+        const combinedRows = [
+          ...(Array.isArray(mwPayload?.data) ? mwPayload.data.map(row => ({ ...row, source_dataset: 'mw' })) : []),
+          ...(Array.isArray(basePayload?.data) ? basePayload.data.map(row => ({ ...row, source_dataset: 'base' })) : []),
+        ];
+        const uniqueRows = new Map();
+        combinedRows.forEach(row => {
+          const key = view === 'most_icons'
+            ? `${row.table_id}\u0000${row.player}\u0000${row.icon}`
+            : `${row.table_id}\u0000${row.player}`;
+          if (!uniqueRows.has(key)) uniqueRows.set(key, row);
+        });
+        payload = {
+          status: 'ok',
+          data: [...uniqueRows.values()],
+        };
+      }
       snapshotRows.set(cacheKey, payload);
     }
     if (!mounted || token !== requestToken) return;
@@ -537,15 +559,23 @@ function selectNoneRecordsIcons() {
 }
 
 async function ensurePlayerIndex() {
-  if (playerIndex && playerIndex.dataset === isMW) return;
+  if (playerIndex?.dataset === 'combined') return;
   if (playerIndexLoading) return;
   playerIndexLoading = true;
   playerIndexError = '';
   try {
-    const dataset = isMW ? 'mw' : 'base';
-    try { playerIndex = await loadSnapshot(`https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/index/default-${dataset}.json`); }
-    catch { playerIndex = await fetchStats({ stats_page: 'players', players_index: true, is_mw: isMW }); }
-    if (playerIndex) playerIndex.dataset = isMW;
+    const root = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/index';
+    const [mwIndex, baseIndex] = await Promise.all([
+      loadSnapshot(`${root}/default-mw.json`).catch(() => fetchStats({ stats_page: 'players', players_index: true, is_mw: 1 })),
+      loadSnapshot(`${root}/default-base.json`).catch(() => fetchStats({ stats_page: 'players', players_index: true, is_mw: 0 })),
+    ]);
+    playerIndex = {
+      dataset: 'combined',
+      players: [...new Set([
+        ...(Array.isArray(mwIndex?.players) ? mwIndex.players : []),
+        ...(Array.isArray(baseIndex?.players) ? baseIndex.players : []),
+      ])].sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' })),
+    };
   } catch (error) { playerIndexError = error?.message || String(error); }
   finally { playerIndexLoading = false; }
 }

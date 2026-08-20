@@ -5,7 +5,7 @@ Output:
 # Ark Nova Statistics Dashboard Handoff
 
 Date: 2026-06-21  
-Last updated: 2026-08-04  
+Last updated: 2026-08-19  
 Project owner: pr0paganda-panda / Panda  
 Current repository: https://github.com/emufriends/stats
 
@@ -331,7 +331,13 @@ Central stylesheet for all pages. Important conventions:
 - Attribute chevron is deliberately large and uses down/up direction:
   - collapsed = down
   - expanded = up
-- Phone table: outer `.table-wrap` is the framed table container, inner `.table-scroll` owns horizontal scrolling, and pagination sits outside `.table-scroll` so page buttons stay visible while columns scroll.
+- Phone tables: outer `.table-wrap` is the framed table container, inner `.table-scroll` owns horizontal scrolling, and pagination sits outside `.table-scroll` so page buttons stay visible while columns scroll.
+- At the 600px phone breakpoint, the nine-column fixed-width/sticky schema is scoped strictly to `.cards-stats-table` and `.opening-hand-table`. Never attach those `nth-child` rules to bare `#statsTable`: many unrelated routes reuse that ID.
+- Wide map matrices retain the 900px canvas, use 11px numerical body text with compact horizontal padding, and keep only the descriptive row-label column frozen. Rank-bearing CP/Action-Card map tables hide the rank and freeze their second column. Combo columns intentionally all scroll.
+- Two-column Predictors tables are the exception to the 900px canvas on phones: Condition and Value fit the viewport and use `min-width: 0`.
+- Map-pack visibility controls scroll horizontally inside their header on phones so Map Pack 1/2, Legacy, Beginner, and Reset remain reachable without creating page-level overflow.
+- Dense compact Build Standard Enclosures and Actions Starting-position tables remain shrinkable in desktop side-by-side layouts, but receive a small internal phone-only scroll canvas so signed values are never ellipsized.
+- At 360px and below, five-tab labels may wrap within their equal-width cells. The tab bar itself must remain one row.
 - Statistical tables use the thick 2px `.table-wrap` frame. Two-table layouts such as Build Enclosures and Actions Starting position/Upgrades use the same visual frame on each panel even when the DOM wrapper class is page-specific.
 - Map header tooltips are a frontend display convention: backend map values remain `Map 1a: Observation Tower`, while tooltips show `Observation Tower (1a)`.
 - Normal tables use the shared 900px minimum canvas and scroll horizontally below
@@ -455,11 +461,13 @@ daily, so repaired source telemetry becomes eligible automatically. Source
 BigQuery tables remain read-only.
 
 By map has the CP-by-map 18-column framework: rank, colloquial Action Card,
-the 15 Standard Maps, and overall Delta. Only games where both players used the
+the 15 Standard Maps, and overall `Avg`. Only games where both players used the
 same map enter this view. Every map and overall cell is an average `elo_delta`
-with sample count, sample standard deviation, and 95% CI. Raw shows the estimate;
-vs. avg subtracts that card's raw overall Delta from each map while leaving the
-final Delta column raw. The table defaults to overall Delta descending. Its graph
+with sample count, sample standard deviation, and 95% CI. Individual map cells
+use the regular Elo-delta scale; only the overall `Avg` cell is bold and uses the
+Synergy/Actions Avg scale. Raw shows the estimate; vs. avg subtracts that card's
+raw overall Avg from each map while leaving the final Avg column raw. The table
+defaults to overall Avg descending. Its graph
 plots maps on the x-axis, supports local line search/selection and hover values,
 and makes no request when graph mode or Raw/vs. avg changes. The sidebar Maps
 section is hidden because maps are the table dimensions.
@@ -471,10 +479,18 @@ under each card name are its standalone filtered average `elo_delta`.
 `Delta (Sum) = Delta Card 1 + Delta Card 2`, `Delta (Actual)` is the observed
 pair average, and `Synergy = Delta (Actual) - Delta (Sum)`. Elo is average
 `pre_match_elo`; Picked is the player-game observation count. Delta Actual has a
-95% CI. Searches may project either pair member into the requested display slot.
+95% mean CI. The standalone Delta values beneath both card names also have
+table-clustered 95% mean CIs. Synergy has its own covariance-aware,
+table-clustered 95% CI; it is not constructed from the displayed component
+intervals. Searches
+may project either pair member into the requested display slot without changing
+the canonical pair or its Synergy interval. MW Synergy uses the same
+orange-ochre-green, zero-centered, +/-2-clamped color scale as Combos Synergy.
 
 Synergies defaults Minimum picks to 1000 and keeps Type, both card
-searches, Minimum, sorting, Rows, and pagination entirely local. Global ranks
+searches, Minimum, sorting, Rows, and pagination entirely local. Its Type popup
+keeps all/none fixed, shows exactly five complete options before internal
+scrolling, and is fixed/clamped within the viewport. Global ranks
 are recalculated after Minimum picks, then retained while Type/search filters
 hide rows. The Minimum control uses the shared warning animation when matching
 rows exist below the threshold. Its compact daily rollup retains rating, map,
@@ -670,6 +686,19 @@ Home's backend-owned observation table is partitioned by game date and clustered
 by dataset, map, Arena season, and Tournament state. Canonical Elo values remain
 `FLOAT64`; they are never rounded merely to make them clustering dimensions.
 
+Every active dashboard Filter bar also exposes a separate `First-player
+advantage (FPA)` section immediately below Date Range (or after the last common
+section when Date Range is absent). `First player` and `Second player` are
+independent multi-select chips, both active by default; the last active chip
+cannot be cleared. The restrictive API field is `starting_positions`. It is
+omitted when both chips are active, preserving default-snapshot eligibility.
+The canonical prepared value is the normalized Full Sample
+`Starting_position_in_first_round`; invalid/null values remain in unfiltered
+populations but cannot match a one-position filter. Player- and pair-oriented
+statistics apply FPA to the focal player before Last X and rolling-history
+selection. A table-level distinct-game statistic may remain numerically
+unchanged because a valid two-player game contains both positions.
+
 Elo range filtering follows one dashboard-wide missing-value rule. A null
 `pre_match_elo` or `opponent_pre_match_elo` is evaluated as `0` only while testing minimum and
 maximum bounds. Consequently, a blank/zero minimum retains observations with
@@ -678,6 +707,17 @@ filter includes them as zero. Prepared/source values remain null: Elo averages,
 display values, Elo delta calculations, and Experts/Masters classification are
 never populated with synthetic zeroes. Once an upstream Elo value is restored,
 the next refresh naturally places that observation in its real range.
+
+Pages that expose both Player Elo and Opponent Elo ranges also expose `Use same
+Elo range for player and opponent`, checked by default. While linked, editing
+either side's minimum or maximum immediately mirrors the corresponding value to
+the other side. Unlinking preserves both current ranges and warns that asymmetric
+ranges can substantially skew results. The linked preference follows navigation
+and reloads in the current browser-tab session through `sessionStorage`; a new
+session starts linked. Restoring the link copies the Player range to Opponent,
+and Reset restores the linked state. Pages with only Opponent Elo, including
+Players and Records, do not show this control. The request schema remains the
+same and intentionally continues to accept asymmetric ranges.
 
 ### Canonical Elo semantics
 
@@ -719,23 +759,29 @@ Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table
 - Frontend has no build step and no automated browser test suite.
 - There are global document listeners in page modules for popups/tooltips. They have not caused data bugs, but a future cleanup could centralize or guard them.
 - CSS is large and monolithic.
-- Elo-delta confidence intervals currently use observation-level Student's t
-  intervals. A future statistical review may replace them with game-clustered
-  or bootstrap intervals to account for within-game dependence.
+- Ordinary displayed Elo-delta means use observation-level Student's t
+  intervals. Derived Synergy statistics instead use the covariance-aware,
+  table-clustered delta method documented below.
 
 ## Elo Delta Confidence Intervals
 
-The dashboard exposes two-sided 95% confidence intervals for only these displayed
-Elo-delta means:
+The dashboard exposes two-sided pointwise 95% confidence intervals for these
+displayed Elo-delta statistics:
 
 - Cards: delta played and delta in hand
 - Opening Hand: delta kept and delta dealt
 - Endgames General: delta scored and delta dealt
-- Combos: delta actual (Card + Card), delta on map, and delta round
+- Combos: standalone card/general deltas, delta actual (Card + Card), delta on
+  map, delta round, and every Synergy value in Card + Card, Card + Map, Card +
+  Round, Card + Endgame, and Card + Action Card
 - Sponsor Endgames: every valid CP/Appeal delta bucket
+- MW Action Cards: General/By-map Delta means, standalone Synergy card deltas,
+  Synergies Delta Actual, and every MW Synergy value
 
-Maps, Synergy, combo component/general deltas, and all other statistics do not
-have confidence intervals.
+The standalone component intervals are ordinary table-clustered mean intervals
+shown when hovering the parenthetical Delta beneath a card name. The Synergy
+interval remains the covariance-aware linear-combination interval.
+Other statistics not listed above do not have confidence intervals.
 
 Each interval is:
 
@@ -750,6 +796,56 @@ Intervals require at least two non-null observations. CI tooltips display a fixe
 gradient line whose endpoint colors are continuously interpolated from the same Delta
 scale as visible values, with signed lower/upper labels beneath it. The fixed line length does not encode
 interval width. Tooltips do not display the internal `n` or a low-sample warning.
+
+Synergy is a linear combination of overlapping estimated means, so combining
+the displayed component CI widths would discard covariance and is prohibited.
+The definitions are:
+
+```text
+Card + Card:        Actual - Card 1 - Card 2
+Card + Map:         Map-specific - Card overall
+Card + Round:       Round-specific - Card overall
+Card + Endgame:     Actual - Card - Endgame
+Card + Action Card: Actual - Card - MW Action Card
+MW Action Synergy:  Actual - Action Card 1 - Action Card 2
+```
+
+For component `j` and table cluster `g`, the backend retains non-null-delta
+count `n_gj` and Delta sum `s_gj`. With unrounded component mean `mu_j`, total
+count `N_j`, and coefficient `c_j`, it calculates:
+
+```text
+u_g = sum_j c_j * (s_gj - n_gj * mu_j) / N_j
+SE = sqrt(G / (G - 1) * sum_g(u_g^2))
+CI = Synergy +/- 1.96 * SE
+```
+
+Every observation from the same `table_id`, including both players and repeated
+round occurrences, remains in one cluster. Component-null deltas are excluded
+only from that component. All component denominators and at least two table
+clusters are required. These are pointwise intervals; they are not adjusted
+for testing many rows simultaneously.
+
+Default snapshots contain complete Synergy CIs. A filtered table returns its
+point estimates immediately, then requests missing intervals for at most the
+visible 100 rows. CI batches are keyed by data version, full backend filter
+scope, view, and canonical row identifiers; identical batches use module and
+persistent caches. Stale batches are aborted and cannot update a newer view,
+page, or filter scope. CI loading never blocks or reruns the main table query.
+
+The complete default intervals are generated by the authenticated
+`refresh_synergy_cis` maintenance stage after the main daily refresh. It builds
+all ten affected snapshots in versioned staging paths. Inference is processed
+in synchronously persisted 100-row checkpoints, with at most six new batches
+per invocation. Scheduler retries resume the same data version, finish smaller
+snapshots before the high-cardinality MW Card + Card snapshot, and become
+immediate no-ops after the per-version completion marker exists. Only after
+every staged snapshot succeeds are the canonical objects promoted and the
+default pack rebuilt. Promotion keeps backups and restores them if any copy or
+pack publication fails. The main daily refresh therefore retains the previous
+complete Synergy snapshots instead of publishing partial or unavailable
+intervals. This separation is required because the all-page refresh already
+runs close to Cloud Run's request limit.
 
 The CI count is deliberately separate from visible table counts:
 
@@ -769,6 +865,16 @@ Public payload field names use:
 <delta_field>_ci95_low
 <delta_field>_ci95_high
 <delta_field>_ci95_n
+```
+
+Synergy rows additionally use:
+
+```text
+interaction_ci95_low
+interaction_ci95_high
+interaction_ci95_se
+interaction_ci95_cluster_n
+interaction_ci95_method = "table_cluster_delta"
 ```
 
 All MW/Base default snapshots include these fields. Filtered requests recompute
@@ -798,6 +904,10 @@ Combo Synergy is likewise zero-anchored per Synergy column and clamped to `[-2, 
 Its negative endpoint is the existing orange (`#ff6027`), its positive endpoint the
 existing green (`#7cba43`), and zero uses their existing 50/50 blended midpoint
 (`#be8d35`). Negative and positive sides interpolate independently.
+Synergy CI endpoints use this same range and palette. If an interval crosses
+zero, its tooltip gradient passes explicitly through the neutral color at the
+proportional zero position. MW Action Cards/Synergies uses the same Synergy
+scale; its other Delta columns retain the ordinary Elo-delta palette.
 
 Color ranges are tied to the fetched backend payload, not to rows left visible by
 frontend-only filtering. Filter-bar changes (Elo range, maps, rounds, dates, completed
@@ -885,6 +995,34 @@ Fix:
 ```powershell
 --message-body='{\"daily_refresh\":true}'
 ```
+
+### Hidden refresh page and completion status
+
+The unlinked path `/refresh/` is a path-based GitHub Pages entry point, not a
+hash route and not a navigation item. It reuses the dashboard topbar/logo while
+hiding the dataset switch, Filters button, nav rail, and sidebar. It does not
+initialize or preload dashboard snapshots.
+
+The page reads the public, sanitized
+`card-stats/refresh/status.json` object and can start the normal main daily
+refresh through `manual_refresh: true`. Starting a manual refresh requires the
+dedicated `X-Ark-Nova-Refresh-Password` header. The password is supplied through
+the page modal and retained only in JavaScript memory until reload; its value
+must live in the backend `REFRESH_PAGE_PASSWORD` secret and never in static
+assets or documentation.
+
+Scheduled and manual daily refreshes share one tracked runner and a Cloud
+Storage lock. The public status contains only state, run ID, monotonic progress,
+the current user-facing phase, timestamps, and completed data version. A second
+request attaches to the active run instead of starting another rebuild. The
+lock becomes replaceable after 90 minutes to recover from a terminated request.
+
+`last_completed_at` advances only after the main refresh reports success and
+the atomic default pack has been published. Its frontend format is
+`YY-MM-DD, hh:mm:ss UTC`. A failed refresh retains the prior completion time and
+the prior snapshots. The status is initially seeded from the canonical default
+pack object's publication timestamp. Separate Synergy-CI staging and Card +
+Card warming do not change this timestamp.
 
 ### Maintenance Token Exposed
 
@@ -996,28 +1134,6 @@ main.py
 
 Exception: if keeping backend open-source, move `main.py` to `backend/main.py`, not root.
 
-## What To Do Next
-
-Likely next product step: continue the remaining requested dashboard views or responsive/mobile polish for the newer pages.
-
-Before adding many pages, decide whether to:
-
-- Continue copy-modifying page modules for 1-2 more pages to learn patterns.
-- Or extract shared frontend utilities first.
-
-Recommended near-term path:
-
-1. Add one more subpage with current architecture.
-2. Note duplicated areas.
-3. Then extract shared table/filter/attribute helpers once the third page confirms the reusable shape.
-
-Be careful with backend changes:
-
-- Keep `stats_page` routing clean.
-- Add daily snapshots for default MW/Base if the page has common default data.
-- Update scheduler daily refresh to include new page snapshots.
-- Ensure all new maintenance paths require token.
-
 ## Conservation page (current behavior)
 
 The Conservation route is `#/conservation`, with `stats_page: "conservation"`
@@ -1117,12 +1233,43 @@ card-stats/scoring/conservation-points/default-{mw|base}.json
 card-stats/scoring/reputation/default-{mw|base}.json
 ```
 
-All eight assets are refreshed daily and included in default-pack schema 8.
+All eight assets are refreshed daily and included in default-pack schema 16.
 The backend reads the source Full Sample through the backend-owned prepared
 table, performs the aggregations, and writes derived snapshots. Source BigQuery
 tables remain read-only.
 
 ## Combinations performance architecture
+
+Combos has five equal-width, single-row views: Card + Card, Card + Map, Card + Round,
+Card + Endgame, and Card + Action Card. Card + Action Card is Marine
+Worlds-only. Entering it temporarily selects and locks MW; leaving it restores
+the dataset that was active beforehand. Its snapshot is
+`card-stats/combinations/card-action-card/default-mw.json`; no Base asset is
+generated.
+
+Card + Action Card uses only tables passing the strict MW action-card telemetry
+validation. Each deduplicated normal card played by a player is paired once
+with each of that player's two selected special action cards. Its formulas are
+`Sum = Card Delta + Action Card Delta`, `Actual = the observed pair mean`, and
+`Synergy = Actual - Sum`; Elo is the holder's pre-match Elo and Played counts
+unique player-game/card/action-card observations. Round filtering accepts a
+normal card if it appeared in any selected round. The two directional searches
+are independent: normal-card aliases apply only to Card, while colloquial names
+and canonical identifiers such as `Animals 2` apply only to Action Card. The
+15 Type combinations stack the normal card type above the MW action-card type.
+Minimum plays defaults to 1,000; search, Type, sorting, pagination, and minimum
+changes are local after the compact payload is loaded.
+
+Daily maintenance builds `card_action_card_observations` by joining prepared
+card plays to `mw_action_card_player_observations` on exact table and player,
+then writes `card_action_card_daily_aggregates` with filter dimensions, played
+round sets, counts, sums, squared sums, and Elo moments. Its Synergy CI is the
+same table-clustered, covariance-aware three-component interval as Card + Card,
+using `Actual - Card - Action Card`.
+
+The Actions page has exactly four equal-width tabs: Starting position,
+Upgrades, Upgrade order, and Upgrades by map. Combos uses five 20% tracks and
+Actions uses four 25% tracks; neither tab bar creates an unused or wrapped row.
 
 Card + Card interactive requests never scan one physical row per pair at query
 time. Daily maintenance first builds `card_pairs_prepared`, then collapses it
@@ -1132,6 +1279,20 @@ both cards/types, and both played-round sets. Each group stores observation
 counts, Elo counts/sums, and Elo-delta counts/sums/squared sums. Weighted
 averages, interactions, sample standard deviations, CIs, and play counts are
 therefore reconstructed exactly from moments.
+
+Synergy CIs remain outside this fast point-estimate path. Their background
+query reads only requested canonical rows from the existing table-level
+prepared card-play, card-pair, card/endgame, endgame-event, and MW action-card
+observation tables. This retains `table_id` covariance without inflating the
+compact daily aggregates or delaying server-paged responses.
+
+Default CI publication runs separately from the 01:05 UTC all-page refresh.
+The `refresh-synergy-confidence-intervals` Scheduler job invokes the staged
+maintenance operation repeatedly every ten minutes from 02:00 through 08:50 UTC, after prepared
+data and its data-version marker are available. Each invocation advances a
+bounded number of durable batches; calls become no-ops after publication. The
+previous complete CI snapshots remain authoritative until this second stage
+promotes all ten replacements and republishes the pack.
 
 Ordinary Card + Card requests use the narrower
 `card_pair_scope_daily_aggregates`, which removes the played-round JSON
@@ -1498,10 +1659,20 @@ descending, truncated to the Top 100, and assigned permanent displayed ranks
 1–100. Blank Peak Arena values display as `n/a`. Country codes render through
 the dashboard's FlagCDN flag treatment with accessible country names. The
 sheet has no MW/Base field, so the identical validated leaderboard is published
-under both dataset paths; switching MW/Base does not change it. The table is
-not sortable and does not query BigQuery. The frontend treats the two paths as
-one shared dataset-neutral payload and reuses the same cached table when the
-global MW/Base switch changes.
+under both dataset paths. The table is not sortable and does not query BigQuery;
+the frontend loads this shared leaderboard only once.
+
+Records as a whole is dataset-neutral in the interface. While `#/records` is
+mounted, both MW and Base buttons are active and disabled; the previously
+selected global dataset remains internal and becomes active again after leaving
+Records. Game-derived views load their MW and Base snapshots in parallel,
+attach an internal source-dataset marker, de-duplicate by record identity, and
+then apply ordering, search, Type filtering, pagination, and sidebar filters to
+the combined population. Records player autocomplete unions and de-duplicates
+both player indexes. Elo Leaderboard is loaded once rather than concatenating
+its identical assets. FPA filtering is local for the four game-derived Records
+views using each focal player's `starting_position`; it does not alter Elo
+Leaderboard because that spreadsheet ranking is not a player-game population.
 
 Automatic Records rows are individual player-game observations from the
 backend-owned `full_stats_prepared` table. Fastest Games also unions manually
@@ -1537,31 +1708,32 @@ links to the corresponding Board Game Arena table, and Date is a `YYYY-MM-DD`
 date from `game_ended_at`. Automatic Fastest rows use EPT zero; manual Fastest
 rows use the spreadsheet's EPT value, where EPT means extrapolated turns.
 
-The canonical Fastest supplement is the first worksheet of Google Sheet
-`1RSOjQdZcGmOY7PBsDY7erGz--dtPJLc3ydNArr9bV48`. Its columns are Turns, Player,
-Score, Map code, ID, Date, EPT, and Mode. Mode is `MW` or `Base`, so separate
-dataset sheets are neither required nor supported. Biggest Turns uses the first
+The canonical Fastest supplement is the `Games to add` worksheet (`gid=1836311698`)
+of Google Sheet `1RSOjQdZcGmOY7PBsDY7erGz--dtPJLc3ydNArr9bV48`. Only its five
+columns Turns, Player, Score, ID, and EPT are consumed; `IDs to check` is not a
+dashboard input. Turns, Score, and EPT are authoritative manually extrapolated
+values. Dataset, map, date, opponent Elo, Arena status, Tournament status, and
+all other filter metadata come from Full Sample. An exact ID/player row is used
+when available; because Player is sheet-owned, a spelling difference does not
+invalidate the record. In that case map, date, mode, and table-level status are
+derived from consistent rows for the table ID, while unavailable player-specific
+Elo enrichment remains null. Biggest
+Turns uses the first
 worksheet of `1SfWmRUo3c2jHbezJDVwXxi3zqEm5RdiZxp4hbHfEl0Q`; the consumed
 columns are Flat A, End B, Total C, Player D, Score E, Turns F, Map G, Move H,
 Actions I, ID K, Result L, Date M, and Mode N. Result must be W, D, or L and
 Total must equal Flat plus End.
 
 The daily refresh downloads both public CSV exports once and validates every
-nonblank row. When an exact ID/player pair exists in Full Sample, that match
-supplies opponent Elo, exact timestamp, and Arena metadata; Mode and Map must
-agree or the refresh fails. Date remains the sheet-owned display value and is
-not an identity field because UTC/local boundaries and historical manual dates
-can differ from the source timestamp. For matched rows, date filtering and Arena
-classification still use the exact source timestamp. Some manually extrapolated early concessions
-are absent from Full Sample by definition. Those rows remain valid with their
-sheet-native dataset, map, player, and date, while unavailable enrichment fields
-are stored as null (`source_enriched = false`). They participate whenever the
-active Elo range contains zero; with a positive minimum they are excluded under
-the same dashboard-wide null-as-zero filtering rule as every other observation.
-Source-absent rows cannot satisfy Arena-only, whose required rating metadata is
-unavailable. Tournament filtering remains possible because it is an independent
-table-ID lookup. A contradictory upstream match is never treated as
-source-absent.
+nonblank row. A Fastest table ID must exist in Full Sample because that source
+owns every field except the five spreadsheet columns. The maintained Player
+value is displayed exactly as entered; an exact player match enriches its Elo,
+while a spelling mismatch falls back to unambiguous table-level map, date, mode,
+and status metadata. Spreadsheet Turns, Score, and EPT are never compared with
+or replaced by Full Sample values. Biggest Turns retains its separate sheet-owned dataset, map, and
+date fields; exact upstream matches must agree with its dataset and map, while
+source-absent Biggest Turns rows retain their maintained metadata and null
+enrichment fields.
 
 Only after all rows validate is the backend-owned
 `records_manual_prepared` table atomically replaced. A valid source is cached in
@@ -1644,10 +1816,10 @@ All ten assets participate in the atomic default snapshot pack. The Elo
 Leaderboard source is cached separately as a last-known-good validated source;
 a temporary Google Sheets delivery or validation failure reuses that source and
 does not publish a partial leaderboard. Each remaining row
-carries `opponent_elo`, `source_enriched`, `is_arena`, `is_tournament`, and the
+carries `opponent_elo`, `starting_position`, `source_enriched`, `is_arena`, `is_tournament`, and the
 available sheet `source_row`, in addition to the displayed fields. The browser
-loads a view snapshot once and performs Player, Maps, Opponent Elo, Date Range,
-Arena-only, Tournament-only, Type, pagination, and row-count changes locally;
+loads both dataset snapshots once and performs Player, Maps, Opponent Elo, Date
+Range, FPA, Arena-only, Tournament-only, Type, pagination, and row-count changes locally;
 applying or resetting Records filters never calls the Cloud Function or
 BigQuery. An empty Elo minimum means zero and an empty maximum means no upper
 bound. Missing opponent Elo is compared as zero locally, exactly matching the
@@ -1664,9 +1836,11 @@ filter is an immediate in-memory operation.
 
 - Normal single statistics tables use `width: 100%` with a shared `900px`
   minimum canvas on desktop and mobile. Below 900px their `.table-scroll`
-  wrapper scrolls horizontally. The only shrinkable `min-width: 0` exceptions
-  are the compact side-by-side Actions Starting position, Actions Upgrades, and
-  Build Enclosures tables.
+  wrapper scrolls horizontally. The only shrinkable `min-width: 0` desktop
+  exceptions are the compact side-by-side Actions Starting position, Actions
+  Upgrades, and Build Enclosures tables. On phones, the especially dense
+  Starting-position and Standard-enclosure children use a small local scroll
+  canvas rather than truncating their signed values.
 - Clearing any Player/Opponent minimum-Elo input means zero; a blank maximum is
   unrestricted. Home serializes blank minima as zero so its unrestricted
   bootstrap payload still renders synchronously without an API request.
@@ -1684,6 +1858,13 @@ filter is an immediate in-memory operation.
   clears Tournament. Arena Top 100 remains static and unfiltered. Reset turns
   both generic switches off. Default snapshots are eligible only while both are
   off.
+- Restrictive FPA requests send `starting_positions` with exactly one of
+  `First player` or `Second player`; both selected is represented by omitting
+  the field. Every prepared analytical derivative and cache key carries this
+  dimension. Frontend Reset restores both chips, and switching tabs within a
+  page preserves the current choice. Arena Top 100 and Refresh have no Filter
+  bar and therefore no FPA control. Records applies FPA entirely in memory to
+  its combined snapshots.
 - Main-header metric/comparison segmented controls use one `24.6667px` slot
   across Predictors, Icons, Sponsor Endgames, Actions, Build, Conservation,
   Scoring, Workers, and Maps. A view change must keep the tab bar and table top
@@ -1712,6 +1893,7 @@ filter is an immediate in-memory operation.
 Never put these in chat, code, GitHub, handoff files, or screenshots:
 
 - `MAINTENANCE_TOKEN`
+- `REFRESH_PAGE_PASSWORD`
 - service account JSON
 - private keys
 - API keys
@@ -1724,11 +1906,3 @@ If exposed, rotate immediately:
 3. Update Scheduler header.
 4. Verify body/header safely.
 5. Run Scheduler once manually.
-
-## Frontend review notes (2026-07-10)
-
-- Bucketed Elo-delta pages now share the `assets/js/table-cells.js` threshold and tooltip constants. The observation population and exact count remain page-specific, but the presentation rule is consistent: fewer than 1,000 observations is insufficient data.
-- The Icons page no longer wraps insufficient delta values in parentheses; it uses the same muted styling and tooltip wording as the other bucketed tables.
-- Cache-busting was advanced for the shared helper and affected page modules.
-- A visual audit found the reviewed desktop CP-by-Map and Actions table geometries aligned. Wide map tables on phones intentionally retain horizontal scrolling rather than compressing columns.
-- Backend verification (read-only) confirmed Maps Fill% is based on `Empty_hexes` with the documented 42/43/39 map totals, and Empty Petting Zoo requires a built petting zoo, zero Petting Zoo icons, and no Horse Whisperer sponsor. No backend changes were made during this review.

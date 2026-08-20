@@ -1,12 +1,12 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260812-2';
-import { deltaColor, deltaRangeColor, orangeGreenRangeColor } from './color-scales.js?v=20260710-3';
-import { getRoutePageId, onRouteChange } from './router.js?v=20260629-13';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260820-mobile1';
+import { deltaColor, deltaRangeColor, orangeGreenRangeColor, synergyRangeColor } from './color-scales.js?v=20260812-9';
+import { getRoutePageId, isRefreshPath, onRouteChange } from './router.js?v=20260819-1';
 import {
   initializeDefaultSnapshots,
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260812-2';
+} from './snapshot-cache.js?v=20260819-3';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -16,7 +16,7 @@ import {
   setTopbarDataset,
   toggleNavCollapse,
   toggleSidebar,
-} from './layout.js?v=20260809-1';
+} from './layout.js?v=20260819-4';
 
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;
@@ -30,6 +30,8 @@ document.addEventListener('click', event => {
     const tournament = document.getElementById('globalTournamentOnly');
     if (arena) arena.checked = false;
     if (tournament) tournament.checked = false;
+    window.resetGlobalStartingPositions?.();
+    activeEloRangeLinkController?.reset();
   }, 0);
 });
 
@@ -51,6 +53,7 @@ document.addEventListener('focusin', prioritizeNavigationSnapshot, { passive: tr
 // build step. They still use inline onclick attributes inside their HTML strings,
 // so each page is responsible for rebinding its own window handlers in mount().
 const appRoot = document.getElementById('app');
+const refreshPath = isRefreshPath();
 let activePage = null;
 let activePageId = null;
 let currentDataset = 1;
@@ -58,14 +61,157 @@ let routeRenderToken = 0;
 let rankFitFrame = 0;
 let rankFitTimer = 0;
 const minimumWarningTimers = new WeakMap();
+const ELO_RANGE_LINK_SESSION_KEY = 'arknova:elo-range-link:v1';
+const ELO_RANGE_WARNING = 'Using different player and opponent elo ranges can substantially skew results. Select asymmetric ranges with caution.';
+let activeEloRangeLinkController = null;
+let eloWarningReturnFocus = null;
+let eloRangeLinkMemory = true;
 const GLOBAL_MODE_FILTER_PAGES = new Set([
   'home', 'cards', 'opening-hand', 'endgames', 'maps', 'sponsor-endgames',
   'combos', 'actions', 'mw-action-cards', 'icons', 'predictors', 'build', 'conservation',
   'scoring', 'workers', 'players',
 ]);
+const GLOBAL_FPA_FILTER_PAGES = new Set([
+  ...GLOBAL_MODE_FILTER_PAGES,
+  'records',
+]);
 
 function globalModeToggle(id, label, kind) {
   return `<div class="toggle-row global-mode-toggle-row"><span class="toggle-label">${label}</span><label class="toggle"><input type="checkbox" id="${id}" data-mode-kind="${kind}" /><span class="toggle-track"></span></label></div>`;
+}
+
+function readEloRangeLinkPreference() {
+  try {
+    const stored = window.sessionStorage.getItem(ELO_RANGE_LINK_SESSION_KEY);
+    if (stored === 'false') return false;
+    if (stored === 'true') return true;
+  } catch (_) {
+    // sessionStorage can be unavailable in privacy-restricted contexts.
+  }
+  return eloRangeLinkMemory;
+}
+
+function writeEloRangeLinkPreference(linked) {
+  eloRangeLinkMemory = Boolean(linked);
+  try {
+    window.sessionStorage.setItem(ELO_RANGE_LINK_SESSION_KEY, linked ? 'true' : 'false');
+  } catch (_) {
+    // The memory fallback still preserves the setting across route changes.
+  }
+}
+
+function ensureEloRangeWarningModal() {
+  let modal = document.getElementById('eloRangeWarningModal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.className = 'elo-range-warning-modal';
+  modal.id = 'eloRangeWarningModal';
+  modal.hidden = true;
+  modal.setAttribute('role', 'alertdialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'eloRangeWarningMessage');
+  modal.innerHTML = `<div class="elo-range-warning-card">
+    <div id="eloRangeWarningMessage">${ELO_RANGE_WARNING}</div>
+    <button type="button" id="eloRangeWarningOk">OK</button>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('#eloRangeWarningOk')?.addEventListener('click', closeEloRangeWarningModal);
+  modal.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeEloRangeWarningModal();
+    } else if (event.key === 'Tab') {
+      event.preventDefault();
+      modal.querySelector('#eloRangeWarningOk')?.focus();
+    }
+  });
+  return modal;
+}
+
+function openEloRangeWarningModal(returnFocus) {
+  const modal = ensureEloRangeWarningModal();
+  eloWarningReturnFocus = returnFocus || null;
+  modal.hidden = false;
+  window.requestAnimationFrame(() => modal.querySelector('#eloRangeWarningOk')?.focus());
+}
+
+function closeEloRangeWarningModal() {
+  const modal = document.getElementById('eloRangeWarningModal');
+  if (!modal || modal.hidden) return;
+  modal.hidden = true;
+  const returnFocus = eloWarningReturnFocus;
+  eloWarningReturnFocus = null;
+  returnFocus?.focus?.();
+}
+
+function findEloFilterGroup(sidebar, labelText) {
+  const normalized = labelText.toLowerCase();
+  return [...sidebar.querySelectorAll('.filter-label')]
+    .find(label => label.textContent.trim().toLowerCase() === normalized)
+    ?.closest('.filter-group') || null;
+}
+
+function installEloRangeLinking() {
+  activeEloRangeLinkController?.destroy();
+  activeEloRangeLinkController = null;
+
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  const playerGroup = findEloFilterGroup(sidebar, 'player elo');
+  const opponentGroup = findEloFilterGroup(sidebar, 'opponent elo');
+  const playerInputs = [...(playerGroup?.querySelectorAll('.range-row input') || [])].slice(0, 2);
+  const opponentInputs = [...(opponentGroup?.querySelectorAll('.range-row input') || [])].slice(0, 2);
+  if (playerInputs.length !== 2 || opponentInputs.length !== 2) return;
+
+  const row = document.createElement('label');
+  row.className = 'elo-range-link-row';
+  row.innerHTML = '<input type="checkbox" class="elo-range-link-checkbox" id="eloRangeLinkCheckbox" /><span>Use same Elo range for player and opponent</span>';
+  opponentGroup.appendChild(row);
+  const checkbox = row.querySelector('input');
+  let synchronizing = false;
+
+  const copyRange = (source, target) => {
+    synchronizing = true;
+    target.forEach((input, index) => { input.value = source[index].value; });
+    synchronizing = false;
+  };
+  const onPlayerInput = event => {
+    if (!checkbox.checked || synchronizing) return;
+    const index = playerInputs.indexOf(event.target);
+    if (index >= 0) opponentInputs[index].value = event.target.value;
+  };
+  const onOpponentInput = event => {
+    if (!checkbox.checked || synchronizing) return;
+    const index = opponentInputs.indexOf(event.target);
+    if (index >= 0) playerInputs[index].value = event.target.value;
+  };
+  const onLinkChange = () => {
+    writeEloRangeLinkPreference(checkbox.checked);
+    if (checkbox.checked) copyRange(playerInputs, opponentInputs);
+    else openEloRangeWarningModal(checkbox);
+  };
+
+  playerInputs.forEach(input => input.addEventListener('input', onPlayerInput));
+  opponentInputs.forEach(input => input.addEventListener('input', onOpponentInput));
+  checkbox.addEventListener('change', onLinkChange);
+  checkbox.checked = readEloRangeLinkPreference();
+  if (checkbox.checked) copyRange(playerInputs, opponentInputs);
+
+  activeEloRangeLinkController = {
+    reset() {
+      checkbox.checked = true;
+      writeEloRangeLinkPreference(true);
+      copyRange(playerInputs, opponentInputs);
+    },
+    synchronize() {
+      if (checkbox.checked) copyRange(playerInputs, opponentInputs);
+    },
+    destroy() {
+      playerInputs.forEach(input => input.removeEventListener('input', onPlayerInput));
+      opponentInputs.forEach(input => input.removeEventListener('input', onOpponentInput));
+      checkbox.removeEventListener('change', onLinkChange);
+    },
+  };
 }
 
 function installGlobalModeFilters(pageId) {
@@ -115,6 +261,68 @@ function installGlobalModeFilters(pageId) {
   window.requestAnimationFrame(() => window.syncGlobalModeFilterGrouping?.());
 }
 
+function installGlobalFpaFilter(pageId) {
+  if (!GLOBAL_FPA_FILTER_PAGES.has(pageId)) return;
+  const sidebar = document.getElementById('sidebar');
+  const actions = sidebar?.querySelector('.filter-action-stack');
+  if (!sidebar || !actions || sidebar.querySelector('.global-fpa-filter-shell')) return;
+
+  const dateLabel = [...sidebar.querySelectorAll('.filter-label')].find(label => (
+    label.textContent.trim().toLowerCase() === 'date range'
+  ));
+  const dateGroup = dateLabel?.closest('.filter-group') || null;
+  const fallbackAnchor = sidebar.querySelector('.global-mode-filter-shell')
+    || sidebar.querySelector('.records-mode-filters')
+    || actions;
+
+  const shell = document.createElement('div');
+  shell.className = 'global-fpa-filter-shell';
+  shell.innerHTML = `<div class="filter-group global-fpa-filter-group">
+    <span class="filter-label">First-player advantage (FPA)</span>
+    <div class="global-fpa-buttons" role="group" aria-label="First-player advantage">
+      <button type="button" class="chip global-fpa-button active" data-starting-position="First player" aria-pressed="true">First player</button>
+      <button type="button" class="chip global-fpa-button active" data-starting-position="Second player" aria-pressed="true">Second player</button>
+    </div>
+  </div>`;
+
+  let leadingDivider = dateGroup?.nextElementSibling?.matches('hr.divider')
+    ? dateGroup.nextElementSibling
+    : null;
+  if (!leadingDivider) {
+    leadingDivider = document.createElement('hr');
+    leadingDivider.className = 'divider global-fpa-leading-divider';
+    fallbackAnchor.parentNode.insertBefore(leadingDivider, fallbackAnchor);
+  } else {
+    leadingDivider.classList.add('global-fpa-leading-divider');
+  }
+  const parent = leadingDivider.parentNode;
+  parent.insertBefore(shell, leadingDivider.nextSibling);
+  const trailingDivider = document.createElement('hr');
+  trailingDivider.className = 'divider global-fpa-trailing-divider';
+  parent.insertBefore(trailingDivider, shell.nextSibling);
+
+  shell.addEventListener('click', event => {
+    const button = event.target.closest('.global-fpa-button');
+    if (!button) return;
+    const buttons = [...shell.querySelectorAll('.global-fpa-button')];
+    const activeCount = buttons.filter(item => item.classList.contains('active')).length;
+    if (button.classList.contains('active') && activeCount === 1) return;
+    button.classList.toggle('active');
+    button.setAttribute('aria-pressed', button.classList.contains('active') ? 'true' : 'false');
+  });
+}
+
+window.getGlobalStartingPositions = () => [...document.querySelectorAll('.global-fpa-button.active')]
+  .map(button => button.dataset.startingPosition)
+  .filter(Boolean);
+
+window.resetGlobalStartingPositions = () => {
+  document.querySelectorAll('.global-fpa-button').forEach(button => {
+    button.classList.add('active');
+    button.setAttribute('aria-pressed', 'true');
+  });
+};
+
 window.syncGlobalModeFilterGrouping = () => {
   const wrapper = document.querySelector('.global-mode-filter-shell');
   const leadingDivider = document.querySelector('.global-mode-filter-divider');
@@ -162,11 +370,12 @@ window.setGlobalTournamentOnly = value => {
 window.hasActiveGlobalModeFilter = () => Boolean(
   document.getElementById('globalArenaOnly')?.checked
   || document.getElementById('globalTournamentOnly')?.checked
+  || window.getGlobalStartingPositions?.().length === 1
 );
 
 // Home owns a tiny synchronous bootstrap. All other defaults begin warming as
 // soon as the shell module loads, without delaying Home's first paint.
-void initializeDefaultSnapshots().catch(() => {});
+if (!refreshPath) void initializeDefaultSnapshots().catch(() => {});
 
 async function renderCurrentRoute() {
   // Dynamic imports can resolve out of order if the hash changes quickly.
@@ -176,14 +385,19 @@ async function renderCurrentRoute() {
 
   const pageId = getRoutePageId(PAGES, DEFAULT_PAGE_ID);
   const pageDef = PAGES[pageId] || PAGES[DEFAULT_PAGE_ID];
-  if (pageDef.id !== 'home') await waitForDefaultSnapshotWarmup(120);
+  if (pageDef.id !== 'home' && pageDef.id !== 'refresh') {
+    await waitForDefaultSnapshotWarmup(120);
+  }
   const page = await pageDef.load();
   if (renderToken !== routeRenderToken) return;
 
   // Always let the outgoing page detach listeners / invalidate async work before
   // the new page's DOM is injected. This is what prevents cross-page state bleed.
   if (activePage && activePage.unmount) activePage.unmount();
+  activeEloRangeLinkController?.destroy();
+  activeEloRangeLinkController = null;
   activePageId = pageDef.id;
+  document.body.classList.toggle('refresh-route-active', activePageId === 'refresh');
   setActiveNav(activePageId);
   setNavHomeLock(activePageId === 'home');
   closeSidebarIfOpen();
@@ -192,14 +406,19 @@ async function renderCurrentRoute() {
   document.title = page.title ? `${page.title} | Ark Nova Statistics` : 'Ark Nova Statistics';
   document.getElementById('pageMain').innerHTML = page.mainHtml || '';
   document.getElementById('sidebar').innerHTML = page.sidebarHtml || '';
-  enhanceIsoDateInputs();
-  installGlobalModeFilters(activePageId);
-  setTopbarDataset(currentDataset);
+  if (activePageId !== 'refresh') {
+    enhanceIsoDateInputs();
+    installGlobalModeFilters(activePageId);
+    installGlobalFpaFilter(activePageId);
+    installEloRangeLinking();
+    setTopbarDataset(currentDataset);
+  }
 
   if (page.mount) page.mount({ dataset: currentDataset, pageId: activePageId });
+  window.requestAnimationFrame(() => activeEloRangeLinkController?.synchronize());
   // Let the active page claim the network first; background warmup begins from
   // an idle callback after its foreground request has been started.
-  preloadDefaultSnapshots(pageDef.id);
+  if (activePageId !== 'refresh') preloadDefaultSnapshots(pageDef.id);
   scheduleRankCellFit();
 }
 
@@ -347,13 +566,17 @@ function renderDeltaCiTooltip(cell) {
   const color = value => Number.isFinite(colorMin) && Number.isFinite(colorMax)
     ? (cell.dataset.ciColorScale === 'orange-green'
       ? orangeGreenRangeColor(value, colorMin, colorMax)
-      : deltaRangeColor(value, colorMin, colorMax))
+      : cell.dataset.ciColorScale === 'synergy'
+        ? synergyRangeColor(value, colorMin, colorMax)
+        : deltaRangeColor(value, colorMin, colorMax))
     : deltaColor(value);
+  const synergyCrossesZero = cell.dataset.ciColorScale === 'synergy' && low < 0 && high > 0;
+  const zeroPosition = synergyCrossesZero ? (-low / (high - low)) * 100 : 50;
   tooltip.innerHTML = `
     <div class="ci-tooltip-title">95% confidence interval</div>
     <div class="ci-tooltip-visual">
-      <div class="ci-tooltip-line"
-           style="--ci-low-color:${color(low)};--ci-high-color:${color(high)}"></div>
+      <div class="ci-tooltip-line${synergyCrossesZero ? ' ci-tooltip-line-crosses-zero' : ''}"
+           style="--ci-low-color:${color(low)};--ci-high-color:${color(high)};--ci-zero-color:${color(0)};--ci-zero-position:${zeroPosition}%"></div>
       <div class="ci-tooltip-bounds">
         <span>${signed(low)}</span>
         <span>${signed(high)}</span>

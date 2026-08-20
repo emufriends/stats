@@ -814,6 +814,74 @@
 
     .toggle input { display: none; }
 
+    .elo-range-link-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font: 500 11px/1.35 Inter, sans-serif;
+    }
+
+    .elo-range-link-checkbox {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      flex: 0 0 14px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .elo-range-link-row:has(.elo-range-link-checkbox:checked) {
+      color: var(--text);
+    }
+
+    .elo-range-link-checkbox:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .elo-range-warning-modal[hidden] { display: none; }
+    .elo-range-warning-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1500;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, .58);
+    }
+
+    .elo-range-warning-card {
+      width: min(430px, calc(100vw - 40px));
+      padding: 18px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      background: var(--bg-panel);
+      color: var(--text);
+      box-shadow: 0 14px 36px rgba(0, 0, 0, .38);
+      text-align: center;
+      font: 500 13px/1.45 Inter, sans-serif;
+    }
+
+    .elo-range-warning-card button {
+      min-width: 64px;
+      margin-top: 16px;
+      padding: 5px 12px;
+      border: 1px solid var(--border-light);
+      border-radius: 5px;
+      background: var(--bg-header);
+      color: var(--accent);
+      cursor: pointer;
+      font: 700 12px Inter, sans-serif;
+    }
+
+    .elo-range-warning-card button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
     .toggle-track {
       position: absolute;
       inset: 0;
@@ -871,6 +939,21 @@
 
     .global-mode-filter-shell.is-joined .global-mode-filter-group {
       padding-top: 12px;
+    }
+
+    .global-fpa-filter-group { margin-bottom: 0; }
+
+    .global-fpa-buttons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .global-fpa-button {
+      width: 100%;
+      padding: 5px 4px;
+      text-align: center;
+      justify-content: center;
     }
 
     /* Apply button */
@@ -2102,6 +2185,15 @@
       box-shadow: 0 0 8px color-mix(in srgb, var(--ci-high-color) 24%, transparent);
     }
 
+    #col-tooltip .ci-tooltip-line.ci-tooltip-line-crosses-zero {
+      background: linear-gradient(
+        90deg,
+        var(--ci-low-color) 0%,
+        var(--ci-zero-color) var(--ci-zero-position),
+        var(--ci-high-color) 100%
+      );
+    }
+
     #col-tooltip .ci-tooltip-bounds {
       display: flex;
       justify-content: space-between;
@@ -3117,6 +3209,11 @@
       grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 
+    .actions-tabs .endgames-tab,
+    .combinations-tabs .endgames-tab {
+      white-space: nowrap;
+    }
+
     .actions-header-left {
       display: flex;
       align-items: center;
@@ -3172,6 +3269,242 @@
 .actions-upgrades-combined th,
 .actions-upgrades-combined td {
     width: 33.3333%;
+}
+
+/* ── Hidden refresh route ───────────────────────────────────────────────────
+   /refresh reuses the persistent topbar but intentionally has no dashboard
+   navigation, dataset controls, filter drawer, or snapshot preloading. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+body.refresh-route-active {
+  overflow: hidden;
+}
+
+.refresh-route-active .topbar-left,
+.refresh-route-active .topbar-actions,
+.refresh-route-active .side-nav,
+.refresh-route-active .sidebar,
+.refresh-route-active .sidebar-overlay {
+  display: none !important;
+}
+
+.refresh-route-active .layout {
+  margin-left: 0 !important;
+  min-height: calc(100dvh - 56px);
+}
+
+.refresh-route-active .main {
+  width: 100%;
+  height: calc(100dvh - 56px);
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.refresh-page {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.refresh-card {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+
+.refresh-progress {
+  width: 100%;
+}
+
+.refresh-progress[hidden],
+.refresh-password-modal[hidden] {
+  display: none;
+}
+
+.refresh-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.refresh-progress-track {
+  width: 100%;
+  height: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+}
+
+.refresh-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  transition: width 0.3s ease;
+}
+
+.refresh-progress-complete .refresh-progress-fill {
+  background: var(--accent);
+}
+
+.refresh-progress-failed .refresh-progress-fill {
+  background: #ef6a5b;
+}
+
+.refresh-start-button {
+  min-width: 240px;
+  min-height: 72px;
+  padding: 14px 36px;
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: 'Bitter', serif;
+  font-size: 25px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.refresh-start-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(52, 211, 153, 0.18);
+}
+
+.refresh-start-button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.refresh-last-update,
+.refresh-message {
+  margin: 0;
+  text-align: center;
+}
+
+.refresh-last-update {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.refresh-message {
+  min-height: 21px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.refresh-password-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 8, 7, 0.76);
+}
+
+.refresh-password-card {
+  width: min(360px, 100%);
+  padding: 24px;
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.refresh-password-card h2 {
+  margin: 0 0 18px;
+  color: var(--accent);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.refresh-password-card label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.refresh-password-card input {
+  width: 100%;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--bg-surface);
+  color: var(--text);
+  font: 14px 'Inter', sans-serif;
+}
+
+.refresh-password-card input:focus {
+  border-color: var(--accent);
+}
+
+.refresh-password-error {
+  min-height: 18px;
+  margin: 7px 0 10px;
+  color: #ff8b79;
+  font-size: 12px;
+}
+
+.refresh-password-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.refresh-password-actions button {
+  min-width: 76px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font: 600 12px 'Inter', sans-serif;
+  cursor: pointer;
+}
+
+.refresh-modal-cancel {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.refresh-modal-confirm {
+  border-color: var(--accent) !important;
+  background: var(--accent);
+  color: var(--bg);
+}
+
+@media (max-width: 600px) {
+  .refresh-page {
+    padding: 18px;
+  }
+
+  .refresh-start-button {
+    width: min(280px, 100%);
+    min-width: 0;
+  }
 }
 
 /* Filtered refreshes retain the previous complete table. This lightweight
@@ -3805,8 +4138,12 @@
     }
 
     .players-performance-completed {
-      margin: 12px 0 0;
+      margin: 0;
       padding: 0;
+    }
+
+    .players-performance-mode-divider {
+      margin: 16px 0;
     }
 
     .players-performance-mode-host { margin-bottom: 0; }
@@ -4084,6 +4421,19 @@
 
     #statsTable.mw-action-cards-by-map-table tbody td {
       font-size: 12px;
+      font-weight: 400;
+    }
+
+    #statsTable.mw-action-cards-by-map-table tbody td.mw-action-map-overall {
+      font-weight: 700;
+    }
+
+    #statsTable.mw-action-cards-by-map-table thead th:last-child {
+      padding-inline: 2px;
+    }
+
+    #statsTable.mw-action-cards-by-map-table thead th:last-child .mw-action-sort-label {
+      gap: 1px;
     }
 
     .mw-action-sort-label {
@@ -4120,14 +4470,19 @@
       position: relative;
     }
 
+    .mw-action-pair-table .combination-card-name {
+      font-size: 11.5px;
+    }
+
     .mw-action-pair-table .combination-card-delta {
-      font-size: 10px;
+      font-size: 11px;
+      line-height: 1.1;
     }
 
     .mw-pair-type-popup {
-      left: 0;
+      position: fixed;
       width: min(220px, calc(100vw - 16px));
-      max-width: min(220px, calc(100vw - 16px));
+      max-width: calc(100vw - 16px);
       max-height: none;
       padding: 8px;
       box-sizing: border-box;
@@ -4144,7 +4499,9 @@
       display: flex;
       flex-direction: column;
       gap: 4px;
-      max-height: 145px;
+      height: 136px;
+      max-height: 136px;
+      flex: 0 0 136px;
       overflow-y: auto;
       padding-right: 2px;
     }
@@ -4188,6 +4545,18 @@
     }
 
     .mw-action-cards-table .mw-action-delta-secondary {
+      font-weight: 400;
+    }
+
+    .mw-action-pair-table .combination-interaction {
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .mw-action-pair-table .delta:not(.combination-interaction),
+    .mw-action-pair-table .combination-card-delta {
       font-weight: 400;
     }
 
@@ -5024,7 +5393,7 @@
     /* Combinations page */
     .combinations-tabs {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       width: 100%;
     }
 
@@ -5036,6 +5405,20 @@
       min-width: 0;
       text-align: center;
       justify-content: center;
+    }
+
+    @media (max-width: 700px) {
+      .combinations-tabs .endgames-tab {
+        padding-inline: 2px;
+        font-size: 7px;
+        letter-spacing: 0;
+      }
+
+      .actions-tabs .endgames-tab {
+        padding-inline: 3px;
+        font-size: 10px;
+        letter-spacing: 0.06em;
+      }
     }
     .combinations-table {
       table-layout: fixed;
@@ -5088,7 +5471,7 @@
     }
 
     /* Preserve readable headers on narrower desktop/tablet viewports. The
-       phone #statsTable rule below remains authoritative at the mobile breakpoint. */
+       scoped Cards/Opening Hand phone rules remain authoritative below 600px. */
     .cards-stats-table {
       min-width: 900px;
     }
@@ -5329,6 +5712,9 @@
     .combination-type-popup {
       width: 172px;
       padding: 8px;
+      max-height: calc(100vh - 16px);
+      box-sizing: border-box;
+      overflow: hidden;
     }
     .combination-single-type-popup {
       width: auto;
@@ -5336,7 +5722,19 @@
       box-sizing: border-box;
     }
     .combination-type-popup .chip { padding-left: 9px; padding-right: 9px; }
-    .combination-type-popup.open { display: grid; gap: 5px; }
+    .combination-type-popup.open {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .combination-type-options {
+      display: grid;
+      gap: 5px;
+      min-height: 0;
+      max-height: min(330px, calc(100vh - 58px));
+      overflow-y: auto;
+      scrollbar-gutter: stable;
+    }
     .combination-type-popup .combination-popup-actions {
       justify-content: flex-start;
       padding: 0 2px 2px;
@@ -5748,18 +6146,26 @@
         font-size: 11.5px;
       }
 
-      /* Phone-only column widths.
-         These nth-child selectors depend on the exact table order:
-         1 #, 2 Card, 3 Δ In Hand, 4 Δ Played, 5 Elo, 6 Playrate, 7 Played, 8 Seen, 9 Type. */
-      #statsTable th:nth-child(1), #statsTable td:nth-child(1) { width: 40px !important; }
-      #statsTable th:nth-child(2), #statsTable td:nth-child(2) { width: 110px !important; }
-      #statsTable th:nth-child(3), #statsTable td:nth-child(3) { width: 100px !important; }
-      #statsTable th:nth-child(4), #statsTable td:nth-child(4) { width: 100px !important; }
-      #statsTable th:nth-child(5), #statsTable td:nth-child(5) { width: 60px !important; }
-      #statsTable th:nth-child(6), #statsTable td:nth-child(6) { width: 115px !important; }
-      #statsTable th:nth-child(7), #statsTable td:nth-child(7) { width: 80px !important; }
-      #statsTable th:nth-child(8), #statsTable td:nth-child(8) { width: 80px !important; }
-      #statsTable th:nth-child(9), #statsTable td:nth-child(9) { width: 70px !important; }
+      /* These fixed phone widths belong only to Cards and Opening Hand. Both
+         pages reuse #statsTable, but so do the dashboard's map matrices. */
+      #statsTable.cards-stats-table th:nth-child(1), #statsTable.cards-stats-table td:nth-child(1),
+      #statsTable.opening-hand-table th:nth-child(1), #statsTable.opening-hand-table td:nth-child(1) { width: 40px !important; }
+      #statsTable.cards-stats-table th:nth-child(2), #statsTable.cards-stats-table td:nth-child(2),
+      #statsTable.opening-hand-table th:nth-child(2), #statsTable.opening-hand-table td:nth-child(2) { width: 110px !important; }
+      #statsTable.cards-stats-table th:nth-child(3), #statsTable.cards-stats-table td:nth-child(3),
+      #statsTable.opening-hand-table th:nth-child(3), #statsTable.opening-hand-table td:nth-child(3) { width: 100px !important; }
+      #statsTable.cards-stats-table th:nth-child(4), #statsTable.cards-stats-table td:nth-child(4),
+      #statsTable.opening-hand-table th:nth-child(4), #statsTable.opening-hand-table td:nth-child(4) { width: 100px !important; }
+      #statsTable.cards-stats-table th:nth-child(5), #statsTable.cards-stats-table td:nth-child(5),
+      #statsTable.opening-hand-table th:nth-child(5), #statsTable.opening-hand-table td:nth-child(5) { width: 60px !important; }
+      #statsTable.cards-stats-table th:nth-child(6), #statsTable.cards-stats-table td:nth-child(6),
+      #statsTable.opening-hand-table th:nth-child(6), #statsTable.opening-hand-table td:nth-child(6) { width: 115px !important; }
+      #statsTable.cards-stats-table th:nth-child(7), #statsTable.cards-stats-table td:nth-child(7),
+      #statsTable.opening-hand-table th:nth-child(7), #statsTable.opening-hand-table td:nth-child(7) { width: 80px !important; }
+      #statsTable.cards-stats-table th:nth-child(8), #statsTable.cards-stats-table td:nth-child(8),
+      #statsTable.opening-hand-table th:nth-child(8), #statsTable.opening-hand-table td:nth-child(8) { width: 80px !important; }
+      #statsTable.cards-stats-table th:nth-child(9), #statsTable.cards-stats-table td:nth-child(9),
+      #statsTable.opening-hand-table th:nth-child(9), #statsTable.opening-hand-table td:nth-child(9) { width: 70px !important; }
 
       .sort-arrow {
         margin-left: 2px;
@@ -5789,9 +6195,10 @@
         padding-top: 20px;
       }
 
-      /* Phone horizontal scrolling: keep only # and Card fixed.
-         Type now sits to the right of Card and scrolls with the other stats. */
-      #statsTable {
+      /* Cards and Opening Hand keep only # and Card fixed. Other tables own
+         their own identifier-column policy below. */
+      #statsTable.cards-stats-table,
+      #statsTable.opening-hand-table {
         border-collapse: separate;
         border-spacing: 0;
         --phone-rank-left: 0px;
@@ -5800,15 +6207,19 @@
 
       /* Force the sticky mobile column widths to the exact same values
          that are used for the sticky left offsets. */
-      #statsTable th:nth-child(1),
-      #statsTable td:nth-child(1) {
+      #statsTable.cards-stats-table th:nth-child(1),
+      #statsTable.cards-stats-table td:nth-child(1),
+      #statsTable.opening-hand-table th:nth-child(1),
+      #statsTable.opening-hand-table td:nth-child(1) {
         width: 40px !important;
         min-width: 40px !important;
         max-width: 40px !important;
       }
 
-      #statsTable th:nth-child(2),
-      #statsTable td:nth-child(2) {
+      #statsTable.cards-stats-table th:nth-child(2),
+      #statsTable.cards-stats-table td:nth-child(2),
+      #statsTable.opening-hand-table th:nth-child(2),
+      #statsTable.opening-hand-table td:nth-child(2) {
         width: 110px !important;
         min-width: 110px !important;
         max-width: 110px !important;
@@ -5831,22 +6242,30 @@
         position: sticky;
       }
 
-      /* Sticky first two columns only: # and Card. */
-      #statsTable th:nth-child(1),
-      #statsTable td:nth-child(1),
-      #statsTable th:nth-child(2),
-      #statsTable td:nth-child(2) {
+      /* Sticky first two columns only on the two card-list tables. */
+      #statsTable.cards-stats-table th:nth-child(1),
+      #statsTable.cards-stats-table td:nth-child(1),
+      #statsTable.cards-stats-table th:nth-child(2),
+      #statsTable.cards-stats-table td:nth-child(2),
+      #statsTable.opening-hand-table th:nth-child(1),
+      #statsTable.opening-hand-table td:nth-child(1),
+      #statsTable.opening-hand-table th:nth-child(2),
+      #statsTable.opening-hand-table td:nth-child(2) {
         position: sticky !important;
         background: var(--bg-panel);
       }
 
-      #statsTable th:nth-child(1),
-      #statsTable td:nth-child(1) {
+      #statsTable.cards-stats-table th:nth-child(1),
+      #statsTable.cards-stats-table td:nth-child(1),
+      #statsTable.opening-hand-table th:nth-child(1),
+      #statsTable.opening-hand-table td:nth-child(1) {
         left: var(--phone-rank-left);
       }
 
-      #statsTable th:nth-child(2),
-      #statsTable td:nth-child(2) {
+      #statsTable.cards-stats-table th:nth-child(2),
+      #statsTable.cards-stats-table td:nth-child(2),
+      #statsTable.opening-hand-table th:nth-child(2),
+      #statsTable.opening-hand-table td:nth-child(2) {
         left: var(--phone-card-left);
         box-shadow: 3px 0 0 var(--border);
       }
@@ -5854,21 +6273,27 @@
       /* Top-left sticky cells need to sit above both the horizontal-scrolling
          header cells and the vertical body cells, otherwise header text can
          appear to slide through them while scrolling. */
-      #statsTable thead th:nth-child(1),
-      #statsTable thead th:nth-child(2) {
+      #statsTable.cards-stats-table thead th:nth-child(1),
+      #statsTable.cards-stats-table thead th:nth-child(2),
+      #statsTable.opening-hand-table thead th:nth-child(1),
+      #statsTable.opening-hand-table thead th:nth-child(2) {
         top: 0;
         background: var(--bg-surface);
         z-index: 80;
       }
 
-      #statsTable tbody td:nth-child(1),
-      #statsTable tbody td:nth-child(2) {
+      #statsTable.cards-stats-table tbody td:nth-child(1),
+      #statsTable.cards-stats-table tbody td:nth-child(2),
+      #statsTable.opening-hand-table tbody td:nth-child(1),
+      #statsTable.opening-hand-table tbody td:nth-child(2) {
         background: var(--bg-panel);
         z-index: 30;
       }
 
-      #statsTable tbody tr:hover td:nth-child(1),
-      #statsTable tbody tr:hover td:nth-child(2) {
+      #statsTable.cards-stats-table tbody tr:hover td:nth-child(1),
+      #statsTable.cards-stats-table tbody tr:hover td:nth-child(2),
+      #statsTable.opening-hand-table tbody tr:hover td:nth-child(1),
+      #statsTable.opening-hand-table tbody tr:hover td:nth-child(2) {
         background: var(--bg-hover);
       }
 
@@ -5877,28 +6302,56 @@
         display: none !important;
       }
 
-      #statsTable:has(tbody .rank-cell) th:nth-child(2),
-      #statsTable:has(tbody .rank-cell) td:nth-child(2) {
+      #statsTable.cards-stats-table:has(tbody .rank-cell) th:nth-child(2),
+      #statsTable.cards-stats-table:has(tbody .rank-cell) td:nth-child(2),
+      #statsTable.opening-hand-table:has(tbody .rank-cell) th:nth-child(2),
+      #statsTable.opening-hand-table:has(tbody .rank-cell) td:nth-child(2) {
         left: 0 !important;
       }
 
-      /* Maps and Combos need every data column to scroll normally on phones.
-         Keep the header row vertically sticky, but remove horizontal freezing. */
-      #statsTable.maps-table th:nth-child(1),
-      #statsTable.maps-table th:nth-child(2),
+      /* Combo columns scroll normally. */
       #statsTable.combinations-table th:nth-child(1),
       #statsTable.combinations-table th:nth-child(2) {
         left: auto !important;
         box-shadow: none;
       }
 
-      #statsTable.maps-table td:nth-child(1),
-      #statsTable.maps-table td:nth-child(2),
       #statsTable.combinations-table td:nth-child(1),
       #statsTable.combinations-table td:nth-child(2) {
         position: static !important;
         left: auto !important;
         box-shadow: none;
+      }
+
+      /* Wide map matrices keep their descriptive row label visible. If a
+         global rank is present, that rank is hidden above and column 2 is the
+         descriptive label. */
+      .maps-table tbody td {
+        padding-left: 4px;
+        padding-right: 4px;
+        font-size: 11px;
+      }
+
+      .maps-table:not(:has(tbody .rank-cell)) th:first-child,
+      .maps-table:not(:has(tbody .rank-cell)) td:first-child,
+      .maps-table:has(tbody .rank-cell) th:nth-child(2),
+      .maps-table:has(tbody .rank-cell) td:nth-child(2) {
+        position: sticky !important;
+        left: 0 !important;
+        background: var(--bg-panel);
+        box-shadow: 3px 0 0 var(--border);
+      }
+
+      .maps-table:not(:has(tbody .rank-cell)) thead th:first-child,
+      .maps-table:has(tbody .rank-cell) thead th:nth-child(2) {
+        top: 0;
+        z-index: 80;
+        background: var(--bg-surface);
+      }
+
+      .maps-table:not(:has(tbody .rank-cell)) tbody td:first-child,
+      .maps-table:has(tbody .rank-cell) tbody td:nth-child(2) {
+        z-index: 30;
       }
 
       /* ── Attributes bar: mobile layout ────────────────────────────────────
@@ -6002,6 +6455,12 @@
   cursor: not-allowed;
 }
 
+.tab-btn.dataset-combined {
+  opacity: 1;
+  filter: none;
+  cursor: not-allowed;
+}
+
 @media (max-width: 760px) {
   .players-arena-graph-shell {
     grid-template-columns: minmax(680px, 1fr) 220px;
@@ -6025,9 +6484,9 @@
   }
 }
 
-/* MW Action Cards keeps its requested percentage geometry on phones. The
-   generic Cards table rules target the same #statsTable id and otherwise hide
-   the rank or assign widths for the unrelated nine-column Cards schema. */
+/* MW Action Cards General/Draft keeps its requested percentage geometry on
+   phones. Its global-rank column is deliberately restored after the shared
+   phone convention hides ranks on other ranked tables. */
 @media (max-width: 600px) {
   .mw-action-cards-tabs .endgames-tab {
     padding-inline: 2px;
@@ -6098,5 +6557,205 @@
   #statsTable.mw-action-cards-draft-table tbody td:nth-child(1),
   #statsTable.mw-action-cards-draft-table tbody td:nth-child(2) {
     position: static !important;
+  }
+
+  /* Phone audit: compact route controls must fit the content column instead
+     of widening the page underneath the fixed navigation/filter overlays. */
+  .actions-tabs .endgames-tab {
+    padding-inline: 2px;
+    font-size: 8px;
+    letter-spacing: 0;
+  }
+
+  .players-tabs .endgames-tab,
+  .scoring-tabs .endgames-tab {
+    min-width: 0;
+    padding-inline: 2px;
+    font-size: 9px;
+    letter-spacing: .03em;
+  }
+
+  .scoring-main-header > .table-meta:empty {
+    display: none;
+  }
+
+  .scoring-main-header .scoring-switches {
+    width: 100%;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .scoring-switches .maps-h2h-mode {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .scoring-switches .maps-h2h-mode button {
+    min-width: 0;
+    padding-inline: 3px;
+    font-size: 10px;
+  }
+
+  /* Map-pack controls retain their full feature set on phones. Their own
+     horizontal scroller prevents Legacy/Beginner controls from being clipped. */
+  .maps-metrics-options {
+    min-width: 0;
+    gap: 16px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-light) transparent;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .maps-metrics-option,
+  .maps-metrics-reset-btn {
+    flex: 0 0 auto;
+  }
+
+  /* Predictors has only Condition and Value; a 900px canvas hid the value
+     column despite both columns fitting comfortably on a phone. */
+  #statsTable.predictors-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+
+  #statsTable.predictors-table th,
+  #statsTable.predictors-table td {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+
+  /* Long card names should wrap within the existing 900px combo canvas rather
+     than being cut at the cell edge. */
+  #statsTable.combinations-table .combination-card-with-delta,
+  #statsTable.combinations-table .combination-card-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #statsTable.combinations-table .combination-card-name {
+    line-height: 1.2;
+  }
+
+  .maps-metrics-table .maps-metric-cell {
+    padding-left: 3px;
+    padding-right: 3px;
+    white-space: normal;
+    line-height: 1.15;
+  }
+
+  .mw-action-cards-by-map-table tbody td {
+    padding-left: 3px !important;
+    padding-right: 3px !important;
+    font-size: 11px !important;
+  }
+
+  /* These two rank-bearing map tables do not use the generic maps-table class.
+     The hidden rank gives way to the descriptive Action Card/Endgame column. */
+  .mw-action-cards-by-map-table th:nth-child(2),
+  .mw-action-cards-by-map-table td:nth-child(2),
+  .cp-by-map-view th:nth-child(2),
+  .cp-by-map-view td:nth-child(2) {
+    position: sticky !important;
+    left: 0 !important;
+    background: var(--bg-panel);
+    box-shadow: 3px 0 0 var(--border);
+  }
+
+  .mw-action-cards-by-map-table thead th:nth-child(2),
+  .cp-by-map-view thead th:nth-child(2) {
+    top: 0;
+    z-index: 80;
+    background: var(--bg-surface);
+  }
+
+  .mw-action-cards-by-map-table tbody td:nth-child(2),
+  .cp-by-map-view tbody td:nth-child(2) {
+    z-index: 30;
+  }
+
+  /* The compact Build/Actions pairs stay shrinkable on desktop. On a phone,
+     only the dense six-metric tables receive a small internal scroll canvas so
+     signed values remain readable instead of becoming ellipses. */
+  .build-standard-enclosures-table {
+    width: 430px;
+    min-width: 430px;
+  }
+
+  .build-table-panel:has(.build-standard-enclosures-table) .table-scroll,
+  .actions-strength-panel .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .actions-strength-table {
+    width: 410px;
+    min-width: 410px;
+  }
+
+  .build-standard-enclosures-table th,
+  .build-standard-enclosures-table td,
+  .actions-strength-table th,
+  .actions-strength-table td {
+    padding-left: 3px;
+    padding-right: 3px;
+    font-size: 11px;
+  }
+
+  .build-unique-enclosures-table th {
+    padding-left: 2px;
+    padding-right: 2px;
+    font-size: 10px;
+  }
+
+  /* Tournament H2H is a matrix but does not carry the shared maps-table class. */
+  .maps-h2h-table .maps-h2h-row-head,
+  .maps-h2h-table .maps-h2h-corner {
+    position: sticky;
+    left: 0;
+    z-index: 30;
+    background: var(--bg-panel);
+    box-shadow: 3px 0 0 var(--border);
+  }
+
+  .maps-h2h-table thead .maps-h2h-corner {
+    top: 0;
+    z-index: 80;
+    background: var(--bg-surface);
+  }
+
+  .records-table td {
+    padding-left: 5px;
+    padding-right: 5px;
+    font-size: 12px;
+  }
+
+  .records-biggest-turns-table tbody td:nth-child(7) {
+    padding-left: 2px;
+    padding-right: 2px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 360px) {
+  .combinations-tabs .endgames-tab {
+    padding-inline: 1px;
+    font-size: 6.5px;
+    line-height: 1.1;
+    white-space: normal;
+  }
+
+  .actions-tabs .endgames-tab {
+    font-size: 7px;
+  }
+
+  .records-tabs .endgames-tab {
+    padding-inline: 1px;
+    font-size: 7px;
+    letter-spacing: .03em;
+    line-height: 1.1;
   }
 }

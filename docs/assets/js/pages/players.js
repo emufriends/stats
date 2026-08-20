@@ -1,6 +1,6 @@
 import { deltaRangeColor, divergingRangeColor } from '../color-scales.js?v=20260711-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-5';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260802-2';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260819-3';
 import { setFilterButtonDisabled } from '../layout.js?v=20260801-2';
 
 export const id = 'players';
@@ -144,7 +144,7 @@ export const sidebarHtml = `
   </div></div>
   <hr class="divider" />
   <div class="filter-group records-map-filter" id="playersMapFilter"></div>
-  <hr class="divider" />
+  <hr class="divider" id="playersMapFilterTrailingDivider" />
   <div class="filter-group"><span class="filter-label">Date Range</span>
     <input class="date-input" type="text" id="playersDateFrom" placeholder="yyyy-mm-dd" oninput="onPlayersDateInput()" />
     <input class="date-input" type="text" id="playersDateTo" placeholder="yyyy-mm-dd" oninput="onPlayersDateInput()" />
@@ -158,6 +158,7 @@ export const sidebarHtml = `
     <div class="players-arena-season-heading"><span class="filter-label">Arena Seasons</span><span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllPlayersArenaSeasons()">all</span> / <span class="map-toggle-link" onclick="selectNonePlayersArenaSeasons()">none</span>)</span></div>
     <div class="chip-grid players-arena-season-chips" id="playersArenaSeasonChips"></div>
   </div>
+  <hr class="divider players-performance-mode-divider is-hidden" id="playersPerformanceModeDivider" />
   <div class="filter-group players-performance-completed is-hidden" id="playersPerformanceCompleted">
     <div class="toggle-row"><span class="toggle-label">Completed games only</span><label class="toggle"><input type="checkbox" id="playersCompletedOnly" /><span class="toggle-track"></span></label></div>
   </div></div>
@@ -354,6 +355,9 @@ function syncTabs() {
     tournament: true,
   });
   document.getElementById('playersPerformanceCompleted')?.classList.toggle('is-hidden', view !== 'performance_by_map');
+  document.getElementById('playersPerformanceModeDivider')?.classList.toggle('is-hidden', view !== 'performance_by_map');
+  document.getElementById('playersMapFilter')?.classList.toggle('is-hidden', view === 'performance_by_map');
+  document.getElementById('playersMapFilterTrailingDivider')?.classList.toggle('is-hidden', view === 'performance_by_map');
   document.querySelector('.players-arena-filter')?.classList.toggle('players-performance-mode-host', view === 'performance_by_map');
   document.querySelector('.global-mode-filter-shell')?.classList.toggle('players-performance-joined', view === 'performance_by_map');
   window.syncGlobalModeFilterGrouping?.();

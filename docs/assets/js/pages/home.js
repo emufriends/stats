@@ -1,5 +1,5 @@
 export const id = 'home';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-3';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
 export const title = 'Home';
 export const navLabel = 'Home';
 
