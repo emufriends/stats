@@ -6,7 +6,7 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 9;
+const DEFAULT_PACK_SCHEMA_VERSION = 19;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
@@ -64,6 +64,9 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['actions', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/actions/upgrades_by_map/delta/default-base.json'],
   ['actions', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/actions/upgrades_by_map/frequency/default-mw.json'],
   ['actions', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/actions/upgrades_by_map/frequency/default-base.json'],
+  ['mw-action-cards', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/mw-action-cards/general/default-mw.json'],
+  ['mw-action-cards', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/mw-action-cards/by-map/default-mw.json'],
+  ['mw-action-cards', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/mw-action-cards/synergies/default-mw.json'],
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/projects/default-mw.json'],
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/projects/default-base.json'],
   ['conservation', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/conservation/project-rewards/default-mw.json'],
@@ -85,7 +88,7 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-mw.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-base.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena/manifest.json'],
-  ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena-top-100/all-seasons.json'],
+  ['arena', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena-top-100/all-seasons.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/elo-leaderboard/default-mw.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/elo-leaderboard/default-base.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/fastest-games/default-mw.json'],
@@ -104,6 +107,7 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-round/default-base.json?v=20260629-13'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-endgame/default-mw.json?v=20260629-13'],
   ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-endgame/default-base.json?v=20260629-13'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-action-card/default-mw.json?v=20260819-1'],
 ];
 
 function dataVersion() {
@@ -179,19 +183,21 @@ async function runForeground(loader) {
   finally { foregroundActivity -= 1; }
 }
 
-async function loadCached(key, loader) {
+async function loadCached(key, loader, { shareInFlight = true } = {}) {
   if (memoryCache.has(key)) {
     const payload = memoryCache.get(key);
     memoryCache.delete(key);
     memoryCache.set(key, payload);
     return payload;
   }
-  if (inFlight.has(key)) return inFlight.get(key);
+  if (shareInFlight && inFlight.has(key)) return inFlight.get(key);
   const promise = loader().then(payload => {
     memoryPut(key, payload);
     return payload;
-  }).finally(() => inFlight.delete(key));
-  inFlight.set(key, promise);
+  }).finally(() => {
+    if (shareInFlight && inFlight.get(key) === promise) inFlight.delete(key);
+  });
+  if (shareInFlight) inFlight.set(key, promise);
   return promise;
 }
 
@@ -207,18 +213,22 @@ export function peekSnapshot(url) {
 
 function withGlobalModeFilters(params) {
   const normalized = { ...params };
-  if (normalized.stats_page === 'records') return normalized;
-  const arena = document.getElementById('globalArenaOnly');
-  const tournament = document.getElementById('globalTournamentOnly');
-  normalized.arena_only = Boolean(arena?.checked);
-  normalized.tournament_only = Boolean(tournament?.checked);
+  if (normalized.stats_page !== 'records') {
+    const arena = document.getElementById('globalArenaOnly');
+    const tournament = document.getElementById('globalTournamentOnly');
+    normalized.arena_only = Boolean(arena?.checked);
+    normalized.tournament_only = Boolean(tournament?.checked);
+  }
+  const startingPositions = window.getGlobalStartingPositions?.() || [];
+  if (startingPositions.length === 1) normalized.starting_positions = startingPositions;
+  else delete normalized.starting_positions;
   return normalized;
 }
 
-export function fetchStats(params, { signal } = {}) {
+export function fetchStats(params, { signal, shareInFlight = true } = {}) {
   const normalized = withGlobalModeFilters(params);
   const key = cacheKey('filtered', normalized);
-  if (inFlight.has(key)) return runForeground(() => inFlight.get(key));
+  if (shareInFlight && inFlight.has(key)) return runForeground(() => inFlight.get(key));
 
   const group = String(normalized.stats_page || 'dashboard');
   let managedController = null;
@@ -241,7 +251,7 @@ export function fetchStats(params, { signal } = {}) {
       throw new Error(payload.message || `API request failed (${response.status})`);
     }
     return payload;
-  }));
+  }, { shareInFlight }));
   return request.finally(() => {
     if (managedController && activeFilteredControllers.get(group) === managedController) {
       activeFilteredControllers.delete(group);
@@ -251,7 +261,7 @@ export function fetchStats(params, { signal } = {}) {
 
 export async function loadStats(params, defaultUrl = null, options = {}) {
   const normalized = withGlobalModeFilters(params);
-  if (defaultUrl && !normalized.arena_only && !normalized.tournament_only) {
+  if (defaultUrl && !normalized.arena_only && !normalized.tournament_only && !normalized.starting_positions) {
     try { return await loadSnapshot(defaultUrl); } catch { return fetchStats(normalized, options); }
   }
   return fetchStats(normalized, options);

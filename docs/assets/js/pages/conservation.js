@@ -13,7 +13,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260728-3';
+import { loadStats } from '../snapshot-cache.js?v=20260819-3';
 
 export const id = 'conservation';
 export const title = 'Conservation';
@@ -152,6 +152,7 @@ function syncControls() {
   document.querySelector('.conservation-completed-divider')?.classList.toggle('is-hidden', !showCompleted);
   document.querySelector('.conservation-switches')?.classList.toggle('is-cp-rewards', view === 'cp_rewards');
   document.querySelector('.conservation-switches')?.classList.toggle('is-projects', view === 'projects');
+  window.syncGlobalModeFilterGrouping?.();
 }
 
 function params() {

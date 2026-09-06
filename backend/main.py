@@ -22,6 +22,7 @@ from types import SimpleNamespace
 
 from google.cloud import bigquery
 from google.cloud import storage
+from google.api_core.exceptions import PreconditionFailed
 
 
 # Constants
@@ -33,6 +34,11 @@ VALID_CARD_TYPES = set(DEFAULT_CARD_TYPES)
 COMBINATION_PAIR_TYPES = [
     "Animal + Animal", "Animal + Project", "Animal + Sponsor",
     "Project + Project", "Project + Sponsor", "Sponsor + Sponsor",
+]
+CARD_ACTION_PAIR_TYPES = [
+    f"{card_type} + {action_type}"
+    for card_type in ("Animal", "Project", "Sponsor")
+    for action_type in ("Animals", "Association", "Build", "Cards", "Sponsors")
 ]
 
 EXCLUDED_PROJECTS = {
@@ -89,7 +95,7 @@ ARENA_MANIFEST_BLOB = f"{CACHE_PREFIX}/players/arena/manifest.json"
 ARENA_TOP100_BUNDLE_BLOB = f"{CACHE_PREFIX}/players/arena-top-100/all-seasons.json"
 RECORDS_FASTEST_SHEET_URL = os.environ.get(
     "RECORDS_FASTEST_SHEET_URL",
-    "https://docs.google.com/spreadsheets/d/1RSOjQdZcGmOY7PBsDY7erGz--dtPJLc3ydNArr9bV48/export?format=csv",
+    "https://docs.google.com/spreadsheets/d/1RSOjQdZcGmOY7PBsDY7erGz--dtPJLc3ydNArr9bV48/export?format=csv&gid=1836311698",
 )
 RECORDS_BIGGEST_TURNS_SHEET_URL = os.environ.get(
     "RECORDS_BIGGEST_TURNS_SHEET_URL",
@@ -101,8 +107,8 @@ RECORDS_ELO_LEADERBOARD_SHEET_URL = os.environ.get(
 )
 RECORDS_MANUAL_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-manual-source.json"
 RECORDS_ELO_LEADERBOARD_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-elo-leaderboard-source.json"
-FILTER_CACHE_VERSION = "v24"
-DEFAULT_PACK_SCHEMA_VERSION = 8
+FILTER_CACHE_VERSION = "v40-population-parity"
+DEFAULT_PACK_SCHEMA_VERSION = 19
 PLAYERS_HISTORY_WINDOW = 100
 PLAYERS_GRAPH_MIN_GAMES = 250
 STATS_PAGE_CARDS = "cards"
@@ -120,7 +126,9 @@ STATS_PAGE_CONSERVATION = "conservation"
 STATS_PAGE_SCORING = "scoring"
 STATS_PAGE_WORKERS = "workers"
 STATS_PAGE_PLAYERS = "players"
+STATS_PAGE_ARENA = "arena"
 STATS_PAGE_RECORDS = "records"
+STATS_PAGE_MW_ACTION_CARDS = "mw_action_cards"
 VALID_STATS_PAGES = {
     STATS_PAGE_CARDS,
     STATS_PAGE_HOME,
@@ -137,7 +145,9 @@ VALID_STATS_PAGES = {
     STATS_PAGE_SCORING,
     STATS_PAGE_WORKERS,
     STATS_PAGE_PLAYERS,
+    STATS_PAGE_ARENA,
     STATS_PAGE_RECORDS,
+    STATS_PAGE_MW_ACTION_CARDS,
 }
 ENDGAMES_VIEW_GENERAL = "general"
 ENDGAMES_VIEW_CP_DISTRIBUTION = "cp_distribution"
@@ -198,11 +208,15 @@ VALID_WORKERS_VIEWS = {WORKERS_VIEW_GENERAL, WORKERS_VIEW_TWO_CP_WORKER}
 PLAYERS_VIEW_GENERAL = "general"
 PLAYERS_VIEW_ARENA_TOP_100 = "arena_top_100"
 PLAYERS_VIEW_COMPARISON = "comparison"
+PLAYERS_VIEW_PERFORMANCE_BY_MAP = "performance_by_map"
 VALID_PLAYERS_VIEWS = {
     PLAYERS_VIEW_GENERAL,
     PLAYERS_VIEW_ARENA_TOP_100,
     PLAYERS_VIEW_COMPARISON,
+    PLAYERS_VIEW_PERFORMANCE_BY_MAP,
 }
+ARENA_VIEW_TOP_100 = "top_100"
+VALID_ARENA_VIEWS = {ARENA_VIEW_TOP_100}
 RECORDS_VIEW_ELO_LEADERBOARD = "elo_leaderboard"
 RECORDS_VIEW_FASTEST_GAMES = "fastest_games"
 RECORDS_VIEW_HIGHEST_SCORES = "highest_scores"
@@ -215,6 +229,43 @@ VALID_RECORDS_VIEWS = {
     RECORDS_VIEW_BIGGEST_TURNS,
     RECORDS_VIEW_MOST_ICONS,
 }
+MW_ACTION_CARDS_VIEW_GENERAL = "general"
+MW_ACTION_CARDS_VIEW_DRAFT = "draft"
+MW_ACTION_CARDS_VIEW_BY_MAP = "by_map"
+MW_ACTION_CARDS_VIEW_SYNERGIES = "synergies"
+VALID_MW_ACTION_CARDS_VIEWS = {
+    MW_ACTION_CARDS_VIEW_GENERAL,
+    MW_ACTION_CARDS_VIEW_DRAFT,
+    MW_ACTION_CARDS_VIEW_BY_MAP,
+    MW_ACTION_CARDS_VIEW_SYNERGIES,
+}
+# Marine Worlds replaces two of a player's five normal action cards with
+# enhanced variants. Draft telemetry uses canonical backend keys such as
+# ``Sponsors 1``; selected-card fields store only the numeric suffix. This
+# catalog is the single mapping from those backend identifiers to the
+# colloquial names displayed by the frontend (for example Sponsors 1 -> Trade).
+MW_ACTION_CARD_CATALOG = (
+    (1, "Animals", 1, "Ignore"),
+    (2, "Animals", 2, "Hunter"),
+    (3, "Animals", 3, "Appeal"),
+    (4, "Animals", 4, "Mark"),
+    (5, "Association", 1, "Duplicate"),
+    (6, "Association", 2, "Hire"),
+    (7, "Association", 3, "X-token"),
+    (8, "Association", 4, "Determination"),
+    (9, "Build", 1, "Pavilion"),
+    (10, "Build", 2, "Kiosk"),
+    (11, "Build", 3, "+1"),
+    (12, "Build", 4, "Terrain"),
+    (13, "Cards", 1, "Keep"),
+    (14, "Cards", 2, "Digging"),
+    (15, "Cards", 3, "Snap"),
+    (16, "Cards", 4, "Clever"),
+    (17, "Sponsors", 1, "Trade"),
+    (18, "Sponsors", 2, "Money"),
+    (19, "Sponsors", 3, "Sunbathing"),
+    (20, "Sponsors", 4, "Marketing"),
+)
 
 # FIDE Rating Regulations table 8.1.1. Index is score percentage 0..100;
 # Top 100 performance rating is average opponent Elo plus this difference.
@@ -281,11 +332,13 @@ COMBINATIONS_VIEW_CARD_CARD = "card_card"
 COMBINATIONS_VIEW_CARD_MAP = "card_map"
 COMBINATIONS_VIEW_CARD_ROUND = "card_round"
 COMBINATIONS_VIEW_CARD_ENDGAME = "card_endgame"
+COMBINATIONS_VIEW_CARD_ACTION_CARD = "card_action_card"
 VALID_COMBINATIONS_VIEWS = {
     COMBINATIONS_VIEW_CARD_CARD,
     COMBINATIONS_VIEW_CARD_MAP,
     COMBINATIONS_VIEW_CARD_ROUND,
     COMBINATIONS_VIEW_CARD_ENDGAME,
+    COMBINATIONS_VIEW_CARD_ACTION_CARD,
 }
 COMBINATION_DEFAULT_MIN_PLAYS = 1000
 COMBINATION_PAGE_DEFAULT = 1
@@ -307,6 +360,10 @@ COMBINATION_SORT_FIELDS = {
     COMBINATIONS_VIEW_CARD_ENDGAME: {
         "card_name", "endgame_name", "delta_combined", "delta_actual",
         "interaction", "avg_elo", "n_played", "card_type",
+    },
+    COMBINATIONS_VIEW_CARD_ACTION_CARD: {
+        "card_name", "action_card_name", "delta_combined", "delta_actual",
+        "interaction", "avg_elo", "n_played", "pair_type",
     },
 }
 
@@ -380,6 +437,10 @@ SPONSOR_APPEAL_CARDS = list(SPONSOR_APPEAL_VALUES.keys())
 BIGQUERY_JOB_PROJECT = os.environ.get("BIGQUERY_JOB_PROJECT", "ark-nova-stats-dashboard")
 BIGQUERY_LOCATION = os.environ.get("BIGQUERY_LOCATION", "US")
 MAINTENANCE_TOKEN = os.environ.get("MAINTENANCE_TOKEN")
+REFRESH_PAGE_PASSWORD = os.environ.get("REFRESH_PAGE_PASSWORD")
+REFRESH_STATUS_BLOB = f"{CACHE_PREFIX}/refresh/status.json"
+REFRESH_LOCK_BLOB = f"{CACHE_PREFIX}/refresh/lock.json"
+REFRESH_LOCK_MAX_AGE = timedelta(minutes=90)
 PREPARED_LOGS_TABLE = os.environ.get(
     "PREPARED_LOGS_TABLE",
     "ark-nova-stats-dashboard.dashboard_cache.card_logs_prepared",
@@ -411,6 +472,10 @@ PREPARED_PLAYERS_BASELINE_TABLE = os.environ.get(
 PREPARED_PLAYERS_IDENTITY_ROLLUP_TABLE = os.environ.get(
     "PREPARED_PLAYERS_IDENTITY_ROLLUP_TABLE",
     "ark-nova-stats-dashboard.dashboard_cache.players_identity_daily_rollup",
+)
+PREPARED_PLAYERS_MAP_ROLLUP_TABLE = os.environ.get(
+    "PREPARED_PLAYERS_MAP_ROLLUP_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.players_map_performance_rollup",
 )
 PREPARED_CARD_PLAYS_TABLE = os.environ.get(
     "PREPARED_CARD_PLAYS_TABLE",
@@ -475,6 +540,30 @@ PREPARED_CARD_ENDGAME_TABLE = os.environ.get(
 PREPARED_CARD_ENDGAME_AGGREGATES_TABLE = os.environ.get(
     "PREPARED_CARD_ENDGAME_AGGREGATES_TABLE",
     "ark-nova-stats-dashboard.dashboard_cache.card_endgame_daily_aggregates",
+)
+PREPARED_MW_ACTION_CARD_PLAYERS_TABLE = os.environ.get(
+    "PREPARED_MW_ACTION_CARD_PLAYERS_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.mw_action_card_player_observations",
+)
+PREPARED_MW_ACTION_CARD_DRAFTS_TABLE = os.environ.get(
+    "PREPARED_MW_ACTION_CARD_DRAFTS_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.mw_action_card_draft_observations",
+)
+PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE = os.environ.get(
+    "PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.mw_action_card_map_daily_aggregates",
+)
+PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE = os.environ.get(
+    "PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.mw_action_card_synergy_daily_aggregates",
+)
+PREPARED_CARD_ACTION_CARD_TABLE = os.environ.get(
+    "PREPARED_CARD_ACTION_CARD_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.card_action_card_observations",
+)
+PREPARED_CARD_ACTION_CARD_AGGREGATES_TABLE = os.environ.get(
+    "PREPARED_CARD_ACTION_CARD_AGGREGATES_TABLE",
+    "ark-nova-stats-dashboard.dashboard_cache.card_action_card_daily_aggregates",
 )
 TOURNAMENT_TABLES_CACHE_TABLE = os.environ.get(
     "TOURNAMENT_TABLES_CACHE_TABLE",
@@ -626,6 +715,70 @@ def _attach_ci95(item, row, schema_field_names, prefix):
     ))
 
 
+def _clustered_linear_ci(component_clusters, coefficients):
+    """Pointwise CR1 interval for a linear combination of ratio means.
+
+    ``component_clusters`` maps each component name to ``table_id -> (n, sum)``.
+    The helper mirrors the production BigQuery calculation and exists as a
+    small, deterministic regression-test surface for the covariance algebra.
+    """
+    means = {}
+    totals = {}
+    all_clusters = set()
+    for component, coefficient in coefficients.items():
+        observations = component_clusters.get(component) or {}
+        total_n = sum(max(0, int(values[0] or 0)) for values in observations.values())
+        total_sum = sum(float(values[1] or 0.0) for values in observations.values())
+        if total_n <= 0:
+            return {
+                "interaction": None,
+                "interaction_ci95_low": None,
+                "interaction_ci95_high": None,
+                "interaction_ci95_se": None,
+                "interaction_ci95_cluster_n": 0,
+                "interaction_ci95_method": "table_cluster_delta",
+            }
+        totals[component] = total_n
+        means[component] = total_sum / total_n
+        all_clusters.update(observations)
+
+    cluster_count = len(all_clusters)
+    point = sum(coefficients[name] * means[name] for name in coefficients)
+    if cluster_count < 2:
+        return {
+            "interaction": point,
+            "interaction_ci95_low": None,
+            "interaction_ci95_high": None,
+            "interaction_ci95_se": None,
+            "interaction_ci95_cluster_n": cluster_count,
+            "interaction_ci95_method": "table_cluster_delta",
+        }
+
+    squared_influence = 0.0
+    for table_id in all_clusters:
+        influence = 0.0
+        for component, coefficient in coefficients.items():
+            count, total = (component_clusters.get(component) or {}).get(
+                table_id, (0, 0.0)
+            )
+            influence += coefficient * (
+                float(total or 0.0) - int(count or 0) * means[component]
+            ) / totals[component]
+        squared_influence += influence * influence
+    standard_error = math.sqrt(
+        cluster_count / (cluster_count - 1) * squared_influence
+    )
+    margin = 1.96 * standard_error
+    return {
+        "interaction": point,
+        "interaction_ci95_low": point - margin,
+        "interaction_ci95_high": point + margin,
+        "interaction_ci95_se": standard_error,
+        "interaction_ci95_cluster_n": cluster_count,
+        "interaction_ci95_method": "table_cluster_delta",
+    }
+
+
 def _sql_string(value):
     return "'" + str(value).replace("'", "''") + "'"
 
@@ -699,7 +852,7 @@ def _parse_stats_page(raw_value):
     if value not in VALID_STATS_PAGES:
         raise ValueError(
             "stats_page must be cards, home, opening_hand, endgames, maps, "
-            "sponsor_endgames, combinations, icons, build, predictors, actions, conservation, scoring, workers, players, or records"
+            "sponsor_endgames, combinations, icons, build, predictors, actions, conservation, scoring, workers, players, arena, records, or mw_action_cards"
         )
     return value
 
@@ -736,7 +889,9 @@ def _parse_combinations_view(raw_value):
         return COMBINATIONS_VIEW_CARD_CARD
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_COMBINATIONS_VIEWS:
-        raise ValueError("combinations_view must be card_card, card_map, card_round, or card_endgame")
+        raise ValueError(
+            "combinations_view must be card_card, card_map, card_round, card_endgame, or card_action_card"
+        )
     return value
 
 
@@ -801,7 +956,18 @@ def _parse_players_view(raw_value):
         return PLAYERS_VIEW_GENERAL
     value = str(raw_value).strip().lower().replace("-", "_")
     if value not in VALID_PLAYERS_VIEWS:
-        raise ValueError("players_view must be general, comparison, or arena_top_100")
+        raise ValueError(
+            "players_view must be general, comparison, performance_by_map, or arena_top_100"
+        )
+    return value
+
+
+def _parse_arena_view(raw_value):
+    if raw_value in (None, ""):
+        return ARENA_VIEW_TOP_100
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_ARENA_VIEWS:
+        raise ValueError("arena_view must be top_100")
     return value
 
 
@@ -813,6 +979,17 @@ def _parse_records_view(raw_value):
         raise ValueError(
             "records_view must be elo_leaderboard, fastest_games, highest_scores, "
             "biggest_turns, or most_icons"
+        )
+    return value
+
+
+def _parse_mw_action_cards_view(raw_value):
+    if raw_value in (None, ""):
+        return MW_ACTION_CARDS_VIEW_GENERAL
+    value = str(raw_value).strip().lower().replace("-", "_")
+    if value not in VALID_MW_ACTION_CARDS_VIEWS:
+        raise ValueError(
+            "mw_action_cards_view must be general, draft, by_map, or synergies"
         )
     return value
 
@@ -852,6 +1029,13 @@ def _has_maintenance_auth(request):
     return hmac.compare_digest(provided, MAINTENANCE_TOKEN)
 
 
+def _has_refresh_page_auth(request):
+    if not REFRESH_PAGE_PASSWORD:
+        return False
+    provided = request.headers.get("X-Ark-Nova-Refresh-Password", "")
+    return hmac.compare_digest(provided, REFRESH_PAGE_PASSWORD)
+
+
 def _maintenance_auth_error(headers):
     if not MAINTENANCE_TOKEN:
         return (
@@ -866,6 +1050,26 @@ def _maintenance_auth_error(headers):
         json.dumps({
             "status": "error",
             "message": "Maintenance authorization required",
+        }),
+        403,
+        headers,
+    )
+
+
+def _refresh_page_auth_error(headers):
+    if not REFRESH_PAGE_PASSWORD:
+        return (
+            json.dumps({
+                "status": "error",
+                "message": "Manual refresh is not configured",
+            }),
+            500,
+            headers,
+        )
+    return (
+        json.dumps({
+            "status": "error",
+            "message": "Invalid refresh password",
         }),
         403,
         headers,
@@ -889,6 +1093,7 @@ def _cache_blob_name(
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
 ):
     dataset = "mw" if int(is_mw) == 1 else "base"
     if stats_page == STATS_PAGE_HOME:
@@ -922,6 +1127,13 @@ def _cache_blob_name(
     if stats_page == STATS_PAGE_RECORDS:
         view_slug = records_view.replace("_", "-")
         return f"{CACHE_PREFIX}/records/{view_slug}/default-{dataset}.json"
+    if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+        view_slug = (
+            MW_ACTION_CARDS_VIEW_GENERAL
+            if mw_action_cards_view == MW_ACTION_CARDS_VIEW_DRAFT
+            else mw_action_cards_view
+        ).replace("_", "-")
+        return f"{CACHE_PREFIX}/mw-action-cards/{view_slug}/default-mw.json"
     if stats_page == STATS_PAGE_COMBINATIONS:
         view_slug = combinations_view.replace("_", "-")
         return f"{CACHE_PREFIX}/combinations/{view_slug}/default-{dataset}.json"
@@ -1014,10 +1226,237 @@ def _write_cache_blob(blob_name, payload, cache_status, compresslevel=6):
             gzip.compress(encoded, compresslevel=compresslevel, mtime=0),
             content_type="application/json",
         )
+        # A successful overwrite must immediately replace any older in-process
+        # copy. Otherwise this instance can serve or repack its pre-refresh
+        # value even though Cloud Storage already contains the new snapshot.
+        _memory_cache_put(blob_name, snapshot)
         return True
     except Exception:
         logging.exception("Failed to write cache blob %s", blob_name)
         return False
+
+
+_REFRESH_PROGRESS_STATE_LOCK = threading.Lock()
+_ACTIVE_REFRESH_PROGRESS = None
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _refresh_status_default():
+    """Build the public status shape, seeding completion from the active pack."""
+    completed_at = None
+    data_version = None
+    if CACHE_BUCKET:
+        try:
+            bucket = storage.Client().bucket(CACHE_BUCKET)
+            pack_blob = bucket.blob(f"{CACHE_PREFIX}/bootstrap/default-pack.json")
+            if pack_blob.exists():
+                pack_blob.reload()
+                completed_at = pack_blob.updated.isoformat() if pack_blob.updated else None
+                raw = pack_blob.download_as_bytes(raw_download=True)
+                if raw.startswith(b"\x1f\x8b"):
+                    raw = gzip.decompress(raw)
+                data_version = json.loads(raw.decode("utf-8")).get("data_version")
+        except Exception:
+            logging.exception("Failed to seed refresh status from the default pack")
+    return {
+        "state": "idle",
+        "run_id": None,
+        "progress_percent": 0,
+        "phase": "Ready",
+        "started_at": None,
+        "updated_at": _utc_now_iso(),
+        "last_completed_at": completed_at,
+        "completed_data_version": data_version,
+    }
+
+
+def _read_refresh_status():
+    if not CACHE_BUCKET:
+        return _refresh_status_default()
+    try:
+        bucket = storage.Client().bucket(CACHE_BUCKET)
+        blob = bucket.blob(REFRESH_STATUS_BLOB)
+        if not blob.exists():
+            payload = _refresh_status_default()
+            _write_refresh_status(payload)
+            return payload
+        payload = json.loads(blob.download_as_text(encoding="utf-8"))
+        return {
+            "state": str(payload.get("state") or "idle"),
+            "run_id": payload.get("run_id"),
+            "progress_percent": max(0, min(100, int(payload.get("progress_percent") or 0))),
+            "phase": str(payload.get("phase") or "Ready"),
+            "started_at": payload.get("started_at"),
+            "updated_at": payload.get("updated_at"),
+            "last_completed_at": payload.get("last_completed_at"),
+            "completed_data_version": payload.get("completed_data_version"),
+        }
+    except Exception:
+        logging.exception("Failed to read refresh status")
+        return _refresh_status_default()
+
+
+def _write_refresh_status(payload):
+    if not CACHE_BUCKET:
+        return False
+    safe_payload = {
+        "state": str(payload.get("state") or "idle"),
+        "run_id": payload.get("run_id"),
+        "progress_percent": max(0, min(100, int(payload.get("progress_percent") or 0))),
+        "phase": str(payload.get("phase") or "Ready"),
+        "started_at": payload.get("started_at"),
+        "updated_at": payload.get("updated_at") or _utc_now_iso(),
+        "last_completed_at": payload.get("last_completed_at"),
+        "completed_data_version": payload.get("completed_data_version"),
+    }
+    try:
+        bucket = storage.Client().bucket(CACHE_BUCKET)
+        blob = bucket.blob(REFRESH_STATUS_BLOB)
+        blob.cache_control = "no-store, max-age=0"
+        blob.upload_from_string(
+            json.dumps(safe_payload, separators=(",", ":")),
+            content_type="application/json; charset=utf-8",
+        )
+        return True
+    except Exception:
+        logging.exception("Failed to publish refresh status")
+        return False
+
+
+def _read_refresh_lock():
+    if not CACHE_BUCKET:
+        return None
+    try:
+        blob = storage.Client().bucket(CACHE_BUCKET).blob(REFRESH_LOCK_BLOB)
+        if not blob.exists():
+            return None
+        blob.reload()
+        payload = json.loads(blob.download_as_text(encoding="utf-8"))
+        payload["generation"] = blob.generation
+        return payload
+    except Exception:
+        logging.exception("Failed to inspect refresh lock")
+        return None
+
+
+def _acquire_refresh_lock(run_id):
+    if not CACHE_BUCKET:
+        return False
+    bucket = storage.Client().bucket(CACHE_BUCKET)
+    blob = bucket.blob(REFRESH_LOCK_BLOB)
+    payload = {"run_id": run_id, "created_at": _utc_now_iso()}
+    try:
+        blob.upload_from_string(
+            json.dumps(payload, separators=(",", ":")),
+            content_type="application/json; charset=utf-8",
+            if_generation_match=0,
+        )
+        return True
+    except PreconditionFailed:
+        existing = _read_refresh_lock()
+        try:
+            created_at = datetime.fromisoformat(str((existing or {}).get("created_at") or ""))
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            created_at = datetime.min.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - created_at <= REFRESH_LOCK_MAX_AGE:
+            return False
+        try:
+            stale_blob = bucket.blob(REFRESH_LOCK_BLOB)
+            stale_blob.delete(if_generation_match=(existing or {}).get("generation"))
+            blob.upload_from_string(
+                json.dumps(payload, separators=(",", ":")),
+                content_type="application/json; charset=utf-8",
+                if_generation_match=0,
+            )
+            return True
+        except Exception:
+            logging.exception("Failed to replace a stale refresh lock")
+            return False
+
+
+def _release_refresh_lock(run_id):
+    if not CACHE_BUCKET:
+        return
+    try:
+        existing = _read_refresh_lock()
+        if not existing or existing.get("run_id") != run_id:
+            return
+        storage.Client().bucket(CACHE_BUCKET).blob(REFRESH_LOCK_BLOB).delete(
+            if_generation_match=existing.get("generation")
+        )
+    except Exception:
+        logging.exception("Failed to release refresh lock")
+
+
+class _RefreshProgress:
+    """Persist monotonic, sanitized progress for scheduled and manual refreshes."""
+
+    def __init__(self, run_id):
+        previous = _read_refresh_status()
+        self.run_id = run_id
+        self.last_completed_at = previous.get("last_completed_at")
+        self.completed_data_version = previous.get("completed_data_version")
+        self.percent = 0
+        self.snapshot_count = 0
+        self.lock = threading.Lock()
+        self.started_at = _utc_now_iso()
+        self._publish("running", 0, "Starting refresh")
+
+    def _publish(self, state, percent, phase, completed_at=None, data_version=None):
+        self.percent = max(self.percent, max(0, min(100, int(percent))))
+        if completed_at:
+            self.last_completed_at = completed_at
+        if data_version:
+            self.completed_data_version = data_version
+        _write_refresh_status({
+            "state": state,
+            "run_id": self.run_id,
+            "progress_percent": self.percent,
+            "phase": phase,
+            "started_at": self.started_at,
+            "updated_at": _utc_now_iso(),
+            "last_completed_at": self.last_completed_at,
+            "completed_data_version": self.completed_data_version,
+        })
+
+    def report(self, percent, phase):
+        with self.lock:
+            self._publish("running", percent, phase)
+
+    def prepared(self, completed, total, label):
+        percent = 4 + round((max(0, completed) / max(1, total)) * 41)
+        self.report(percent, f"Preparing data: {label}")
+
+    def snapshot_completed(self):
+        with self.lock:
+            self.snapshot_count += 1
+            percent = 50 + round(min(1, self.snapshot_count / 64) * 42)
+            self._publish(
+                "running",
+                percent,
+                f"Generating snapshots ({self.snapshot_count})",
+            )
+
+    def complete(self, data_version):
+        with self.lock:
+            completed_at = _utc_now_iso()
+            self._publish("succeeded", 100, "Refresh complete", completed_at, data_version)
+
+    def fail(self):
+        with self.lock:
+            self._publish("failed", self.percent, "Refresh failed")
+
+
+def _active_refresh_snapshot_completed():
+    with _REFRESH_PROGRESS_STATE_LOCK:
+        progress = _ACTIVE_REFRESH_PROGRESS
+    if progress is not None:
+        progress.snapshot_completed()
 
 
 def _enqueue_cache_blob_write(blob_name, payload, cache_status, compresslevel=6):
@@ -1519,7 +1958,9 @@ def _records_sheet_common(raw, row_number, view):
 
 def _parse_records_fastest_sheet(source_text):
     reader = csv.DictReader(io.StringIO(source_text))
-    required = {"Turns", "Player", "Score", "Map", "ID", "Date", "EPT", "Mode"}
+    # Games to add owns only the manually extrapolated record values. Dataset,
+    # map, date, and all filter metadata deliberately come from Full Sample.
+    required = {"Turns", "Player", "Score", "ID", "EPT"}
     if not required.issubset(set(reader.fieldnames or [])):
         missing = sorted(required - set(reader.fieldnames or []))
         raise ValueError(f"Fastest Games sheet is missing columns: {', '.join(missing)}")
@@ -1528,8 +1969,17 @@ def _parse_records_fastest_sheet(source_text):
     for row_number, raw in enumerate(reader, start=2):
         if not any(str(value or "").strip() for value in raw.values()):
             continue
-        item = _records_sheet_common(raw, row_number, RECORDS_VIEW_FASTEST_GAMES)
-        item.update({
+        player = str(raw.get("Player") or "").strip()
+        table_id = str(raw.get("ID") or "").strip()
+        if not player:
+            raise ValueError(f"Fastest Games row {row_number} has a blank Player")
+        if not table_id.isdigit():
+            raise ValueError(f"Fastest Games row {row_number} has invalid ID: {table_id!r}")
+        item = {
+            "record_view": RECORDS_VIEW_FASTEST_GAMES,
+            "source_row": row_number,
+            "player": player,
+            "table_id": table_id,
             "turns": _records_sheet_int(raw.get("Turns"), "Turns", row_number),
             "score": _records_sheet_int(raw.get("Score"), "Score", row_number),
             "ept": _records_sheet_int(raw.get("EPT"), "EPT", row_number),
@@ -1539,12 +1989,12 @@ def _parse_records_fastest_sheet(source_text):
             "move": None,
             "actions": None,
             "result_code": None,
-        })
+        }
         if item["turns"] < 1 or item["turns"] > 23:
             raise ValueError(f"Fastest Games row {row_number} must have Turns between 1 and 23")
-        key = (item["is_mw"], item["table_id"], item["player"])
+        key = (item["table_id"], item["player"].casefold())
         if key in seen:
-            raise ValueError(f"Fastest Games sheet has duplicate Mode/ID/Player at row {row_number}")
+            raise ValueError(f"Fastest Games sheet has duplicate ID/Player at row {row_number}")
         seen.add(key)
         rows.append(item)
     if not rows:
@@ -1629,6 +2079,8 @@ def _parse_records_elo_leaderboard_sheet(source_text):
     expected_headers = {
         1: {"nationality", "country"},
         2: {"bga name", "player"},
+        # Spreadsheet Peak Elo is an external historical leaderboard metric,
+        # not the deprecated Full Sample `elo` field.
         5: {"peak elo"},
         7: {"peak arena"},
     }
@@ -1791,7 +2243,9 @@ def _read_data_version():
         blob = bucket.blob(_data_version_blob_name())
         if not blob.exists():
             return _filter_cache_day()
-        payload = json.loads(blob.download_as_text(encoding="utf-8"))
+        blob.reload()
+        raw = blob.download_as_bytes(if_generation_match=blob.generation)
+        payload = json.loads(raw.decode("utf-8"))
         return str(payload.get("version") or _filter_cache_day())
     except Exception:
         logging.exception("Failed to read data-version marker")
@@ -1812,6 +2266,7 @@ def _write_data_version(prepared_payload):
     try:
         bucket = storage.Client().bucket(CACHE_BUCKET)
         blob = bucket.blob(_data_version_blob_name())
+        blob.cache_control = "no-store, max-age=0"
         blob.upload_from_string(
             json.dumps(payload, default=_json_default),
             content_type="application/json",
@@ -1837,12 +2292,14 @@ def _read_cached_snapshot(
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
 ):
     return _read_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view,
+            mw_action_cards_view
         ),
         "hit",
     )
@@ -1864,12 +2321,14 @@ def _write_cached_snapshot(
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
 ):
     return _write_cache_blob(
         _cache_blob_name(
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view,
+            mw_action_cards_view
         ),
         payload,
         "refreshed",
@@ -1949,7 +2408,31 @@ def _default_snapshot_pack_blob_names():
             f"{CACHE_PREFIX}/combinations/card-round/default-{dataset}.json",
             f"{CACHE_PREFIX}/combinations/card-endgame/default-{dataset}.json",
         ])
+    names.extend([
+        f"{CACHE_PREFIX}/combinations/card-action-card/default-mw.json",
+        f"{CACHE_PREFIX}/mw-action-cards/general/default-mw.json",
+        f"{CACHE_PREFIX}/mw-action-cards/by-map/default-mw.json",
+        f"{CACHE_PREFIX}/mw-action-cards/synergies/default-mw.json",
+    ])
     return names
+
+
+def _validate_snapshot_pack_member(blob_name, snapshot, data_version):
+    """Reject mixed prepared-data or Synergy-CI versions before publication."""
+    version_neutral = "/records/elo-leaderboard/" in blob_name
+    snapshot_version = snapshot.get("data_version")
+    if not version_neutral and snapshot_version != data_version:
+        raise RuntimeError(
+            "Default snapshot data-version mismatch: "
+            f"{blob_name} has {snapshot_version!r}, expected {data_version!r}"
+        )
+    if snapshot.get("synergy_ci_status") == "complete":
+        ci_version = snapshot.get("synergy_ci_data_version")
+        if ci_version != snapshot_version:
+            raise RuntimeError(
+                "Synergy CI data-version mismatch: "
+                f"{blob_name} has {ci_version!r}, expected {snapshot_version!r}"
+            )
 
 
 def _write_default_snapshot_pack(data_version):
@@ -1963,10 +2446,25 @@ def _write_default_snapshot_pack(data_version):
             blob = bucket.blob(blob_name)
             if not blob.exists():
                 raise RuntimeError(f"Default snapshot is missing: {blob_name}")
-            raw = blob.download_as_bytes(raw_download=True)
+            # Snapshot objects are intentionally browser-cacheable. A plain
+            # media download immediately after overwrite can therefore receive
+            # the prior cached body even though object metadata already points
+            # at the new generation. Pin the read to the freshly reloaded
+            # generation so atomic validation always inspects the exact object
+            # that will back this pack.
+            blob.reload()
+            raw = blob.download_as_bytes(
+                raw_download=True,
+                if_generation_match=blob.generation,
+            )
             if raw.startswith(b"\x1f\x8b"):
                 raw = gzip.decompress(raw)
-            snapshots[blob_name] = json.loads(raw.decode("utf-8"))
+            snapshot = json.loads(raw.decode("utf-8"))
+            # Every BigQuery-derived asset in an atomic pack must describe the
+            # same prepared-data publication. The sheet-only Elo leaderboard is
+            # intentionally version-neutral and is the sole exemption.
+            _validate_snapshot_pack_member(blob_name, snapshot, data_version)
+            snapshots[blob_name] = snapshot
         payload = {
             "status": "ok",
             "schema_version": DEFAULT_PACK_SCHEMA_VERSION,
@@ -2053,10 +2551,24 @@ def _is_default_cache_request(
     players_players=None,
     last_x_games=None,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
     records_player=None,
     records_arena_only=False,
     records_tournament_only=False,
 ):
+    if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+        return (
+            int(is_mw) == 1
+            and set(selected_maps) == set(VALID_MAPS)
+            and player_elo_min == 300
+            and player_elo_max is None
+            and opponent_elo_min == 300
+            and opponent_elo_max is None
+            and date_from == DEFAULT_DATE_FROM
+            and date_to is None
+            and not completed_only
+            and not round_filter_active
+        )
     if stats_page == STATS_PAGE_MAPS and maps_view == MAPS_VIEW_TOURNAMENT_H2H:
         return int(is_mw) in (0, 1)
     if stats_page == STATS_PAGE_HOME:
@@ -2159,21 +2671,16 @@ def _refresh_prepared_logs_table(arena_metadata=None):
       f.player,
       CAST(f.is_mw AS INT64) AS is_mw,
       f.Map,
-      CAST(f.game_ended_at AS DATE) AS game_date,
+      f.game_date,
       f.concede,
-      MAX(IF(COALESCE(f.concede, 0) != 0, 1, 0))
-        OVER (PARTITION BY f.table_id) AS table_conceded,
-      COALESCE(SAFE_CAST(f.end_game_triggered AS BOOL), FALSE)
-        AS end_game_triggered,
-      f.elo,
-      f.opponent_elo,
+      f.table_conceded,
+      f.end_game_triggered,
+      f.pre_match_elo,
+      f.opponent_pre_match_elo,
       f.elo_delta,
-      {arena_season_case} AS arena_season,
-      EXISTS (
-        SELECT 1
-        FROM `{TOURNAMENT_TABLES_CACHE_TABLE}` t
-        WHERE CAST(t.table_id AS STRING) = CAST(f.table_id AS STRING)
-      ) AS is_tournament,
+      f.arena_season,
+      f.is_tournament,
+      f.starting_position,
       l.played_animals,
       l.played_sponsors,
       l.played_projects,
@@ -2212,7 +2719,7 @@ def _refresh_prepared_logs_table(arena_metadata=None):
       l.chosen_5cp_bonus,
       l.chosen_8cp_bonus,
       l.endgame_from_sponsors
-    FROM `freestyle-190711.ark_nova.all_games_stat` f
+    FROM `{PREPARED_FULL_STATS_TABLE}` f
     JOIN valid_log_ids v ON f.table_id = v.table_id
     JOIN `freestyle-190711.ark_nova.game_log_stat_v2` l
       ON f.table_id = l.table_id AND f.player = l.player
@@ -2243,7 +2750,14 @@ def _refresh_prepared_logs_table(arena_metadata=None):
 
 
 def _refresh_prepared_full_stats_table(arena_metadata=None):
-    """Materialize Full Sample with reusable table-level filter classifications."""
+    """Materialize Full Sample with canonical pre-game Elo semantics.
+
+    The source's legacy ``elo`` and ``opponent_elo`` fields represent mixed
+    rating moments and must never enter dashboard statistics. Player Elo is
+    the source ``pre_match_elo``. Opponent Elo is derived from the unique
+    opposing player row's ``pre_match_elo``; malformed tables deliberately
+    receive NULL rather than falling back to legacy metadata.
+    """
     arena_metadata = arena_metadata or _load_arena_metadata()
     arena_season_case = _arena_season_case_sql(arena_metadata)
     query = f"""
@@ -2251,10 +2765,56 @@ def _refresh_prepared_full_stats_table(arena_metadata=None):
     PARTITION BY game_date
     CLUSTER BY is_mw, Map, arena_season, is_tournament
     AS
+    WITH source_rows AS (
+      SELECT
+        f.* EXCEPT(elo, opponent_elo, end_game_triggered),
+        SAFE_CAST(f.pre_match_elo AS FLOAT64) AS canonical_pre_match_elo,
+        SAFE_CAST(f.post_match_elo AS FLOAT64) AS canonical_post_match_elo,
+        COALESCE(SAFE_CAST(f.end_game_triggered AS BOOL), FALSE)
+          AS canonical_end_game_triggered
+      FROM `freestyle-190711.ark_nova.all_games_stat` f
+    ),
+    player_ratings AS (
+      SELECT
+        table_id,
+        CAST(player AS STRING) AS player,
+        IF(
+          COUNT(DISTINCT canonical_pre_match_elo) = 1,
+          ANY_VALUE(canonical_pre_match_elo),
+          CAST(NULL AS FLOAT64)
+        ) AS pre_match_elo
+      FROM source_rows
+      GROUP BY table_id, player
+    ),
+    opponent_ratings AS (
+      SELECT
+        me.table_id,
+        me.player,
+        IF(
+          COUNT(DISTINCT opponent.player) = 1,
+          ANY_VALUE(opponent.pre_match_elo),
+          CAST(NULL AS FLOAT64)
+        ) AS opponent_pre_match_elo
+      FROM player_ratings me
+      LEFT JOIN player_ratings opponent
+        ON me.table_id = opponent.table_id
+       AND me.player != opponent.player
+      GROUP BY me.table_id, me.player
+    )
     SELECT
-      f.* EXCEPT(end_game_triggered),
-      COALESCE(SAFE_CAST(f.end_game_triggered AS BOOL), FALSE)
-        AS end_game_triggered,
+      f.* EXCEPT(
+        pre_match_elo, post_match_elo, canonical_pre_match_elo,
+        canonical_post_match_elo, canonical_end_game_triggered
+      ),
+      f.canonical_pre_match_elo AS pre_match_elo,
+      f.canonical_post_match_elo AS post_match_elo,
+      opponent.opponent_pre_match_elo,
+      f.canonical_end_game_triggered AS end_game_triggered,
+      CASE LOWER(TRIM(CAST(f.Starting_position_in_first_round AS STRING)))
+        WHEN 'first player' THEN 'First player'
+        WHEN 'second player' THEN 'Second player'
+        ELSE NULL
+      END AS starting_position,
       CAST(f.game_ended_at AS DATE) AS game_date,
       MAX(IF(COALESCE(f.concede, 0) != 0, 1, 0))
         OVER (PARTITION BY f.table_id) AS table_conceded,
@@ -2264,7 +2824,10 @@ def _refresh_prepared_full_stats_table(arena_metadata=None):
         FROM `{TOURNAMENT_TABLES_CACHE_TABLE}` t
         WHERE CAST(t.table_id AS STRING) = CAST(f.table_id AS STRING)
       ) AS is_tournament
-    FROM `freestyle-190711.ark_nova.all_games_stat` f
+    FROM source_rows f
+    LEFT JOIN opponent_ratings opponent
+      ON f.table_id = opponent.table_id
+     AND CAST(f.player AS STRING) = opponent.player
     """
 
     started_at = time.perf_counter()
@@ -2292,7 +2855,12 @@ def _refresh_prepared_full_stats_table(arena_metadata=None):
 
 
 def _enrich_and_write_records_manual_table(source_payload):
-    """Validate sheet identities against Full Sample, then atomically replace derived rows."""
+    """Enrich manual Records rows, then atomically replace the derived table.
+
+    Fastest owns only Turns, Player, Score, ID, and EPT; every other field is
+    sourced from the matching Full Sample player row. Biggest Turns retains its
+    separate sheet-owned schema and its existing identity validation.
+    """
     source_rows = [
         dict(item)
         for key in ("fastest_games", "biggest_turns")
@@ -2310,8 +2878,9 @@ def _enrich_and_write_records_manual_table(source_payload):
         CAST(is_mw AS INT64) AS is_mw,
         SAFE_CAST(game_ended_at AS TIMESTAMP) AS game_ended_at,
         SAFE_CAST(arena_rating_delta AS FLOAT64) AS arena_rating_delta,
-        SAFE_CAST(opponent_elo AS FLOAT64) AS opponent_elo,
-        SAFE_CAST(elo AS FLOAT64) AS elo
+        SAFE_CAST(opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
+        SAFE_CAST(pre_match_elo AS FLOAT64) AS pre_match_elo,
+        CAST(starting_position AS STRING) AS starting_position
       FROM `{PREPARED_FULL_STATS_TABLE}`
       WHERE CAST(table_id AS STRING) IN UNNEST(@table_ids)
     """
@@ -2323,50 +2892,103 @@ def _enrich_and_write_records_manual_table(source_payload):
         location=BIGQUERY_LOCATION,
     )
     metadata = {}
+    table_metadata = {}
     for row in metadata_job.result():
         key = (str(row.table_id), str(row.player))
         if key in metadata:
             raise ValueError(f"Full Sample contains duplicate Records identity {key[0]}/{key[1]}")
         metadata[key] = row
+        table_metadata.setdefault(str(row.table_id), []).append(row)
 
+    map_by_name = {item["full"]: item for item in ALL_MAPS_FOR_METRICS}
     enriched = []
     for item in source_rows:
         key = (item["table_id"], item["player"])
         match = metadata.get(key)
-        # The Fastest sheet exists specifically for early concessions that the
-        # source scraper can omit entirely.  Validate every upstream match, but
-        # retain genuinely source-absent rows with null enrichment metadata so
-        # their sheet-native player/map/date/dataset filters still work.
-        if match is not None and int(match.is_mw) != int(item["is_mw"]):
-            raise ValueError(
-                f"Records sheet row {item['source_row']} Mode {item['mode']} "
-                f"does not match Full Sample for ID {item['table_id']}"
-            )
-        if match is not None and str(match.map_name) != item["map_name"]:
-            raise ValueError(
-                f"Records sheet row {item['source_row']} Map {item['map_code']} "
-                f"does not match Full Sample map {match.map_name!r}"
-            )
-        # Date is a manually maintained Records value and is displayed exactly
-        # as entered in the sheet.  It is not an identity field: UTC/local date
-        # boundaries and historical hand-entered dates can differ from the
-        # source timestamp.  The exact timestamp is still retained when present
-        # for backend metadata filters.
-        source_timestamp = match.game_ended_at if match is not None else None
+        is_fastest = item["record_view"] == RECORDS_VIEW_FASTEST_GAMES
+        if is_fastest:
+            table_matches = table_metadata.get(item["table_id"], [])
+            if not table_matches:
+                raise ValueError(
+                    f"Fastest Games row {item['source_row']} ID {item['table_id']} "
+                    "does not exist in Full Sample"
+                )
+            # Player is sheet-owned and may intentionally differ from the
+            # source spelling. Prefer exact per-player enrichment, but derive
+            # display/filter identity from the table when no exact row exists.
+            metadata_rows = [match] if match is not None else table_matches
+            map_names = {str(row.map_name) for row in metadata_rows if row.map_name is not None}
+            mode_values = {
+                int(row.is_mw)
+                for row in metadata_rows
+                if row.is_mw is not None and int(row.is_mw) in (0, 1)
+            }
+            timestamps = {
+                row.game_ended_at
+                for row in metadata_rows
+                if row.game_ended_at is not None
+            }
+            if len(map_names) != 1:
+                raise ValueError(
+                    f"Fastest Games row {item['source_row']} ID {item['table_id']} "
+                    "has no unambiguous Full Sample map"
+                )
+            if len(mode_values) != 1:
+                raise ValueError(
+                    f"Fastest Games row {item['source_row']} ID {item['table_id']} "
+                    "has no unambiguous Full Sample mode"
+                )
+            if len(timestamps) != 1:
+                raise ValueError(
+                    f"Fastest Games row {item['source_row']} ID {item['table_id']} "
+                    "has no unambiguous Full Sample end timestamp"
+                )
+            source_map_name = next(iter(map_names))
+            map_item = map_by_name.get(source_map_name)
+            if map_item is None:
+                raise ValueError(
+                    f"Fastest Games row {item['source_row']} ID {item['table_id']} "
+                    f"has unsupported Full Sample map {source_map_name!r}"
+                )
+            source_timestamp = next(iter(timestamps))
+            is_mw = next(iter(mode_values))
+            mode = "MW" if is_mw == 1 else "Base"
+            map_name = map_item["full"]
+            map_code = map_item["code"]
+            game_date = source_timestamp.date().isoformat()
+        else:
+            # Biggest Turns remains sheet-owned. Exact upstream matches must
+            # agree with its maintained dataset and map identity.
+            if match is not None and int(match.is_mw) != int(item["is_mw"]):
+                raise ValueError(
+                    f"Biggest Turns row {item['source_row']} Mode {item['mode']} "
+                    f"does not match Full Sample for ID {item['table_id']}"
+                )
+            if match is not None and str(match.map_name) != item["map_name"]:
+                raise ValueError(
+                    f"Biggest Turns row {item['source_row']} Map {item['map_code']} "
+                    f"does not match Full Sample map {match.map_name!r}"
+                )
+            source_timestamp = match.game_ended_at if match is not None else None
+            is_mw = int(item["is_mw"])
+            mode = item["mode"]
+            map_name = item["map_name"]
+            map_code = item["map_code"]
+            game_date = item["game_date"]
         enriched.append({
             "record_view": item["record_view"],
             "source_row": int(item["source_row"]),
-            "is_mw": int(item["is_mw"]),
-            "mode": item["mode"],
+            "is_mw": is_mw,
+            "mode": mode,
             "player": item["player"],
             "table_id": item["table_id"],
-            "Map": item["map_name"],
-            "map_code": item["map_code"],
-            "game_date": item["game_date"],
+            "Map": map_name,
+            "map_code": map_code,
+            "game_date": game_date,
             "game_ended_at": (
                 source_timestamp.isoformat()
                 if source_timestamp is not None
-                else f"{item['game_date']}T00:00:00+00:00"
+                else f"{game_date}T00:00:00+00:00"
             ),
             "turns": item.get("turns"),
             "score": item.get("score"),
@@ -2377,10 +2999,30 @@ def _enrich_and_write_records_manual_table(source_payload):
             "move": item.get("move"),
             "actions": item.get("actions"),
             "result_code": item.get("result_code"),
-            "opponent_elo": match.opponent_elo if match is not None else None,
-            "elo": match.elo if match is not None else None,
-            "arena_rating_delta": match.arena_rating_delta if match is not None else None,
-            "source_enriched": match is not None,
+            "opponent_pre_match_elo": match.opponent_pre_match_elo if match is not None else None,
+            "pre_match_elo": match.pre_match_elo if match is not None else None,
+            "starting_position": match.starting_position if match is not None else None,
+            "arena_rating_delta": (
+                match.arena_rating_delta
+                if match is not None
+                else next(
+                    (
+                        row.arena_rating_delta
+                        for row in table_metadata.get(item["table_id"], [])
+                        if row.arena_rating_delta is not None
+                    ),
+                    None,
+                )
+                if is_fastest
+                else None
+            ),
+            "source_enriched": (
+                match is not None
+                or (
+                    is_fastest
+                    and bool(table_metadata.get(item["table_id"]))
+                )
+            ),
         })
 
     schema = [
@@ -2403,8 +3045,9 @@ def _enrich_and_write_records_manual_table(source_payload):
         bigquery.SchemaField("move", "INT64"),
         bigquery.SchemaField("actions", "INT64"),
         bigquery.SchemaField("result_code", "STRING"),
-        bigquery.SchemaField("opponent_elo", "FLOAT64"),
-        bigquery.SchemaField("elo", "FLOAT64"),
+        bigquery.SchemaField("starting_position", "STRING"),
+        bigquery.SchemaField("opponent_pre_match_elo", "FLOAT64"),
+        bigquery.SchemaField("pre_match_elo", "FLOAT64"),
         bigquery.SchemaField("arena_rating_delta", "FLOAT64"),
         bigquery.SchemaField("source_enriched", "BOOLEAN", mode="REQUIRED"),
     ]
@@ -2509,7 +3152,7 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
     -- The merged analytical identity leads the clustering order because one
     -- selected BGA name may resolve to several historical accounts. Dataset,
     -- map, and opponent Elo still prune the common filtered scans.
-    CLUSTER BY player_identity, is_mw, Map, opponent_elo
+    CLUSTER BY player_identity, is_mw, Map, arena_season
     AS
     WITH player_merge_map AS (
       {merge_players_map}
@@ -2535,11 +3178,9 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
       Map,
       SAFE_CAST(game_ended_at AS TIMESTAMP) AS game_ended_at,
       game_date,
-      SAFE_CAST(elo AS FLOAT64) AS elo,
-      -- Opponent Elo is filtered with integer request bounds. BigQuery cannot
-      -- cluster FLOAT64 columns, so the derived Players table stores this
-      -- filter-only field as INT64 without changing the read-only source.
-      SAFE_CAST(opponent_elo AS INT64) AS opponent_elo,
+      SAFE_CAST(pre_match_elo AS FLOAT64) AS pre_match_elo,
+      SAFE_CAST(elo_delta AS FLOAT64) AS elo_delta,
+      SAFE_CAST(opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
       CAST(COALESCE(table_conceded, 0) AS INT64) AS table_conceded,
       COALESCE(SAFE_CAST(end_game_triggered AS BOOL), FALSE)
         AS end_game_triggered,
@@ -2554,6 +3195,7 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
       SAFE_CAST(post_match_arena_rating AS FLOAT64) AS post_match_arena_rating,
       {arena_season_case} AS arena_season,
       COALESCE(is_tournament, FALSE) AS is_tournament,
+      starting_position,
       {metric_selects},
       {money_selects}
     FROM tagged f
@@ -2580,7 +3222,7 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
     recent_query = f"""
     CREATE OR REPLACE TABLE `{PREPARED_PLAYERS_RECENT_TABLE}`
     PARTITION BY RANGE_BUCKET(identity_bucket, GENERATE_ARRAY(0, 1024, 1))
-    CLUSTER BY player_identity, is_mw, Map, opponent_elo
+    CLUSTER BY player_identity, is_mw, Map, arena_season
     AS
     SELECT
       MOD(
@@ -2622,21 +3264,22 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
       is_mw,
       Map,
       game_date,
-      opponent_elo,
+      opponent_pre_match_elo,
       arena_season,
       is_tournament,
+      starting_position,
       0 AS table_conceded,
       TRUE AS end_game_triggered,
       is_winner,
-      elo >= 500 AS is_expert,
-      elo >= 700 AS is_master,
+      pre_match_elo >= 500 AS is_expert,
+      pre_match_elo >= 700 AS is_master,
       COUNT(*) AS observation_count,
       {rollup_moments}
     FROM `{PREPARED_PLAYERS_TABLE}`
     WHERE {_completed_game_sql()}
     GROUP BY
-      is_mw, Map, game_date, opponent_elo, arena_season, is_tournament,
-      is_winner, elo >= 500, elo >= 700
+      is_mw, Map, game_date, opponent_pre_match_elo, arena_season, is_tournament, starting_position,
+      is_winner, pre_match_elo >= 500, pre_match_elo >= 700
     """
     client.query(
         f"DROP TABLE IF EXISTS `{PREPARED_PLAYERS_BASELINE_TABLE}`",
@@ -2655,9 +3298,10 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
       is_mw,
       Map,
       game_date,
-      opponent_elo,
+      opponent_pre_match_elo,
       arena_season,
       is_tournament,
+      starting_position,
       0 AS table_conceded,
       TRUE AS end_game_triggered,
       COUNT(*) AS observation_count,
@@ -2665,8 +3309,8 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
     FROM `{PREPARED_PLAYERS_TABLE}`
     WHERE {_completed_game_sql()}
     GROUP BY
-      player_identity, player, is_mw, Map, game_date, opponent_elo,
-      arena_season, is_tournament
+      player_identity, player, is_mw, Map, game_date, opponent_pre_match_elo,
+      arena_season, is_tournament, starting_position
     """
     client.query(
         f"DROP TABLE IF EXISTS `{PREPARED_PLAYERS_IDENTITY_ROLLUP_TABLE}`",
@@ -2676,6 +3320,39 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
         identity_rollup_query, location=BIGQUERY_LOCATION
     )
     identity_rollup_job.result()
+    # Performance by map defaults to every qualifying game, unlike General
+    # and Comparison. Keep completion as a dimension so its optional toggle
+    # remains exact without scanning the player-game table.
+    map_rollup_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_PLAYERS_MAP_ROLLUP_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY player_identity, is_mw, Map, arena_season
+    AS
+    SELECT
+      player_identity,
+      is_mw,
+      Map,
+      game_date,
+      opponent_pre_match_elo,
+      arena_season,
+      is_tournament,
+      starting_position,
+      table_conceded,
+      end_game_triggered,
+      COUNT(elo_delta) AS delta_count,
+      SUM(elo_delta) AS delta_sum,
+      SUM(POW(elo_delta, 2)) AS delta_sum_squares
+    FROM `{PREPARED_PLAYERS_TABLE}`
+    GROUP BY
+      player_identity, is_mw, Map, game_date, opponent_pre_match_elo,
+      arena_season, is_tournament, starting_position, table_conceded, end_game_triggered
+    """
+    client.query(
+        f"DROP TABLE IF EXISTS `{PREPARED_PLAYERS_MAP_ROLLUP_TABLE}`",
+        location=BIGQUERY_LOCATION,
+    ).result()
+    map_rollup_job = client.query(map_rollup_query, location=BIGQUERY_LOCATION)
+    map_rollup_job.result()
     default_selects = ",\n      ".join(
         [f"AVG({key}) AS {key}" for key in ordinary_keys]
         + [f"AVG({key}_raw) AS {key}_raw" for key in money_fields]
@@ -2689,7 +3366,11 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
       SELECT *
       FROM `{PREPARED_PLAYERS_TABLE}`
       WHERE {_completed_game_sql()}
-        AND opponent_elo >= 0
+        -- Elo NULLs are unknown metadata, not zero-valued observations. The
+        -- dashboard treats them as zero only while evaluating range filters,
+        -- so the unrestricted Players default retains those games without
+        -- altering metric averages or expert/master classifications.
+        AND COALESCE(opponent_pre_match_elo, 0) >= 0
         AND Map IN ({all_maps_sql})
     ),
     identity_aggregates AS (
@@ -2747,6 +3428,8 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
         "baseline_job_id": baseline_job.job_id,
         "identity_rollup_table": PREPARED_PLAYERS_IDENTITY_ROLLUP_TABLE,
         "identity_rollup_job_id": identity_rollup_job.job_id,
+        "map_performance_rollup_table": PREPARED_PLAYERS_MAP_ROLLUP_TABLE,
+        "map_performance_rollup_job_id": map_rollup_job.job_id,
         "merge_groups": len(merge_metadata.get("groups", [])),
         "merge_source_sha256": merge_metadata.get("source_sha256"),
     }
@@ -2763,8 +3446,8 @@ def _refresh_prepared_card_plays_table():
       SELECT
         table_id, player, is_mw, Map, game_date, table_conceded,
         end_game_triggered,
-        arena_season, is_tournament,
-        elo, opponent_elo, elo_delta,
+        arena_season, is_tournament, starting_position,
+        pre_match_elo, opponent_pre_match_elo, elo_delta,
         pa.animal AS card_name,
         'animal' AS card_type,
         SAFE_CAST(pa.round AS INT64) AS played_round
@@ -2777,8 +3460,8 @@ def _refresh_prepared_card_plays_table():
       SELECT
         table_id, player, is_mw, Map, game_date, table_conceded,
         end_game_triggered,
-        arena_season, is_tournament,
-        elo, opponent_elo, elo_delta,
+        arena_season, is_tournament, starting_position,
+        pre_match_elo, opponent_pre_match_elo, elo_delta,
         ps.sponsor AS card_name,
         'sponsor' AS card_type,
         SAFE_CAST(ps.round AS INT64) AS played_round
@@ -2791,8 +3474,8 @@ def _refresh_prepared_card_plays_table():
       SELECT
         table_id, player, is_mw, Map, game_date, table_conceded,
         end_game_triggered,
-        arena_season, is_tournament,
-        elo, opponent_elo, elo_delta,
+        arena_season, is_tournament, starting_position,
+        pre_match_elo, opponent_pre_match_elo, elo_delta,
         pp.project AS card_name,
         'project' AS card_type,
         SAFE_CAST(pp.round AS INT64) AS played_round
@@ -2832,15 +3515,15 @@ def _refresh_prepared_card_pairs_table():
       SELECT
         table_id, player, is_mw, Map, game_date, table_conceded,
         end_game_triggered,
-        arena_season, is_tournament,
-        elo, opponent_elo, elo_delta, card_name, ANY_VALUE(card_type) AS card_type,
+        arena_season, is_tournament, starting_position,
+        pre_match_elo, opponent_pre_match_elo, elo_delta, card_name, ANY_VALUE(card_type) AS card_type,
         ARRAY_AGG(DISTINCT played_round IGNORE NULLS) AS played_rounds
       FROM `{PREPARED_CARD_PLAYS_TABLE}`
       GROUP BY
         table_id, player, is_mw, Map, game_date, table_conceded,
         end_game_triggered,
-        arena_season, is_tournament,
-        elo, opponent_elo, elo_delta, card_name
+        arena_season, is_tournament, starting_position,
+        pre_match_elo, opponent_pre_match_elo, elo_delta, card_name
     )
     SELECT
       a.table_id,
@@ -2852,8 +3535,9 @@ def _refresh_prepared_card_pairs_table():
       a.end_game_triggered,
       a.arena_season,
       a.is_tournament,
-      a.elo,
-      a.opponent_elo,
+      a.starting_position,
+      a.pre_match_elo,
+      a.opponent_pre_match_elo,
       a.elo_delta,
       a.card_name AS card_1,
       a.card_type AS type_1,
@@ -2903,19 +3587,21 @@ def _refresh_prepared_card_play_aggregates_table():
       end_game_triggered,
       arena_season,
       is_tournament,
-      SAFE_CAST(elo AS INT64) AS elo,
-      SAFE_CAST(opponent_elo AS INT64) AS opponent_elo,
+      starting_position,
+      SAFE_CAST(pre_match_elo AS FLOAT64) AS pre_match_elo,
+      SAFE_CAST(opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
       card_name,
       ANY_VALUE(card_type) AS card_type,
       played_round,
       COUNT(*) AS observation_count,
       COUNT(elo_delta) AS delta_count,
       SUM(SAFE_CAST(elo_delta AS FLOAT64)) AS delta_sum
-    FROM `{PREPARED_CARD_PLAYS_TABLE}`
+    FROM `{PREPARED_CARD_MOMENTS_TABLE}`
+    WHERE moment = 'played'
     GROUP BY
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament,
-      SAFE_CAST(elo AS INT64), SAFE_CAST(opponent_elo AS INT64),
+      arena_season, is_tournament, starting_position,
+      SAFE_CAST(pre_match_elo AS FLOAT64), SAFE_CAST(opponent_pre_match_elo AS FLOAT64),
       card_name, played_round
     """
     started_at = time.perf_counter()
@@ -2952,8 +3638,9 @@ def _refresh_prepared_card_pair_aggregates_table():
       end_game_triggered,
       arena_season,
       is_tournament,
-      SAFE_CAST(elo AS INT64) AS elo,
-      SAFE_CAST(opponent_elo AS INT64) AS opponent_elo,
+      starting_position,
+      SAFE_CAST(pre_match_elo AS FLOAT64) AS pre_match_elo,
+      SAFE_CAST(opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
       card_1,
       ANY_VALUE(type_1) AS type_1,
       card_2,
@@ -2964,13 +3651,13 @@ def _refresh_prepared_card_pair_aggregates_table():
       COUNT(elo_delta) AS delta_count,
       SUM(SAFE_CAST(elo_delta AS FLOAT64)) AS delta_sum,
       SUM(POW(SAFE_CAST(elo_delta AS FLOAT64), 2)) AS delta_sum_squares,
-      COUNT(elo) AS elo_count,
-      SUM(SAFE_CAST(elo AS FLOAT64)) AS elo_sum
+      COUNT(pre_match_elo) AS elo_count,
+      SUM(SAFE_CAST(pre_match_elo AS FLOAT64)) AS elo_sum
     FROM `{PREPARED_CARD_PAIRS_TABLE}`
     GROUP BY
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament,
-      SAFE_CAST(elo AS INT64), SAFE_CAST(opponent_elo AS INT64),
+      arena_season, is_tournament, starting_position,
+      SAFE_CAST(pre_match_elo AS FLOAT64), SAFE_CAST(opponent_pre_match_elo AS FLOAT64),
       card_1, card_2, played_rounds_1_json, played_rounds_2_json
     """
     started_at = time.perf_counter()
@@ -3001,7 +3688,7 @@ def _refresh_prepared_card_pair_scope_aggregates_table():
     AS
     SELECT
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament, elo, opponent_elo,
+      arena_season, is_tournament, starting_position, pre_match_elo, opponent_pre_match_elo,
       card_1, ANY_VALUE(type_1) AS type_1,
       card_2, ANY_VALUE(type_2) AS type_2,
       SUM(observation_count) AS observation_count,
@@ -3013,7 +3700,7 @@ def _refresh_prepared_card_pair_scope_aggregates_table():
     FROM `{PREPARED_CARD_PAIR_AGGREGATES_TABLE}`
     GROUP BY
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament, elo, opponent_elo, card_1, card_2
+      arena_season, is_tournament, starting_position, pre_match_elo, opponent_pre_match_elo, card_1, card_2
     """
     started_at = time.perf_counter()
     client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
@@ -3034,7 +3721,7 @@ def _refresh_prepared_home_observations_table():
     query = f"""
     CREATE OR REPLACE TABLE `{PREPARED_HOME_OBSERVATIONS_TABLE}`
     PARTITION BY game_date
-    CLUSTER BY is_mw, Map, elo, opponent_elo
+    CLUSTER BY is_mw, Map, arena_season, is_tournament
     AS
     WITH log_flags AS (
       SELECT
@@ -3074,8 +3761,9 @@ def _refresh_prepared_home_observations_table():
     )
     SELECT
       f.is_mw, f.Map, f.game_date, f.table_conceded, f.end_game_triggered,
-      f.arena_season, f.is_tournament, f.table_id, f.player,
-      f.elo, f.opponent_elo,
+      f.arena_season, f.is_tournament, f.table_id, f.player, f.starting_position,
+      f.pre_match_elo,
+      SAFE_CAST(f.opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
       COALESCE(SAFE_CAST(f.Played_animals AS INT64), 0) AS animals_played,
       COALESCE(SAFE_CAST(f.Played_sponsors AS INT64), 0) AS sponsors_played,
       COALESCE(SAFE_CAST(f.Conservation_project_association_tasks AS INT64), 0)
@@ -3101,6 +3789,13 @@ def _refresh_prepared_home_observations_table():
     """
     started_at = time.perf_counter()
     client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    # The canonical Elo migration removes FLOAT64 rating fields from the
+    # clustering specification. BigQuery cannot alter clustering through
+    # CREATE OR REPLACE, so explicitly replace this backend-owned derivative.
+    client.query(
+        f"DROP TABLE IF EXISTS `{PREPARED_HOME_OBSERVATIONS_TABLE}`",
+        location=BIGQUERY_LOCATION,
+    ).result()
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -3132,7 +3827,7 @@ def _refresh_prepared_endgame_events_table():
       WHERE {_completed_game_sql()}
     ),
     players AS (
-      SELECT DISTINCT table_id, player FROM completed
+      SELECT DISTINCT table_id, player, starting_position FROM completed
     ),
     dealt AS (
       SELECT
@@ -3184,13 +3879,13 @@ def _refresh_prepared_endgame_events_table():
       GROUP BY table_id
     ),
     corrected_dealt AS (
-      SELECT d.* EXCEPT(player), d.player
+      SELECT d.* EXCEPT(player, starting_position), d.player, d.starting_position
       FROM dealt d
       WHERE d.is_mw = 0
 
       UNION ALL
 
-      SELECT d.* EXCEPT(player), p.player
+      SELECT d.* EXCEPT(player, starting_position), p.player, p.starting_position
       FROM dealt d
       JOIN orientation o USING(table_id)
       JOIN players p
@@ -3215,23 +3910,24 @@ def _refresh_prepared_endgame_events_table():
       SELECT
         is_mw, Map, game_date, table_conceded, end_game_triggered,
         arena_season, is_tournament, table_id, dealt_row_player AS player,
-        elo, opponent_elo, elo_delta, card_name,
+        starting_position,
+        pre_match_elo, opponent_pre_match_elo, elo_delta, card_name,
         'dealt' AS event_role, CAST(NULL AS FLOAT64) AS cp
       FROM dealt
     ),
     dealt_delta_events AS (
       SELECT
         is_mw, Map, game_date, table_conceded, end_game_triggered,
-        arena_season, is_tournament, table_id, player,
-        elo, opponent_elo, elo_delta, card_name,
+        arena_season, is_tournament, table_id, player, starting_position,
+        pre_match_elo, opponent_pre_match_elo, elo_delta, card_name,
         'dealt_delta' AS event_role, CAST(NULL AS FLOAT64) AS cp
       FROM eligible_dealt_delta
     ),
     scored_events AS (
       SELECT
         is_mw, Map, game_date, table_conceded, end_game_triggered,
-        arena_season, is_tournament, table_id, player,
-        elo, opponent_elo, elo_delta, card_name,
+        arena_season, is_tournament, table_id, player, starting_position,
+        pre_match_elo, opponent_pre_match_elo, elo_delta, card_name,
         'scored' AS event_role, cp
       FROM scored
     )
@@ -3298,7 +3994,8 @@ def _refresh_prepared_action_starting_table():
     )
     SELECT
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament, table_id, player, elo, opponent_elo,
+      arena_season, is_tournament, table_id, player, starting_position,
+      pre_match_elo, opponent_pre_match_elo,
       elo_delta, section, sort_order, label, bucket, condition_met
     FROM observations
     """
@@ -3324,8 +4021,8 @@ def _refresh_prepared_conservation_counts_table():
     AS
     SELECT
       f.is_mw, f.Map, f.game_date, f.table_conceded, f.end_game_triggered,
-      f.arena_season, f.is_tournament, f.table_id, f.player,
-      f.elo, f.opponent_elo, f.elo_delta,
+      f.arena_season, f.is_tournament, f.table_id, f.player, f.starting_position,
+      f.pre_match_elo, f.opponent_pre_match_elo, f.elo_delta,
       subject,
       CASE subject
         WHEN 'projects' THEN SAFE_CAST(f.Conservation_project_association_tasks AS INT64)
@@ -3426,7 +4123,8 @@ def _refresh_prepared_card_moments_table():
     )
     SELECT
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament, table_id, player, elo, opponent_elo,
+      arena_season, is_tournament, table_id, player, starting_position,
+      pre_match_elo, opponent_pre_match_elo,
       elo_delta, card_name, card_type, played_round, moment
     FROM all_moments
     """
@@ -3471,8 +4169,8 @@ def _refresh_prepared_sponsor_endgame_table():
     )
     SELECT
       l.is_mw, l.Map, l.game_date, l.table_conceded, l.end_game_triggered,
-      l.arena_season, l.is_tournament, l.table_id, l.player,
-      l.elo, l.opponent_elo, l.elo_delta, p.sponsor,
+      l.arena_season, l.is_tournament, l.table_id, l.player, l.starting_position,
+      l.pre_match_elo, l.opponent_pre_match_elo, l.elo_delta, p.sponsor,
       COALESCE(r.cp, 0) AS cp, COALESCE(r.appeal, 0) AS appeal
     FROM played p
     JOIN completed l USING(table_id, player)
@@ -3501,7 +4199,8 @@ def _refresh_prepared_project_reward_table():
     WITH base AS (
       SELECT
         is_mw, Map, game_date, table_conceded, end_game_triggered,
-        arena_season, is_tournament, table_id, player, elo, opponent_elo,
+        arena_season, is_tournament, table_id, player, starting_position,
+        pre_match_elo, opponent_pre_match_elo,
         elo_delta, 'base' AS event_kind, CAST(NULL AS STRING) AS raw_value,
         CAST(NULL AS INT64) AS reward_order
       FROM `{PREPARED_LOGS_TABLE}`
@@ -3509,8 +4208,9 @@ def _refresh_prepared_project_reward_table():
     rewards AS (
       SELECT
         l.is_mw, l.Map, l.game_date, l.table_conceded, l.end_game_triggered,
-        l.arena_season, l.is_tournament, l.table_id, l.player, l.elo,
-        l.opponent_elo, l.elo_delta, 'reward' AS event_kind,
+        l.arena_season, l.is_tournament, l.table_id, l.player, l.starting_position,
+        l.pre_match_elo,
+        l.opponent_pre_match_elo, l.elo_delta, 'reward' AS event_kind,
         LOWER(TRIM(r.reward)) AS raw_value,
         SAFE_CAST(r.`order` AS INT64) AS reward_order
       FROM `{PREPARED_LOGS_TABLE}` l
@@ -3518,8 +4218,9 @@ def _refresh_prepared_project_reward_table():
       WHERE TRIM(r.reward) != ''
       GROUP BY
         l.is_mw, l.Map, l.game_date, l.table_conceded, l.end_game_triggered,
-        l.arena_season, l.is_tournament, l.table_id, l.player, l.elo,
-        l.opponent_elo, l.elo_delta, raw_value, reward_order
+        l.arena_season, l.is_tournament, l.table_id, l.player, l.starting_position,
+        l.pre_match_elo,
+        l.opponent_pre_match_elo, l.elo_delta, raw_value, reward_order
     )
     SELECT * FROM base UNION ALL SELECT * FROM rewards
     """
@@ -3586,7 +4287,8 @@ def _refresh_prepared_cp_reward_table():
     chosen_rows AS (
       SELECT
         is_mw, Map, game_date, table_conceded, end_game_triggered,
-        arena_season, is_tournament, table_id, player, elo, opponent_elo,
+        arena_season, is_tournament, table_id, player, starting_position,
+        pre_match_elo, opponent_pre_match_elo,
         elo_delta, 'chosen' AS event_kind, scope, raw_value,
         CAST(NULL AS BOOL) AS chosen
       FROM chosen
@@ -3594,7 +4296,8 @@ def _refresh_prepared_cp_reward_table():
     opportunity_rows AS (
       SELECT
         is_mw, Map, game_date, table_conceded, end_game_triggered,
-        arena_season, is_tournament, table_id, player, elo, opponent_elo,
+        arena_season, is_tournament, table_id, player, starting_position,
+        pre_match_elo, opponent_pre_match_elo,
         elo_delta, 'opportunity' AS event_kind, scope, raw_value, chosen
       FROM opportunities
     )
@@ -3620,8 +4323,8 @@ def _refresh_prepared_card_endgame_table():
     AS
     SELECT DISTINCT
       p.is_mw, p.Map, p.game_date, p.table_conceded, p.end_game_triggered,
-      p.arena_season, p.is_tournament, p.table_id, p.player,
-      p.elo, p.opponent_elo, p.elo_delta, p.card_name, p.card_type,
+       p.arena_season, p.is_tournament, p.table_id, p.player, p.starting_position,
+      p.pre_match_elo, p.opponent_pre_match_elo, p.elo_delta, p.card_name, p.card_type,
       p.played_round, e.card_name AS endgame_name
     FROM `{PREPARED_CARD_PLAYS_TABLE}` p
     JOIN `{PREPARED_ENDGAME_EVENTS_TABLE}` e USING(table_id, player)
@@ -3649,20 +4352,21 @@ def _refresh_prepared_card_endgame_aggregates_table():
     AS
     SELECT
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament,
-      SAFE_CAST(elo AS INT64) AS elo,
-      SAFE_CAST(opponent_elo AS INT64) AS opponent_elo,
+      arena_season, is_tournament, starting_position,
+      SAFE_CAST(pre_match_elo AS FLOAT64) AS pre_match_elo,
+      SAFE_CAST(opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
       card_name, ANY_VALUE(card_type) AS card_type, played_round, endgame_name,
       COUNT(*) AS observation_count,
       COUNT(elo_delta) AS delta_count,
       SUM(SAFE_CAST(elo_delta AS FLOAT64)) AS delta_sum,
       SUM(POW(SAFE_CAST(elo_delta AS FLOAT64), 2)) AS delta_sum_squares,
-      COUNT(elo) AS elo_count,
-      SUM(SAFE_CAST(elo AS FLOAT64)) AS elo_sum
+      COUNT(pre_match_elo) AS elo_count,
+      SUM(SAFE_CAST(pre_match_elo AS FLOAT64)) AS elo_sum
     FROM `{PREPARED_CARD_ENDGAME_TABLE}`
     GROUP BY
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament, elo, opponent_elo,
+      arena_season, is_tournament, starting_position,
+      pre_match_elo, opponent_pre_match_elo,
       card_name, played_round, endgame_name
     """
     started_at = time.perf_counter()
@@ -3679,52 +4383,395 @@ def _refresh_prepared_card_endgame_aggregates_table():
     }
 
 
-def _refresh_prepared_tables(arena_metadata=None, merge_metadata=None):
+def _mw_action_card_catalog_sql():
+    rows = ",\n      ".join(
+        "STRUCT({order} AS card_order, '{card_type}' AS card_type, "
+        "{number} AS card_number, '{name}' AS card_name, "
+        "'{card_type} {number}' AS card_key)".format(
+            order=order,
+            card_type=card_type.replace("'", "''"),
+            number=number,
+            name=name.replace("'", "''"),
+        )
+        for order, card_type, number, name in MW_ACTION_CARD_CATALOG
+    )
+    return f"SELECT * FROM UNNEST([\n      {rows}\n    ])"
+
+
+def _mw_action_card_telemetry_condition(alias="f"):
+    number_fields = (
+        "Animals_Action_Card_Number",
+        "Association_Action_Card_Number",
+        "Build_Action_Card_Number",
+        "Cards_Action_Card_Number",
+        "Sponsors_Action_Card_Number",
+    )
+    draft_fields = (
+        "First_drafted_action_card",
+        "Second_drafted_action_card",
+        "Third_drafted_action_card",
+    )
+    number_checks = [
+        f"IFNULL(SAFE_CAST({alias}.{field} AS INT64) BETWEEN 0 AND 4, FALSE)"
+        for field in number_fields
+    ]
+    draft_checks = [
+        "IFNULL(REGEXP_CONTAINS(TRIM(CAST({alias}.{field} AS STRING)), "
+        "r'^(Animals|Association|Build|Cards|Sponsors) [1-4]$'), FALSE)".format(
+            alias=alias, field=field
+        )
+        for field in draft_fields
+    ]
+    return " AND ".join(number_checks + draft_checks)
+
+
+def _refresh_prepared_mw_action_card_tables():
+    """Materialize only complete two-player MW action-card telemetry.
+
+    Marine Worlds deals each player three special action cards through a
+    choose/pass, choose/pass, receive-returned-card draft.  Players then keep
+    two different action types.  Draft strings use canonical backend keys such
+    as ``Sponsors 1``; selected cards use the five numeric action-card fields.
+    ``MW_ACTION_CARD_CATALOG`` is the single mapping from those representations
+    to frontend colloquial names such as ``Trade``.
+    """
+    telemetry_ok = _mw_action_card_telemetry_condition("f")
+    catalog_sql = _mw_action_card_catalog_sql()
+    eligible_cte = f"""
+    eligible_tables AS (
+      SELECT table_id
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE CAST(f.is_mw AS INT64) = 1
+      GROUP BY table_id
+      HAVING COUNT(*) = 2
+        AND COUNT(DISTINCT player) = 2
+        AND COUNTIF(NOT ({telemetry_ok})) = 0
+    )
+    """
+    player_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY card_key, Map, arena_season, is_tournament
+    AS
+    WITH
+    {eligible_cte},
+    catalog AS ({catalog_sql}),
+    selected AS (
+      SELECT
+        f.table_id, f.player, f.Map, opponent.Map AS opponent_map, f.game_date,
+        f.table_conceded, f.end_game_triggered, f.arena_season,
+        f.is_tournament, f.starting_position,
+        f.pre_match_elo, f.opponent_pre_match_elo, f.elo_delta,
+        picked.card_type, picked.card_number,
+        COALESCE(
+          CASE picked.card_type
+            WHEN 'Animals' THEN f.Upgraded_Animals_action_card
+            WHEN 'Association' THEN f.Upgraded_Association_action_card
+            WHEN 'Build' THEN f.Upgraded_Build_action_card
+            WHEN 'Cards' THEN f.Upgraded_Cards_action_card
+            WHEN 'Sponsors' THEN f.Upgraded_Sponsors_action_card
+          END,
+          FALSE
+        ) AS upgraded
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      JOIN eligible_tables e USING(table_id)
+      JOIN `{PREPARED_FULL_STATS_TABLE}` opponent
+        ON opponent.table_id = f.table_id AND opponent.player != f.player
+      CROSS JOIN UNNEST([
+        STRUCT('Animals' AS card_type, SAFE_CAST(f.Animals_Action_Card_Number AS INT64) AS card_number),
+        STRUCT('Association', SAFE_CAST(f.Association_Action_Card_Number AS INT64)),
+        STRUCT('Build', SAFE_CAST(f.Build_Action_Card_Number AS INT64)),
+        STRUCT('Cards', SAFE_CAST(f.Cards_Action_Card_Number AS INT64)),
+        STRUCT('Sponsors', SAFE_CAST(f.Sponsors_Action_Card_Number AS INT64))
+      ]) picked
+      WHERE picked.card_number BETWEEN 1 AND 4
+    )
+    SELECT
+      1 AS is_mw,
+      c.card_order, c.card_type, c.card_number, c.card_name, c.card_key,
+      s.table_id, s.player, s.Map, s.opponent_map, s.game_date,
+      s.table_conceded, s.end_game_triggered, s.arena_season,
+      s.is_tournament, s.starting_position,
+      s.pre_match_elo, s.opponent_pre_match_elo, s.elo_delta,
+      s.upgraded
+    FROM selected s
+    JOIN catalog c USING(card_type, card_number)
+    """
+    draft_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_MW_ACTION_CARD_DRAFTS_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY card_key, p1_map, p2_map, arena_season
+    AS
+    WITH
+    {eligible_cte},
+    catalog AS ({catalog_sql}),
+    ranked AS (
+      SELECT
+        f.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY table_id
+          ORDER BY IF(starting_position = 'First player', 1, 2), player
+        ) AS player_order
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
+      JOIN eligible_tables e USING(table_id)
+    ),
+    paired AS (
+      SELECT
+        table_id,
+        MAX(IF(player_order = 1, Map, NULL)) AS p1_map,
+        MAX(IF(player_order = 2, Map, NULL)) AS p2_map,
+        MAX(IF(player_order = 1, pre_match_elo, NULL)) AS p1_pre_match_elo,
+        MAX(IF(player_order = 2, pre_match_elo, NULL)) AS p2_pre_match_elo,
+        MAX(IF(player_order = 1, opponent_pre_match_elo, NULL)) AS p1_opponent_pre_match_elo,
+        MAX(IF(player_order = 2, opponent_pre_match_elo, NULL)) AS p2_opponent_pre_match_elo,
+        MAX(game_date) AS game_date,
+        MAX(table_conceded) AS table_conceded,
+        LOGICAL_AND(end_game_triggered) AS end_game_triggered,
+        MAX(arena_season) AS arena_season,
+        LOGICAL_OR(is_tournament) AS is_tournament,
+        MAX(IF(player_order = 1, First_drafted_action_card, NULL)) AS p1_first,
+        MAX(IF(player_order = 2, First_drafted_action_card, NULL)) AS p2_first,
+        MAX(IF(player_order = 1, Second_drafted_action_card, NULL)) AS p1_second,
+        MAX(IF(player_order = 2, Second_drafted_action_card, NULL)) AS p2_second,
+        MAX(IF(player_order = 1, Third_drafted_action_card, NULL)) AS p1_third,
+        MAX(IF(player_order = 2, Third_drafted_action_card, NULL)) AS p2_third,
+        ARRAY_CONCAT_AGG([
+          CONCAT('Animals ', CAST(Animals_Action_Card_Number AS STRING)),
+          CONCAT('Association ', CAST(Association_Action_Card_Number AS STRING)),
+          CONCAT('Build ', CAST(Build_Action_Card_Number AS STRING)),
+          CONCAT('Cards ', CAST(Cards_Action_Card_Number AS STRING)),
+          CONCAT('Sponsors ', CAST(Sponsors_Action_Card_Number AS STRING))
+        ]) AS selected_cards
+      FROM ranked
+      GROUP BY table_id
+    )
+    SELECT
+      1 AS is_mw,
+      c.card_order, c.card_type, c.card_number, c.card_name, c.card_key,
+      p.table_id, p.game_date, p.p1_map, p.p2_map,
+      p.p1_pre_match_elo, p.p2_pre_match_elo,
+      p.p1_opponent_pre_match_elo, p.p2_opponent_pre_match_elo,
+      p.table_conceded, p.end_game_triggered, p.arena_season, p.is_tournament,
+      c.card_key IN UNNEST(p.selected_cards) AS picked,
+      c.card_key IN (p.p1_first, p.p2_first) AS drafted_first,
+      c.card_key IN (p.p1_second, p.p2_second) AS drafted_second,
+      c.card_key IN (p.p1_third, p.p2_third) AS undrafted
+    FROM paired p
+    CROSS JOIN catalog c
+    WHERE c.card_key IN (
+      p.p1_first, p.p2_first, p.p1_second, p.p2_second, p.p1_third, p.p2_third
+    )
+    """
+    map_aggregate_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY card_key, Map, arena_season, is_tournament
+    AS
+    SELECT
+      game_date, Map, starting_position, pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_order, card_key, card_type, card_number, card_name,
+      COUNT(*) AS observation_count,
+      COUNT(elo_delta) AS delta_count,
+      SUM(elo_delta) AS delta_sum,
+      SUM(POW(elo_delta, 2)) AS delta_sum_squares
+    FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}`
+    WHERE Map = opponent_map AND Map IN UNNEST({json.dumps(VALID_MAPS)})
+    GROUP BY
+      game_date, Map, starting_position, pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_order, card_key, card_type, card_number, card_name
+    """
+    synergy_aggregate_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY card_1_key, card_2_key, Map, arena_season
+    AS
+    WITH player_pairs AS (
+      SELECT
+        table_id, player, game_date, Map, opponent_map,
+        starting_position, pre_match_elo, opponent_pre_match_elo, elo_delta,
+        table_conceded, end_game_triggered, arena_season, is_tournament,
+        ARRAY_AGG(STRUCT(
+          card_order, card_key, card_type, card_number, card_name
+        ) ORDER BY card_order) AS cards
+      FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}`
+      GROUP BY
+        table_id, player, game_date, Map, opponent_map,
+        starting_position, pre_match_elo, opponent_pre_match_elo, elo_delta,
+        table_conceded, end_game_triggered, arena_season, is_tournament
+      HAVING COUNT(*) = 2 AND COUNT(DISTINCT card_type) = 2
+    ), observations AS (
+      SELECT
+        game_date, Map, opponent_map, starting_position,
+        pre_match_elo, opponent_pre_match_elo,
+        table_conceded, end_game_triggered, arena_season, is_tournament,
+        cards[OFFSET(0)].card_order AS card_1_order,
+        cards[OFFSET(0)].card_key AS card_1_key,
+        cards[OFFSET(0)].card_type AS card_1_type,
+        cards[OFFSET(0)].card_number AS card_1_number,
+        cards[OFFSET(0)].card_name AS card_1_name,
+        cards[OFFSET(1)].card_order AS card_2_order,
+        cards[OFFSET(1)].card_key AS card_2_key,
+        cards[OFFSET(1)].card_type AS card_2_type,
+        cards[OFFSET(1)].card_number AS card_2_number,
+        cards[OFFSET(1)].card_name AS card_2_name,
+        elo_delta
+      FROM player_pairs
+    )
+    SELECT
+      game_date, Map, opponent_map, starting_position,
+      pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_1_order, card_1_key, card_1_type, card_1_number, card_1_name,
+      card_2_order, card_2_key, card_2_type, card_2_number, card_2_name,
+      COUNT(*) AS observation_count,
+      COUNT(elo_delta) AS delta_count,
+      SUM(elo_delta) AS delta_sum,
+      SUM(POW(elo_delta, 2)) AS delta_sum_squares,
+      COUNT(pre_match_elo) AS elo_count,
+      SUM(pre_match_elo) AS elo_sum
+    FROM observations
+    GROUP BY
+      game_date, Map, opponent_map, starting_position,
+      pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_1_order, card_1_key, card_1_type, card_1_number, card_1_name,
+      card_2_order, card_2_key, card_2_type, card_2_number, card_2_name
+    """
+    card_action_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_CARD_ACTION_CARD_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY card_name, action_card_key, Map, arena_season
+    AS
+    WITH normal_cards AS (
+      SELECT
+        table_id, player, ANY_VALUE(is_mw) AS is_mw, ANY_VALUE(Map) AS Map,
+        ANY_VALUE(game_date) AS game_date,
+        ANY_VALUE(table_conceded) AS table_conceded,
+        LOGICAL_AND(end_game_triggered) AS end_game_triggered,
+        ANY_VALUE(arena_season) AS arena_season,
+        LOGICAL_OR(is_tournament) AS is_tournament,
+        ANY_VALUE(starting_position) AS starting_position,
+        ANY_VALUE(pre_match_elo) AS pre_match_elo,
+        ANY_VALUE(opponent_pre_match_elo) AS opponent_pre_match_elo,
+        ANY_VALUE(elo_delta) AS elo_delta,
+        card_name, ANY_VALUE(card_type) AS card_type,
+        TO_JSON_STRING(ARRAY_AGG(DISTINCT played_round ORDER BY played_round)) AS played_rounds_json
+      FROM `{PREPARED_CARD_PLAYS_TABLE}`
+      WHERE CAST(is_mw AS INT64) = 1
+      GROUP BY table_id, player, card_name
+    )
+    SELECT
+      n.table_id, n.player, n.is_mw, n.Map, a.opponent_map, n.game_date,
+      n.table_conceded, n.end_game_triggered, n.arena_season, n.is_tournament,
+      n.starting_position,
+      n.pre_match_elo, n.opponent_pre_match_elo, n.elo_delta,
+      n.card_name, n.card_type, n.played_rounds_json,
+      a.card_order AS action_card_order, a.card_key AS action_card_key,
+      a.card_type AS action_card_type, a.card_number AS action_card_number,
+      a.card_name AS action_card_name
+    FROM normal_cards n
+    JOIN `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}` a
+      ON a.table_id = n.table_id AND a.player = n.player
+    """
+    card_action_aggregate_query = f"""
+    CREATE OR REPLACE TABLE `{PREPARED_CARD_ACTION_CARD_AGGREGATES_TABLE}`
+    PARTITION BY game_date
+    CLUSTER BY card_name, action_card_key, Map, arena_season
+    AS
+    SELECT
+      is_mw, game_date, Map, opponent_map, starting_position,
+      pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_name, card_type, played_rounds_json,
+      action_card_order, action_card_key, action_card_type,
+      action_card_number, action_card_name,
+      COUNT(*) AS observation_count,
+      COUNT(elo_delta) AS delta_count,
+      SUM(elo_delta) AS delta_sum,
+      SUM(POW(elo_delta, 2)) AS delta_sum_squares,
+      COUNT(pre_match_elo) AS elo_count,
+      SUM(pre_match_elo) AS elo_sum
+    FROM `{PREPARED_CARD_ACTION_CARD_TABLE}`
+    GROUP BY
+      is_mw, game_date, Map, opponent_map, starting_position,
+      pre_match_elo, opponent_pre_match_elo,
+      table_conceded, end_game_triggered, arena_season, is_tournament,
+      card_name, card_type, played_rounds_json,
+      action_card_order, action_card_key, action_card_type,
+      action_card_number, action_card_name
+    """
+    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    started_at = time.perf_counter()
+    player_job = client.query(player_query, location=BIGQUERY_LOCATION)
+    draft_job = client.query(draft_query, location=BIGQUERY_LOCATION)
+    player_job.result()
+    card_action_job = client.query(card_action_query, location=BIGQUERY_LOCATION)
+    card_action_job.result()
+    aggregate_jobs = {
+        "map": client.query(map_aggregate_query, location=BIGQUERY_LOCATION),
+        "synergy": client.query(synergy_aggregate_query, location=BIGQUERY_LOCATION),
+        "card_action": client.query(card_action_aggregate_query, location=BIGQUERY_LOCATION),
+    }
+    draft_job.result()
+    for job in aggregate_jobs.values():
+        job.result()
+    all_jobs = [player_job, draft_job, card_action_job, *aggregate_jobs.values()]
+    return {
+        "status": "ok",
+        "player_table": PREPARED_MW_ACTION_CARD_PLAYERS_TABLE,
+        "draft_table": PREPARED_MW_ACTION_CARD_DRAFTS_TABLE,
+        "map_table": PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE,
+        "synergy_table": PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE,
+        "card_action_table": PREPARED_CARD_ACTION_CARD_TABLE,
+        "card_action_aggregate_table": PREPARED_CARD_ACTION_CARD_AGGREGATES_TABLE,
+        "total_ms": _ms_since(started_at),
+        "player_job_id": player_job.job_id,
+        "draft_job_id": draft_job.job_id,
+        "job_total_bytes_processed": sum(
+            int(job.total_bytes_processed or 0) for job in all_jobs
+        ),
+        "job_total_slot_ms": sum(int(job.slot_millis or 0) for job in all_jobs),
+    }
+
+
+def _refresh_prepared_tables(arena_metadata=None, merge_metadata=None, progress_callback=None):
     arena_metadata = arena_metadata or _load_arena_metadata()
-    logs = _refresh_prepared_logs_table(arena_metadata)
-    full_stats = _refresh_prepared_full_stats_table(arena_metadata)
-    records_manual = _refresh_prepared_records_manual_table()
-    players = _refresh_prepared_players_table(arena_metadata, merge_metadata)
-    card_plays = _refresh_prepared_card_plays_table()
-    card_pairs = _refresh_prepared_card_pairs_table()
-    card_play_aggregates = _refresh_prepared_card_play_aggregates_table()
-    card_pair_aggregates = _refresh_prepared_card_pair_aggregates_table()
-    card_pair_scope_aggregates = _refresh_prepared_card_pair_scope_aggregates_table()
-    home_observations = _refresh_prepared_home_observations_table()
-    endgame_events = _refresh_prepared_endgame_events_table()
-    action_starting = _refresh_prepared_action_starting_table()
-    conservation_counts = _refresh_prepared_conservation_counts_table()
-    predictor_specific = _refresh_prepared_predictor_specific_table()
-    card_moments = _refresh_prepared_card_moments_table()
-    sponsor_endgames = _refresh_prepared_sponsor_endgame_table()
-    project_rewards = _refresh_prepared_project_reward_table()
-    cp_rewards = _refresh_prepared_cp_reward_table()
-    card_endgames = _refresh_prepared_card_endgame_table()
-    card_endgame_aggregates = _refresh_prepared_card_endgame_aggregates_table()
+    steps = [
+        ("full_stats", "Full Sample", lambda: _refresh_prepared_full_stats_table(arena_metadata)),
+        ("logs", "Logs", lambda: _refresh_prepared_logs_table(arena_metadata)),
+        ("records_manual", "Records sheets", _refresh_prepared_records_manual_table),
+        ("players", "Players", lambda: _refresh_prepared_players_table(arena_metadata, merge_metadata)),
+        ("card_plays", "Card plays", _refresh_prepared_card_plays_table),
+        ("card_pairs", "Card pairs", _refresh_prepared_card_pairs_table),
+        ("card_play_aggregates", "Card aggregates", _refresh_prepared_card_play_aggregates_table),
+        ("card_pair_aggregates", "Card-pair aggregates", _refresh_prepared_card_pair_aggregates_table),
+        ("card_pair_scope_aggregates", "Card-pair scopes", _refresh_prepared_card_pair_scope_aggregates_table),
+        ("home_observations", "Home observations", _refresh_prepared_home_observations_table),
+        ("endgame_events", "Endgame events", _refresh_prepared_endgame_events_table),
+        ("action_starting", "Starting positions", _refresh_prepared_action_starting_table),
+        ("conservation_counts", "Conservation", _refresh_prepared_conservation_counts_table),
+        ("predictor_specific", "Predictors", _refresh_prepared_predictor_specific_table),
+        ("card_moments", "Card moments", _refresh_prepared_card_moments_table),
+        ("sponsor_endgames", "Sponsor endgames", _refresh_prepared_sponsor_endgame_table),
+        ("project_rewards", "Project rewards", _refresh_prepared_project_reward_table),
+        ("cp_rewards", "CP rewards", _refresh_prepared_cp_reward_table),
+        ("card_endgames", "Card/endgame pairs", _refresh_prepared_card_endgame_table),
+        ("card_endgame_aggregates", "Card/endgame aggregates", _refresh_prepared_card_endgame_aggregates_table),
+        ("mw_action_cards", "MW Action Cards", _refresh_prepared_mw_action_card_tables),
+    ]
+    results = {}
+    for index, (key, label, operation) in enumerate(steps, start=1):
+        results[key] = operation()
+        if progress_callback:
+            progress_callback(index, len(steps), label)
+    full_stats = results["full_stats"]
     return {
         "status": "ok",
         "prepared_table": PREPARED_LOGS_TABLE,
         "job_id": full_stats["job_id"],
-        "logs": logs,
-        "full_stats": full_stats,
-        "records_manual": records_manual,
-        "players": players,
-        "card_plays": card_plays,
-        "card_pairs": card_pairs,
-        "card_play_aggregates": card_play_aggregates,
-        "card_pair_aggregates": card_pair_aggregates,
-        "card_pair_scope_aggregates": card_pair_scope_aggregates,
-        "home_observations": home_observations,
-        "endgame_events": endgame_events,
-        "action_starting": action_starting,
-        "conservation_counts": conservation_counts,
-        "predictor_specific": predictor_specific,
-        "card_moments": card_moments,
-        "sponsor_endgames": sponsor_endgames,
-        "project_rewards": project_rewards,
-        "cp_rewards": cp_rewards,
-        "card_endgames": card_endgames,
-        "card_endgame_aggregates": card_endgame_aggregates,
+        **results,
     }
 
 
@@ -3827,8 +4874,8 @@ def _arena_top100_season_payload(season):
         COUNT(*) AS games,
         MAX(post_match_arena_rating) AS peak,
         AVG(arena_game_score) AS score_rate,
-        AVG(opponent_elo) AS opponent_elo,
-        AVG(IF(arena_game_score IS NOT NULL, opponent_elo, NULL)) AS pr_opponent_elo,
+        AVG(opponent_pre_match_elo) AS opponent_pre_match_elo,
+        AVG(IF(arena_game_score IS NOT NULL, opponent_pre_match_elo, NULL)) AS pr_opponent_elo,
         AVG(IF({_completed_game_sql()}, turns, NULL)) AS turns,
         AVG(IF({_completed_game_sql()}, points_per_turn, NULL)) AS ppt,
         ARRAY_AGG(
@@ -3879,7 +4926,7 @@ def _arena_top100_season_payload(season):
         aggregate = by_player.get(player)
         games = int(getattr(aggregate, "games", 0) or 0) if aggregate else 0
         score_rate = getattr(aggregate, "score_rate", None) if aggregate else None
-        average_opponent = getattr(aggregate, "opponent_elo", None) if aggregate else None
+        average_opponent = getattr(aggregate, "opponent_pre_match_elo", None) if aggregate else None
         pr_opponent = getattr(aggregate, "pr_opponent_elo", None) if aggregate else None
         rows.append({
             "rank": int(ranked["rank"]),
@@ -3888,6 +4935,8 @@ def _arena_top100_season_payload(season):
             "peak": getattr(aggregate, "peak", None) if aggregate else None,
             "games": games,
             "winrate": float(score_rate) * 100.0 if score_rate is not None else None,
+            # Public payload compatibility: this key means the opponent's
+            # canonical pre-match Elo.
             "opponent_elo": average_opponent,
             "pr": _fide_performance_rating(score_rate, pr_opponent),
             "turns": getattr(aggregate, "turns", None) if aggregate else None,
@@ -3991,7 +5040,14 @@ def _build_where_sql(
     completed_only,
     arena_only=False,
     tournament_only=False,
+    starting_positions=None,
 ):
+    """Build the shared focal-player filter.
+
+    Starting position is intentionally a player-observation dimension. Omitting
+    it means both positions (and preserves malformed legacy rows); a restrictive
+    request is applied before any downstream Last-X or rolling-window logic.
+    """
     where_clauses = [
         "is_mw = @is_mw",
         "Map NOT IN UNNEST(@invalid_maps)",
@@ -4004,16 +5060,16 @@ def _build_where_sql(
     ]
 
     if player_elo_min is not None:
-        where_clauses.append("elo >= @player_elo_min")
+        where_clauses.append("COALESCE(pre_match_elo, 0) >= @player_elo_min")
         query_parameters.append(bigquery.ScalarQueryParameter("player_elo_min", "INT64", player_elo_min))
     if player_elo_max is not None:
-        where_clauses.append("elo <= @player_elo_max")
+        where_clauses.append("COALESCE(pre_match_elo, 0) <= @player_elo_max")
         query_parameters.append(bigquery.ScalarQueryParameter("player_elo_max", "INT64", player_elo_max))
     if opponent_elo_min is not None:
-        where_clauses.append("opponent_elo >= @opponent_elo_min")
+        where_clauses.append("COALESCE(opponent_pre_match_elo, 0) >= @opponent_elo_min")
         query_parameters.append(bigquery.ScalarQueryParameter("opponent_elo_min", "INT64", opponent_elo_min))
     if opponent_elo_max is not None:
-        where_clauses.append("opponent_elo <= @opponent_elo_max")
+        where_clauses.append("COALESCE(opponent_pre_match_elo, 0) <= @opponent_elo_max")
         query_parameters.append(bigquery.ScalarQueryParameter("opponent_elo_max", "INT64", opponent_elo_max))
     if date_from:
         where_clauses.append("game_date >= @date_from")
@@ -4027,6 +5083,11 @@ def _build_where_sql(
         where_clauses.append("arena_season IS NOT NULL")
     if tournament_only:
         where_clauses.append("COALESCE(is_tournament, FALSE)")
+    if starting_positions:
+        where_clauses.append("starting_position IN UNNEST(@starting_positions)")
+        query_parameters.append(bigquery.ArrayQueryParameter(
+            "starting_positions", "STRING", starting_positions
+        ))
 
     return " AND ".join(where_clauses), query_parameters
 
@@ -4059,7 +5120,7 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
         AVG(elo_delta) AS delta_played_ci_mean,
         STDDEV_SAMP(elo_delta) AS delta_played_ci_sd,
         COUNT(elo_delta) AS delta_played_ci_n,
-        ROUND(AVG(elo), 0) AS avg_elo
+        ROUND(AVG(pre_match_elo), 0) AS avg_elo
       FROM filtered
       WHERE moment = 'played'{round_sql}
       GROUP BY card_name, card_type
@@ -4111,26 +5172,26 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
         project_round_sql = f" AND {_round_condition('pp', selected_rounds)}"
         return f"""
         WITH log_filtered AS (
-          SELECT table_id, player, played_animals, played_sponsors, played_projects, elo_delta, elo
+          SELECT table_id, player, played_animals, played_sponsors, played_projects, elo_delta, pre_match_elo
           FROM `{PREPARED_LOGS_TABLE}`
           WHERE {where_sql}
         ),
         played_animals AS (
-          SELECT l.table_id, l.player, pa.animal AS card_name, 'animal' AS card_type, l.elo_delta, l.elo
+          SELECT l.table_id, l.player, pa.animal AS card_name, 'animal' AS card_type, l.elo_delta, l.pre_match_elo
           FROM log_filtered l
           CROSS JOIN UNNEST(l.played_animals) AS pa
           WHERE pa.animal IS NOT NULL
             {animal_round_sql}
         ),
         played_sponsors AS (
-          SELECT l.table_id, l.player, ps.sponsor AS card_name, 'sponsor' AS card_type, l.elo_delta, l.elo
+          SELECT l.table_id, l.player, ps.sponsor AS card_name, 'sponsor' AS card_type, l.elo_delta, l.pre_match_elo
           FROM log_filtered l
           CROSS JOIN UNNEST(l.played_sponsors) AS ps
           WHERE ps.sponsor IS NOT NULL
             {sponsor_round_sql}
         ),
         played_projects AS (
-          SELECT l.table_id, l.player, pp.project AS card_name, 'project' AS card_type, l.elo_delta, l.elo
+          SELECT l.table_id, l.player, pp.project AS card_name, 'project' AS card_type, l.elo_delta, l.pre_match_elo
           FROM log_filtered l
           CROSS JOIN UNNEST(l.played_projects) AS pp
           WHERE pp.project IS NOT NULL
@@ -4138,11 +5199,11 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
             {project_round_sql}
         ),
         all_played AS (
-          SELECT table_id, player, card_name, card_type, elo_delta, elo FROM played_animals
+          SELECT table_id, player, card_name, card_type, elo_delta, pre_match_elo FROM played_animals
           UNION ALL
-          SELECT table_id, player, card_name, card_type, elo_delta, elo FROM played_sponsors
+          SELECT table_id, player, card_name, card_type, elo_delta, pre_match_elo FROM played_sponsors
           UNION ALL
-          SELECT table_id, player, card_name, card_type, elo_delta, elo FROM played_projects
+          SELECT table_id, player, card_name, card_type, elo_delta, pre_match_elo FROM played_projects
         ),
         played_agg AS (
           SELECT
@@ -4153,7 +5214,7 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
             AVG(elo_delta) AS delta_played_ci_mean,
             STDDEV_SAMP(elo_delta) AS delta_played_ci_sd,
             COUNT(elo_delta) AS delta_played_ci_n,
-            ROUND(AVG(elo), 0) AS avg_elo
+            ROUND(AVG(pre_match_elo), 0) AS avg_elo
           FROM all_played
           GROUP BY card_name, card_type
         )
@@ -4187,35 +5248,35 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
         cards_drawn,
         display_cards,
         elo_delta,
-        elo
+        pre_match_elo
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
     ),
     played_animals AS (
-      SELECT l.table_id, l.player, pa.animal AS card_name, 'animal' AS card_type, l.elo_delta, l.elo
+      SELECT l.table_id, l.player, pa.animal AS card_name, 'animal' AS card_type, l.elo_delta, l.pre_match_elo
       FROM log_filtered l
       CROSS JOIN UNNEST(l.played_animals) AS pa
       WHERE pa.animal IS NOT NULL
     ),
     played_sponsors AS (
-      SELECT l.table_id, l.player, ps.sponsor AS card_name, 'sponsor' AS card_type, l.elo_delta, l.elo
+      SELECT l.table_id, l.player, ps.sponsor AS card_name, 'sponsor' AS card_type, l.elo_delta, l.pre_match_elo
       FROM log_filtered l
       CROSS JOIN UNNEST(l.played_sponsors) AS ps
       WHERE ps.sponsor IS NOT NULL
     ),
     played_projects AS (
-      SELECT l.table_id, l.player, pp.project AS card_name, 'project' AS card_type, l.elo_delta, l.elo
+      SELECT l.table_id, l.player, pp.project AS card_name, 'project' AS card_type, l.elo_delta, l.pre_match_elo
       FROM log_filtered l
       CROSS JOIN UNNEST(l.played_projects) AS pp
       WHERE pp.project IS NOT NULL
         AND LOWER(pp.project) NOT IN UNNEST(@excluded_projects)
     ),
     all_played AS (
-      SELECT table_id, player, card_name, card_type, elo_delta, elo FROM played_animals
+      SELECT table_id, player, card_name, card_type, elo_delta, pre_match_elo FROM played_animals
       UNION ALL
-      SELECT table_id, player, card_name, card_type, elo_delta, elo FROM played_sponsors
+      SELECT table_id, player, card_name, card_type, elo_delta, pre_match_elo FROM played_sponsors
       UNION ALL
-      SELECT table_id, player, card_name, card_type, elo_delta, elo FROM played_projects
+      SELECT table_id, player, card_name, card_type, elo_delta, pre_match_elo FROM played_projects
     ),
     in_hand AS (
       SELECT DISTINCT
@@ -4246,7 +5307,7 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
         AVG(elo_delta) AS delta_played_ci_mean,
         STDDEV_SAMP(elo_delta) AS delta_played_ci_sd,
         COUNT(elo_delta) AS delta_played_ci_n,
-        ROUND(AVG(elo), 0) AS avg_elo
+        ROUND(AVG(pre_match_elo), 0) AS avg_elo
       FROM all_played
       GROUP BY card_name, card_type
     ),
@@ -4301,7 +5362,7 @@ def _build_opening_hand_stats_query(where_sql):
         opening_cards,
         opening_keep,
         elo_delta,
-        elo
+        pre_match_elo
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
     ),
@@ -4349,7 +5410,7 @@ def _build_opening_hand_stats_query(where_sql):
         AVG(elo_delta) AS delta_kept_ci_mean,
         STDDEV_SAMP(elo_delta) AS delta_kept_ci_sd,
         COUNT(elo_delta) AS delta_kept_ci_n,
-        ROUND(AVG(elo), 0) AS avg_elo
+        ROUND(AVG(pre_match_elo), 0) AS avg_elo
       FROM log_filtered
       CROSS JOIN UNNEST(IFNULL(opening_keep, [])) AS card
       WHERE TRIM(card) != ''
@@ -4423,7 +5484,7 @@ def _build_endgames_general_query(where_sql):
         AVG(elo_delta) AS delta_scored_ci_mean,
         STDDEV_SAMP(elo_delta) AS delta_scored_ci_sd,
         COUNT(elo_delta) AS delta_scored_ci_n,
-        ROUND(AVG(elo), 0) AS avg_elo,
+        ROUND(AVG(pre_match_elo), 0) AS avg_elo,
         ROUND(AVG(cp), 2) AS avg_cp
       FROM filtered
       WHERE event_role = 'scored'
@@ -4593,7 +5654,11 @@ def _build_maps_metrics_where_sql(
     date_to,
     arena_only=False,
     tournament_only=False,
+    starting_positions=None,
 ):
+    # Elo NULLs remain NULL in prepared data and statistical calculations.
+    # Only range comparisons treat missing metadata as zero, allowing an
+    # unrestricted/blank minimum of zero to retain those observations.
     where_clauses = [
         "CAST(is_mw AS INT64) = @is_mw",
         _completed_game_sql(),
@@ -4601,16 +5666,16 @@ def _build_maps_metrics_where_sql(
     query_parameters = [bigquery.ScalarQueryParameter("is_mw", "INT64", is_mw)]
 
     if player_elo_min is not None:
-        where_clauses.append("elo >= @player_elo_min")
+        where_clauses.append("COALESCE(pre_match_elo, 0) >= @player_elo_min")
         query_parameters.append(bigquery.ScalarQueryParameter("player_elo_min", "INT64", player_elo_min))
     if player_elo_max is not None:
-        where_clauses.append("elo <= @player_elo_max")
+        where_clauses.append("COALESCE(pre_match_elo, 0) <= @player_elo_max")
         query_parameters.append(bigquery.ScalarQueryParameter("player_elo_max", "INT64", player_elo_max))
     if opponent_elo_min is not None:
-        where_clauses.append("opponent_elo >= @opponent_elo_min")
+        where_clauses.append("COALESCE(opponent_pre_match_elo, 0) >= @opponent_elo_min")
         query_parameters.append(bigquery.ScalarQueryParameter("opponent_elo_min", "INT64", opponent_elo_min))
     if opponent_elo_max is not None:
-        where_clauses.append("opponent_elo <= @opponent_elo_max")
+        where_clauses.append("COALESCE(opponent_pre_match_elo, 0) <= @opponent_elo_max")
         query_parameters.append(bigquery.ScalarQueryParameter("opponent_elo_max", "INT64", opponent_elo_max))
     if date_from:
         where_clauses.append("game_date >= @date_from")
@@ -4622,6 +5687,11 @@ def _build_maps_metrics_where_sql(
         where_clauses.append("arena_season IS NOT NULL")
     if tournament_only:
         where_clauses.append("COALESCE(is_tournament, FALSE)")
+    if starting_positions:
+        where_clauses.append("starting_position IN UNNEST(@starting_positions)")
+        query_parameters.append(bigquery.ArrayQueryParameter(
+            "starting_positions", "STRING", starting_positions
+        ))
 
     return " AND ".join(where_clauses), query_parameters
 
@@ -4639,10 +5709,12 @@ def _build_full_sample_where_sql(
     exclude_invalid_maps=True,
     arena_only=False,
     tournament_only=False,
+    starting_positions=None,
 ):
     # Home passes exclude_invalid_maps=False so its aggregate tiles use the
     # same complete map population shown by its default filter chips. Keep the
-    # restricted default for all analytical pages.
+    # restricted default for all analytical pages. As in the Logs builder,
+    # COALESCE belongs only to Elo range predicates; source values remain NULL.
     where_clauses = [
         "CAST(f.is_mw AS INT64) = @is_mw",
         "f.Map IN UNNEST(@selected_maps)",
@@ -4656,16 +5728,16 @@ def _build_full_sample_where_sql(
         query_parameters.append(bigquery.ArrayQueryParameter("invalid_maps", "STRING", INVALID_MAPS))
 
     if player_elo_min is not None:
-        where_clauses.append("f.elo >= @player_elo_min")
+        where_clauses.append("COALESCE(f.pre_match_elo, 0) >= @player_elo_min")
         query_parameters.append(bigquery.ScalarQueryParameter("player_elo_min", "INT64", player_elo_min))
     if player_elo_max is not None:
-        where_clauses.append("f.elo <= @player_elo_max")
+        where_clauses.append("COALESCE(f.pre_match_elo, 0) <= @player_elo_max")
         query_parameters.append(bigquery.ScalarQueryParameter("player_elo_max", "INT64", player_elo_max))
     if opponent_elo_min is not None:
-        where_clauses.append("f.opponent_elo >= @opponent_elo_min")
+        where_clauses.append("COALESCE(f.opponent_pre_match_elo, 0) >= @opponent_elo_min")
         query_parameters.append(bigquery.ScalarQueryParameter("opponent_elo_min", "INT64", opponent_elo_min))
     if opponent_elo_max is not None:
-        where_clauses.append("f.opponent_elo <= @opponent_elo_max")
+        where_clauses.append("COALESCE(f.opponent_pre_match_elo, 0) <= @opponent_elo_max")
         query_parameters.append(bigquery.ScalarQueryParameter("opponent_elo_max", "INT64", opponent_elo_max))
     if date_from:
         where_clauses.append("CAST(f.game_ended_at AS DATE) >= @date_from")
@@ -4679,6 +5751,11 @@ def _build_full_sample_where_sql(
         where_clauses.append("f.arena_season IS NOT NULL")
     if tournament_only:
         where_clauses.append("COALESCE(f.is_tournament, FALSE)")
+    if starting_positions:
+        where_clauses.append("f.starting_position IN UNNEST(@starting_positions)")
+        query_parameters.append(bigquery.ArrayQueryParameter(
+            "starting_positions", "STRING", starting_positions
+        ))
 
     return " AND ".join(where_clauses), query_parameters
 
@@ -5117,9 +6194,10 @@ def _players_history_cache_blob_name(
     last_x_games,
     arena_seasons,
     tournament_only,
+    starting_positions,
 ):
     scope = {
-        "schema": 1,
+        "schema": 3,
         "data_version": data_version,
         "is_mw": int(is_mw),
         "identities": sorted(identities),
@@ -5132,6 +6210,7 @@ def _players_history_cache_blob_name(
         "last_x_games": last_x_games,
         "arena_seasons": sorted(arena_seasons or []),
         "tournament_only": bool(tournament_only),
+        "starting_positions": sorted(starting_positions or []),
     }
     digest = hashlib.sha256(
         json.dumps(scope, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -5151,6 +6230,7 @@ def _query_players_history(
     last_x_games,
     arena_seasons,
     tournament_only,
+    starting_positions,
 ):
     """Return compact trailing-100 histories for selected merged identities."""
     catalog = _players_history_metric_catalog()
@@ -5191,12 +6271,12 @@ def _query_players_history(
         bigquery.ScalarQueryParameter("last_x_games", "INT64", int(last_x_games or 0)),
     ]
     if opponent_elo_min is not None:
-        where.append("f.opponent_elo >= @opponent_elo_min")
+        where.append("COALESCE(f.opponent_pre_match_elo, 0) >= @opponent_elo_min")
         parameters.append(bigquery.ScalarQueryParameter(
             "opponent_elo_min", "INT64", opponent_elo_min
         ))
     if opponent_elo_max is not None:
-        where.append("f.opponent_elo <= @opponent_elo_max")
+        where.append("COALESCE(f.opponent_pre_match_elo, 0) <= @opponent_elo_max")
         parameters.append(bigquery.ScalarQueryParameter(
             "opponent_elo_max", "INT64", opponent_elo_max
         ))
@@ -5213,6 +6293,11 @@ def _query_players_history(
         ))
     if tournament_only:
         where.append("COALESCE(f.is_tournament, FALSE)")
+    if starting_positions:
+        where.append("f.starting_position IN UNNEST(@starting_positions)")
+        parameters.append(bigquery.ArrayQueryParameter(
+            "starting_positions", "STRING", starting_positions
+        ))
 
     query = f"""
     WITH filtered AS (
@@ -5348,6 +6433,7 @@ def _load_players_history(
     last_x_games,
     arena_seasons,
     tournament_only,
+    starting_positions,
 ):
     blob_name = _players_history_cache_blob_name(
         data_version,
@@ -5362,6 +6448,7 @@ def _load_players_history(
         last_x_games,
         arena_seasons,
         tournament_only,
+        starting_positions,
     )
     cached = _read_cache_blob(blob_name, "players_history_hit")
     if cached and isinstance(cached.get("players"), list):
@@ -5380,6 +6467,7 @@ def _load_players_history(
             last_x_games,
             arena_seasons,
             tournament_only,
+            starting_positions,
         )
         timing = core.pop("_server_timing", {})
         _enqueue_cache_blob_write(
@@ -5471,8 +6559,8 @@ def _build_players_query(where_sql, component="combined", source_table=None):
     baseline_conditions = {
         "all_players": "TRUE",
         "winners": "is_winner",
-        "experts": "elo >= 500",
-        "masters": "elo >= 700",
+        "experts": "pre_match_elo >= 500",
+        "masters": "pre_match_elo >= 700",
     }
 
     baseline_fields = []
@@ -6041,6 +7129,102 @@ def _build_players_comparison_rollup_query(where_sql):
       c.sort_order, c.metric, c.tooltip, c.is_default, c.format,
       c.lower_is_better
     ORDER BY c.sort_order
+    """
+
+
+def _build_players_performance_by_map_query(where_sql, use_last_x=False):
+    """Average Elo delta per merged identity and map.
+
+    The daily rollup serves ordinary filters. Last X deliberately ranks exact
+    player-game rows separately inside every identity/map partition before
+    null Elo deltas are removed from the statistical moments.
+    """
+    if use_last_x:
+        source = f"""
+        filtered_games AS (
+          SELECT
+            f.player_identity,
+            f.Map,
+            SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta,
+            ROW_NUMBER() OVER (
+              PARTITION BY f.player_identity, f.Map
+              ORDER BY f.game_ended_at DESC, CAST(f.table_id AS STRING) DESC
+            ) AS recent_rank
+          FROM `{PREPARED_PLAYERS_RECENT_TABLE}` f
+          WHERE f.identity_bucket IN UNNEST(@players_identity_buckets)
+            AND f.player_identity IN UNNEST(@players_identities)
+            AND {where_sql}
+        ),
+        moments AS (
+          SELECT
+            player_identity,
+            Map,
+            COUNT(elo_delta) AS delta_count,
+            SUM(elo_delta) AS delta_sum,
+            SUM(POW(elo_delta, 2)) AS delta_sum_squares
+          FROM filtered_games
+          WHERE recent_rank <= @last_x_games
+          GROUP BY player_identity, Map
+        )
+        """
+    else:
+        source = f"""
+        moments AS (
+          SELECT
+            f.player_identity,
+            f.Map,
+            SUM(f.delta_count) AS delta_count,
+            SUM(f.delta_sum) AS delta_sum,
+            SUM(f.delta_sum_squares) AS delta_sum_squares
+          FROM `{PREPARED_PLAYERS_MAP_ROLLUP_TABLE}` f
+          WHERE f.player_identity IN UNNEST(@players_identities)
+            AND {where_sql}
+          GROUP BY f.player_identity, f.Map
+        )
+        """
+    pivot_fields = []
+    for map_meta in ALL_MAPS_FOR_METRICS:
+        key = map_meta["key"]
+        full = _sql_string(map_meta["full"])
+        pivot_fields.extend([
+            f"MAX(IF(s.Map = {full}, ROUND(s.delta_mean, 3), NULL)) AS {key}",
+            f"MAX(IF(s.Map = {full}, s.delta_mean, NULL)) AS {key}_ci_mean",
+            f"MAX(IF(s.Map = {full}, s.delta_sd, NULL)) AS {key}_ci_sd",
+            f"MAX(IF(s.Map = {full}, s.delta_count, 0)) AS {key}_ci_n",
+        ])
+    return f"""
+    WITH selected_players AS (
+      SELECT
+        identity AS player_identity,
+        @players_players[SAFE_OFFSET(position)] AS player,
+        position
+      FROM UNNEST(@players_identities) AS identity WITH OFFSET position
+    ),
+    {source},
+    map_stats AS (
+      SELECT
+        player_identity,
+        Map,
+        delta_count,
+        SAFE_DIVIDE(delta_sum, delta_count) AS delta_mean,
+        IF(
+          delta_count > 1,
+          SQRT(SAFE_DIVIDE(
+            GREATEST(delta_sum_squares - SAFE_DIVIDE(POW(delta_sum, 2), delta_count), 0),
+            delta_count - 1
+          )),
+          NULL
+        ) AS delta_sd
+      FROM moments
+    )
+    SELECT
+      p.position AS sort_order,
+      p.player,
+      {', '.join(pivot_fields)}
+    FROM selected_players p
+    LEFT JOIN map_stats s USING(player_identity)
+    GROUP BY p.position, p.player
+    ORDER BY p.position
     """
 
 
@@ -6687,7 +7871,8 @@ def _build_predictors_specific_query(where_sql, observations_only=False):
         """
     SELECT
       is_mw, Map, game_date, table_conceded, end_game_triggered,
-      arena_season, is_tournament, table_id, player, elo, opponent_elo,
+      arena_season, is_tournament, table_id, player, starting_position,
+      pre_match_elo, opponent_pre_match_elo,
       elo_delta, sort_order, condition, mw_only, condition_met
     FROM observations
         """
@@ -6726,11 +7911,11 @@ def _build_predictors_specific_query(where_sql, observations_only=False):
         f.end_game_triggered,
         f.arena_season,
         f.is_tournament,
-        SAFE_CAST(f.elo AS FLOAT64) AS elo,
-        SAFE_CAST(f.opponent_elo AS FLOAT64) AS opponent_elo,
+        SAFE_CAST(f.pre_match_elo AS FLOAT64) AS pre_match_elo,
+        SAFE_CAST(f.opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
         SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta,
         SAFE_CAST(f.Conservation AS FLOAT64) AS conservation,
-        LOWER(TRIM(CAST(f.Starting_position_in_first_round AS STRING))) AS starting_position,
+        f.starting_position,
         l.played_animals,
         l.opening_cards,
         l.endgame_scores,
@@ -6845,8 +8030,9 @@ def _build_predictors_specific_query(where_sql, observations_only=False):
         me.is_tournament,
         me.table_id,
         me.player,
-        me.elo,
-        me.opponent_elo,
+        me.starting_position,
+        me.pre_match_elo,
+        me.opponent_pre_match_elo,
         me.elo_delta,
         CASE config.condition_key
           WHEN 'more_endgame_points' THEN me.endgame_points > opp.endgame_points
@@ -6876,7 +8062,7 @@ def _build_predictors_specific_query(where_sql, observations_only=False):
             me.no_sponsor_opening AND me.sponsors_starting_strength = 5
           WHEN 'no_sponsor_second_assoc_2_sponsors_5' THEN
             me.no_sponsor_opening
-            AND me.starting_position = 'second player'
+            AND me.starting_position = 'Second player'
             AND me.association_starting_strength = 2
             AND me.sponsors_starting_strength = 5
           ELSE FALSE
@@ -6891,7 +8077,7 @@ def _build_predictors_specific_query(where_sql, observations_only=False):
     """
 
 
-def _build_predictors_query(where_sql, predictors_view):
+def _build_predictors_query(where_sql, predictors_view, starting_positions=None):
     if predictors_view == PREDICTORS_VIEW_SPECIFIC:
         where_sql = where_sql.replace("f.game_ended_at", "f.game_date")
         return f"""
@@ -6910,6 +8096,19 @@ def _build_predictors_query(where_sql, predictors_view):
         GROUP BY sort_order
         ORDER BY sort_order
         """
+    # General/Icon compare the focal row with its opponent. Applying FPA inside
+    # the shared `scoped` CTE would require both rows to have the same starting
+    # position and empty every valid two-player table. Keep the opponent row in
+    # scope and orient the restriction on `me` after the self-join instead.
+    focal_position_sql = ""
+    if starting_positions:
+        where_sql = where_sql.replace(
+            "f.starting_position IN UNNEST(@starting_positions)",
+            "TRUE",
+        )
+        focal_position_sql = (
+            "WHERE me.starting_position IN UNNEST(@starting_positions)"
+        )
     fields = ICON_FIELDS if predictors_view == PREDICTORS_VIEW_ICON else PREDICTOR_GENERAL_FIELDS
     condition_structs = ",\n        ".join(
         f"STRUCT({idx} AS sort_order, {_sql_string(label)} AS condition, {_sql_string(field)} AS field_name)"
@@ -6940,6 +8139,7 @@ def _build_predictors_query(where_sql, predictors_view):
       CROSS JOIN UNNEST([
         {condition_structs}
       ]) AS config
+      {focal_position_sql}
     )
     SELECT
       sort_order,
@@ -7747,21 +8947,10 @@ def _build_records_query(where_sql, records_view, records_player=None,
 
     # Scope predicates are shared with the manually maintained derived rows.
     # Completion/winner predicates are attached only to automatic Records;
-    # spreadsheet Fastest rows are explicit extrapolated exceptions.
-    # Source-absent manual exceptions have no Elo metadata.  They must not
-    # disappear from Records solely because the standard Records sidebar has a
-    # default Elo range; apply Elo bounds only when enrichment actually exists.
+    # spreadsheet Fastest rows are explicit extrapolated exceptions. Missing
+    # enrichment remains NULL in storage but follows the dashboard-wide Elo
+    # range rule and is evaluated as zero by `where_sql`.
     manual_where_sql = where_sql
-    for elo_clause in (
-        "f.elo >= @player_elo_min",
-        "f.elo <= @player_elo_max",
-        "f.opponent_elo >= @opponent_elo_min",
-        "f.opponent_elo <= @opponent_elo_max",
-    ):
-        manual_where_sql = manual_where_sql.replace(
-            elo_clause,
-            f"(NOT f.source_enriched OR {elo_clause})",
-        )
     scope_predicates = [where_sql]
     manual_scope_predicates = [manual_where_sql]
     if records_player:
@@ -7825,14 +9014,16 @@ def _build_records_query(where_sql, records_view, records_player=None,
     # needed by the browser. This keeps every Records filter local and avoids a
     # BigQuery request for static, bounded record populations.
     automatic_metadata = f"""
-      SAFE_CAST(f.opponent_elo AS FLOAT64) AS opponent_elo,
+      SAFE_CAST(f.opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
+      CAST(f.starting_position AS STRING) AS starting_position,
       TRUE AS source_enriched,
       ({arena_case}) IS NOT NULL AS is_arena,
       {tournament_flag} AS is_tournament,
       CAST(NULL AS INT64) AS source_row
     """
     manual_metadata = f"""
-      SAFE_CAST(f.opponent_elo AS FLOAT64) AS opponent_elo,
+      SAFE_CAST(f.opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
+      CAST(f.starting_position AS STRING) AS starting_position,
       COALESCE(f.source_enriched, FALSE) AS source_enriched,
       ({arena_case}) IS NOT NULL AS is_arena,
       {tournament_flag} AS is_tournament,
@@ -7950,7 +9141,8 @@ def _build_records_query(where_sql, records_view, records_player=None,
       %s
     )
     SELECT n, icon, player, turns, score, map_name, table_id, game_date,
-           result_code, 0 AS ept, opponent_elo, source_enriched, is_arena,
+           result_code, 0 AS ept, opponent_pre_match_elo, starting_position,
+           source_enriched, is_arena,
            is_tournament, source_row
     FROM icon_records
     ORDER BY n DESC, turns ASC NULLS LAST, player ASC, table_id ASC
@@ -8077,6 +9269,634 @@ def _build_sponsor_endgames_query(where_sql, sponsor_endgames_view):
     """
 
 
+def _synergy_ci_row_key(stats_page, view, row):
+    """Return a stable, non-public key for one requested Synergy row."""
+    if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+        card_1 = str(row.get("card_1_key") or "").strip()
+        card_2 = str(row.get("card_2_key") or "").strip()
+        if not card_1 or not card_2:
+            raise ValueError("MW Synergy CI rows require card_1_key and card_2_key")
+        values = [card_1, card_2]
+    elif view == COMBINATIONS_VIEW_CARD_CARD:
+        card_1 = str(row.get("card_1") or "").strip()
+        card_2 = str(row.get("card_2") or "").strip()
+        if not card_1 or not card_2:
+            raise ValueError("Card + Card CI rows require card_1 and card_2")
+        values = [card_1, card_2]
+    elif view == COMBINATIONS_VIEW_CARD_MAP:
+        card = str(row.get("card_name") or "").strip()
+        context = str(row.get("map_name") or "").strip()
+        if not card or context not in VALID_MAPS:
+            raise ValueError("Card + Map CI rows require a valid card_name and map_name")
+        values = [card, context]
+    elif view == COMBINATIONS_VIEW_CARD_ROUND:
+        card = str(row.get("card_name") or "").strip()
+        context = str(row.get("round_name") or "").strip()
+        if not card or context not in VALID_ROUNDS:
+            raise ValueError("Card + Round CI rows require a valid card_name and round_name")
+        values = [card, context]
+    elif view == COMBINATIONS_VIEW_CARD_ENDGAME:
+        card = str(row.get("card_name") or "").strip()
+        context = str(row.get("endgame_name") or "").strip()
+        if not card or not context:
+            raise ValueError("Card + Endgame CI rows require card_name and endgame_name")
+        values = [card, context]
+    elif view == COMBINATIONS_VIEW_CARD_ACTION_CARD:
+        card = str(row.get("card_name") or "").strip()
+        action_card = str(row.get("action_card_key") or "").strip()
+        if not card or not action_card:
+            raise ValueError(
+                "Card + Action Card CI rows require card_name and action_card_key"
+            )
+        values = [card, action_card]
+    else:
+        raise ValueError("Synergy confidence intervals are unavailable for this view")
+    return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
+
+
+def _parse_synergy_ci_rows(raw_rows, stats_page, view, limit=100):
+    if not isinstance(raw_rows, list):
+        raise ValueError("synergy_ci_rows must be an array")
+    if len(raw_rows) > limit:
+        raise ValueError(f"synergy_ci_rows may contain at most {limit} rows")
+    parsed = []
+    seen = set()
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            raise ValueError("Each synergy_ci_rows item must be an object")
+        item = dict(raw)
+        item["row_key"] = _synergy_ci_row_key(stats_page, view, item)
+        if item["row_key"] in seen:
+            continue
+        seen.add(item["row_key"])
+        parsed.append(item)
+    return parsed
+
+
+def _synergy_round_predicates(selected_rounds):
+    if not selected_rounds:
+        return "", ""
+    exact = sorted(int(value) for value in selected_rounds if value != "6+")
+    play_parts = []
+    pair_parts_1 = []
+    pair_parts_2 = []
+    if exact:
+        values = ", ".join(str(value) for value in exact)
+        play_parts.append(f"played_round IN ({values})")
+        pair_parts_1.append(
+            f"EXISTS (SELECT 1 FROM UNNEST(IFNULL(played_rounds_1, [])) r WHERE r IN ({values}))"
+        )
+        pair_parts_2.append(
+            f"EXISTS (SELECT 1 FROM UNNEST(IFNULL(played_rounds_2, [])) r WHERE r IN ({values}))"
+        )
+    if "6+" in selected_rounds:
+        play_parts.append("played_round >= 6")
+        pair_parts_1.append(
+            "EXISTS (SELECT 1 FROM UNNEST(IFNULL(played_rounds_1, [])) r WHERE r >= 6)"
+        )
+        pair_parts_2.append(
+            "EXISTS (SELECT 1 FROM UNNEST(IFNULL(played_rounds_2, [])) r WHERE r >= 6)"
+        )
+    play_sql = " AND (" + " OR ".join(play_parts) + ")"
+    pair_sql = (
+        " AND (" + " OR ".join(pair_parts_1) + ")"
+        " AND (" + " OR ".join(pair_parts_2) + ")"
+    )
+    return play_sql, pair_sql
+
+
+def _component_ci_projection(component_aliases):
+    """Render clustered 95% CI fields for the displayed standalone components."""
+    fields = []
+    for source, alias in component_aliases:
+        source_sql = _sql_string(source)
+        fields.extend([
+            f"MAX(IF(cs.component = {source_sql}, cs.component_mean, NULL)) AS {alias}_mean",
+            f"MAX(IF(cs.component = {source_sql} AND cs.cluster_n >= 2, cs.component_mean - 1.96 * cs.standard_error, NULL)) AS {alias}_ci95_low",
+            f"MAX(IF(cs.component = {source_sql} AND cs.cluster_n >= 2, cs.component_mean + 1.96 * cs.standard_error, NULL)) AS {alias}_ci95_high",
+            f"MAX(IF(cs.component = {source_sql}, cs.standard_error, NULL)) AS {alias}_ci95_se",
+            f"MAX(IF(cs.component = {source_sql}, cs.total_n, 0)) AS {alias}_ci95_n",
+        ])
+    return ",\n      ".join(fields)
+
+
+def _build_synergy_ci_query(
+    where_sql,
+    stats_page,
+    view,
+    selected_rounds=None,
+    requested_rows=None,
+):
+    """Build a table-clustered sandwich CI query for visible Synergy rows.
+
+    Fast aggregate tables continue to provide the table values. This separate
+    query reads only the requested row keys from table-level prepared sources,
+    retaining covariance between the Actual and baseline component means.
+    """
+    selected_rounds = selected_rounds or []
+    requested_rows = requested_rows or []
+    play_round_sql, pair_round_sql = _synergy_round_predicates(selected_rounds)
+    action_pair_round_sql = ""
+    if selected_rounds:
+        exact = sorted(int(value) for value in selected_rounds if value != "6+")
+        action_parts = []
+        if exact:
+            values = ", ".join(str(value) for value in exact)
+            action_parts.append(
+                "EXISTS (SELECT 1 FROM UNNEST(JSON_VALUE_ARRAY(played_rounds_json)) r "
+                f"WHERE SAFE_CAST(r AS INT64) IN ({values}))"
+            )
+        if "6+" in selected_rounds:
+            action_parts.append(
+                "EXISTS (SELECT 1 FROM UNNEST(JSON_VALUE_ARRAY(played_rounds_json)) r "
+                "WHERE SAFE_CAST(r AS INT64) >= 6)"
+            )
+        action_pair_round_sql = " AND (" + " OR ".join(action_parts) + ")"
+    if (
+        stats_page == STATS_PAGE_MW_ACTION_CARDS
+        or view in (COMBINATIONS_VIEW_CARD_CARD, COMBINATIONS_VIEW_CARD_ACTION_CARD)
+    ):
+        component_aliases = [('first', 'component_1'), ('second', 'component_2')]
+    elif view in (COMBINATIONS_VIEW_CARD_MAP, COMBINATIONS_VIEW_CARD_ROUND):
+        component_aliases = [('general', 'component_1'), ('context', 'component_2')]
+    elif view == COMBINATIONS_VIEW_CARD_ENDGAME:
+        component_aliases = [('card', 'component_1'), ('endgame', 'component_2')]
+    else:
+        raise ValueError("Synergy confidence intervals are unavailable for this view")
+
+    # Source pruning is expressed against the parameterized request CTE rather
+    # than interpolated string literals. Besides keeping the scans compact,
+    # this safely handles card and endgame names containing apostrophes.
+    play_filter_sql = """
+      AND card_name IN (
+        SELECT card_1 FROM request_rows WHERE card_1 IS NOT NULL
+        UNION DISTINCT
+        SELECT card_2 FROM request_rows WHERE card_2 IS NOT NULL
+        UNION DISTINCT
+        SELECT card_name FROM request_rows WHERE card_name IS NOT NULL
+      )
+    """
+    mw_filter_sql = """
+      AND card_key IN (
+        SELECT card_1_key FROM request_rows WHERE card_1_key IS NOT NULL
+        UNION DISTINCT
+        SELECT card_2_key FROM request_rows WHERE card_2_key IS NOT NULL
+      )
+    """
+    pair_filter_sql = """
+      AND EXISTS (
+        SELECT 1 FROM request_rows r
+        WHERE r.card_1 = card_1 AND r.card_2 = card_2
+      )
+    """
+    card_endgame_filter_sql = """
+      AND EXISTS (
+        SELECT 1 FROM request_rows r
+        WHERE r.card_name = card_name AND r.endgame_name = endgame_name
+      )
+    """
+    endgame_filter_sql = """
+      AND card_name IN (
+        SELECT endgame_name FROM request_rows WHERE endgame_name IS NOT NULL
+      )
+    """
+    request_cte = """
+    request_rows AS (
+      SELECT
+        JSON_VALUE(item, '$.row_key') AS row_key,
+        JSON_VALUE(item, '$.card_1') AS card_1,
+        JSON_VALUE(item, '$.card_2') AS card_2,
+        JSON_VALUE(item, '$.card_1_key') AS card_1_key,
+        JSON_VALUE(item, '$.card_2_key') AS card_2_key,
+        JSON_VALUE(item, '$.card_name') AS card_name,
+        JSON_VALUE(item, '$.map_name') AS map_name,
+        JSON_VALUE(item, '$.round_name') AS round_name,
+        JSON_VALUE(item, '$.endgame_name') AS endgame_name
+        ,JSON_VALUE(item, '$.action_card_key') AS action_card_key
+      FROM UNNEST(JSON_QUERY_ARRAY(@synergy_ci_rows_json)) AS item
+    )
+    """
+
+    if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+        source_ctes = f"""
+        filtered_mw AS (
+          SELECT * FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}`
+          WHERE {where_sql}{mw_filter_sql}
+        ),
+        mw_pairs AS (
+          SELECT
+            table_id, player, ANY_VALUE(elo_delta) AS elo_delta,
+            ARRAY_AGG(card_key ORDER BY card_order) AS cards
+          FROM filtered_mw
+          GROUP BY table_id, player
+          HAVING COUNT(*) = 2 AND COUNT(DISTINCT card_type) = 2
+        )
+        """
+        component_sql = """
+          SELECT r.row_key, 'actual' AS component, 1.0 AS coefficient,
+                 p.table_id, COUNTIF(p.elo_delta IS NOT NULL) AS n,
+                 SUM(p.elo_delta) AS value_sum
+          FROM request_rows r
+          JOIN mw_pairs p
+            ON p.cards[SAFE_OFFSET(0)] = r.card_1_key
+           AND p.cards[SAFE_OFFSET(1)] = r.card_2_key
+          GROUP BY r.row_key, p.table_id
+          UNION ALL
+          SELECT r.row_key, 'first', -1.0, p.table_id,
+                 COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+          FROM request_rows r
+          JOIN filtered_mw p ON p.card_key = r.card_1_key
+          GROUP BY r.row_key, p.table_id
+          UNION ALL
+          SELECT r.row_key, 'second', -1.0, p.table_id,
+                 COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+          FROM request_rows r
+          JOIN filtered_mw p ON p.card_key = r.card_2_key
+          GROUP BY r.row_key, p.table_id
+        """
+        expected_components = 3
+    else:
+        source_ctes = f"""
+        filtered_plays AS (
+          SELECT * FROM `{PREPARED_CARD_PLAYS_TABLE}`
+          WHERE {where_sql}{play_round_sql}{play_filter_sql}
+        )
+        """
+        if view == COMBINATIONS_VIEW_CARD_CARD:
+            source_ctes += f""",
+            filtered_pairs AS (
+              SELECT * FROM `{PREPARED_CARD_PAIRS_TABLE}`
+              WHERE {where_sql}{pair_round_sql}{pair_filter_sql}
+            )
+            """
+            component_sql = """
+              SELECT r.row_key, 'actual' AS component, 1.0 AS coefficient,
+                     p.table_id, COUNTIF(p.elo_delta IS NOT NULL) AS n,
+                     SUM(p.elo_delta) AS value_sum
+              FROM request_rows r
+              JOIN filtered_pairs p ON p.card_1 = r.card_1 AND p.card_2 = r.card_2
+              GROUP BY r.row_key, p.table_id
+              UNION ALL
+              SELECT r.row_key, 'first', -1.0, p.table_id,
+                     COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+              FROM request_rows r JOIN filtered_plays p ON p.card_name = r.card_1
+              GROUP BY r.row_key, p.table_id
+              UNION ALL
+              SELECT r.row_key, 'second', -1.0, p.table_id,
+                     COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+              FROM request_rows r JOIN filtered_plays p ON p.card_name = r.card_2
+              GROUP BY r.row_key, p.table_id
+            """
+            expected_components = 3
+        elif view == COMBINATIONS_VIEW_CARD_ACTION_CARD:
+            source_ctes += f""",
+            filtered_actions AS (
+              SELECT * FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}`
+              WHERE {where_sql}
+                AND card_key IN (
+                  SELECT action_card_key FROM request_rows
+                  WHERE action_card_key IS NOT NULL
+                )
+            ),
+            filtered_card_actions AS (
+              SELECT * FROM `{PREPARED_CARD_ACTION_CARD_TABLE}`
+              WHERE {where_sql}{action_pair_round_sql}
+                AND EXISTS (
+                  SELECT 1 FROM request_rows r
+                  WHERE r.card_name = card_name
+                    AND r.action_card_key = action_card_key
+                )
+            ),
+            filtered_eligible_cards AS (
+              SELECT DISTINCT table_id, player, card_name, elo_delta
+              FROM `{PREPARED_CARD_ACTION_CARD_TABLE}`
+              WHERE {where_sql}{action_pair_round_sql}
+                AND card_name IN (
+                  SELECT card_name FROM request_rows WHERE card_name IS NOT NULL
+                )
+            )
+            """
+            component_sql = """
+              SELECT r.row_key, 'actual' AS component, 1.0 AS coefficient,
+                     p.table_id, COUNTIF(p.elo_delta IS NOT NULL) AS n,
+                     SUM(p.elo_delta) AS value_sum
+              FROM request_rows r
+              JOIN filtered_card_actions p
+                ON p.card_name = r.card_name
+               AND p.action_card_key = r.action_card_key
+              GROUP BY r.row_key, p.table_id
+              UNION ALL
+              SELECT r.row_key, 'first', -1.0, p.table_id,
+                     COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+              FROM request_rows r
+              JOIN filtered_eligible_cards p ON p.card_name = r.card_name
+              GROUP BY r.row_key, p.table_id
+              UNION ALL
+              SELECT r.row_key, 'second', -1.0, p.table_id,
+                     COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+              FROM request_rows r
+              JOIN filtered_actions p ON p.card_key = r.action_card_key
+              GROUP BY r.row_key, p.table_id
+            """
+            expected_components = 3
+        elif view == COMBINATIONS_VIEW_CARD_MAP:
+            component_sql = """
+              SELECT r.row_key, 'context' AS component, 1.0 AS coefficient,
+                     p.table_id, COUNTIF(p.elo_delta IS NOT NULL) AS n,
+                     SUM(p.elo_delta) AS value_sum
+              FROM request_rows r
+              JOIN filtered_plays p ON p.card_name = r.card_name AND p.Map = r.map_name
+              GROUP BY r.row_key, p.table_id
+              UNION ALL
+              SELECT r.row_key, 'general', -1.0, p.table_id,
+                     COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+              FROM request_rows r JOIN filtered_plays p ON p.card_name = r.card_name
+              GROUP BY r.row_key, p.table_id
+            """
+            expected_components = 2
+        elif view == COMBINATIONS_VIEW_CARD_ROUND:
+            component_sql = """
+              SELECT r.row_key, 'context' AS component, 1.0 AS coefficient,
+                     p.table_id, COUNTIF(p.elo_delta IS NOT NULL) AS n,
+                     SUM(p.elo_delta) AS value_sum
+              FROM request_rows r
+              JOIN filtered_plays p
+                ON p.card_name = r.card_name
+               AND IF(p.played_round >= 6, '6+', CAST(p.played_round AS STRING)) = r.round_name
+              GROUP BY r.row_key, p.table_id
+              UNION ALL
+              SELECT r.row_key, 'general', -1.0, p.table_id,
+                     COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+              FROM request_rows r JOIN filtered_plays p ON p.card_name = r.card_name
+              GROUP BY r.row_key, p.table_id
+            """
+            expected_components = 2
+        elif view == COMBINATIONS_VIEW_CARD_ENDGAME:
+            source_ctes += f""",
+            filtered_card_endgames AS (
+              SELECT * FROM `{PREPARED_CARD_ENDGAME_TABLE}`
+              WHERE {where_sql}{play_round_sql}{card_endgame_filter_sql}
+            ),
+            filtered_endgames AS (
+              SELECT * FROM `{PREPARED_ENDGAME_EVENTS_TABLE}`
+              WHERE {where_sql} AND event_role = 'scored'{endgame_filter_sql}
+            )
+            """
+            component_sql = """
+              SELECT r.row_key, 'actual' AS component, 1.0 AS coefficient,
+                     p.table_id, COUNTIF(p.elo_delta IS NOT NULL) AS n,
+                     SUM(p.elo_delta) AS value_sum
+              FROM request_rows r
+              JOIN filtered_card_endgames p
+                ON p.card_name = r.card_name AND p.endgame_name = r.endgame_name
+              GROUP BY r.row_key, p.table_id
+              UNION ALL
+              SELECT r.row_key, 'card', -1.0, p.table_id,
+                     COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+              FROM request_rows r JOIN filtered_plays p ON p.card_name = r.card_name
+              GROUP BY r.row_key, p.table_id
+              UNION ALL
+              SELECT r.row_key, 'endgame', -1.0, p.table_id,
+                     COUNTIF(p.elo_delta IS NOT NULL), SUM(p.elo_delta)
+              FROM request_rows r
+              JOIN filtered_endgames p ON p.card_name = r.endgame_name
+              GROUP BY r.row_key, p.table_id
+            """
+            expected_components = 3
+        else:
+            raise ValueError("Synergy confidence intervals are unavailable for this view")
+
+    return f"""
+    WITH
+    {request_cte},
+    {source_ctes},
+    raw_components AS (
+      {component_sql}
+    ),
+    cluster_components AS (
+      SELECT row_key, component, ANY_VALUE(coefficient) AS coefficient,
+             table_id, SUM(n) AS n, SUM(value_sum) AS value_sum
+      FROM raw_components
+      WHERE n > 0
+      GROUP BY row_key, component, table_id
+    ),
+    component_means AS (
+      SELECT row_key, component, ANY_VALUE(coefficient) AS coefficient,
+             SUM(n) AS total_n,
+             SAFE_DIVIDE(SUM(value_sum), SUM(n)) AS component_mean
+      FROM cluster_components
+      GROUP BY row_key, component
+    ),
+    valid_rows AS (
+      SELECT row_key,
+             SUM(coefficient * component_mean) AS interaction,
+             COUNT(*) AS component_count
+      FROM component_means
+      GROUP BY row_key
+      HAVING component_count = {expected_components}
+    ),
+    cluster_influences AS (
+      SELECT c.row_key, c.table_id,
+             SUM(
+               m.coefficient * (c.value_sum - c.n * m.component_mean) / m.total_n
+             ) AS influence
+      FROM cluster_components c
+      JOIN component_means m USING(row_key, component)
+      JOIN valid_rows v USING(row_key)
+      GROUP BY c.row_key, c.table_id
+    ),
+    variance AS (
+      SELECT row_key, COUNT(*) AS cluster_n,
+             IF(
+               COUNT(*) >= 2,
+               SQRT(COUNT(*) / (COUNT(*) - 1) * SUM(POW(influence, 2))),
+               CAST(NULL AS FLOAT64)
+             ) AS standard_error
+      FROM cluster_influences
+      GROUP BY row_key
+    ),
+    component_stats AS (
+      SELECT m.row_key, m.component, m.total_n, m.component_mean,
+             COUNT(c.table_id) AS cluster_n,
+             IF(
+               COUNT(c.table_id) >= 2,
+               SQRT(
+                 COUNT(c.table_id) / (COUNT(c.table_id) - 1)
+                 * SUM(POW((c.value_sum - c.n * m.component_mean) / m.total_n, 2))
+               ),
+               CAST(NULL AS FLOAT64)
+             ) AS standard_error
+      FROM component_means m
+      JOIN cluster_components c USING(row_key, component)
+      GROUP BY m.row_key, m.component, m.total_n, m.component_mean
+    )
+    SELECT
+      r.row_key,
+      v.interaction,
+      variance.standard_error AS interaction_ci95_se,
+      IF(variance.cluster_n >= 2,
+         v.interaction - 1.96 * variance.standard_error, NULL) AS interaction_ci95_low,
+      IF(variance.cluster_n >= 2,
+         v.interaction + 1.96 * variance.standard_error, NULL) AS interaction_ci95_high,
+      COALESCE(variance.cluster_n, 0) AS interaction_ci95_cluster_n,
+      'table_cluster_delta' AS interaction_ci95_method,
+      {_component_ci_projection(component_aliases)}
+    FROM request_rows r
+    LEFT JOIN valid_rows v USING(row_key)
+    LEFT JOIN variance USING(row_key)
+    LEFT JOIN component_stats cs USING(row_key)
+    GROUP BY r.row_key, v.interaction, variance.standard_error,
+             variance.cluster_n
+    ORDER BY r.row_key
+    """
+
+
+def _synergy_ci_cache_blob_name(
+    data_version,
+    stats_page,
+    view,
+    is_mw,
+    selected_maps,
+    selected_rounds,
+    player_elo_min,
+    player_elo_max,
+    opponent_elo_min,
+    opponent_elo_max,
+    date_from,
+    date_to,
+    completed_only,
+    arena_only,
+    tournament_only,
+    starting_positions,
+    rows,
+):
+    scope = {
+        "schema": 3,
+        "data_version": data_version,
+        "stats_page": stats_page,
+        "view": view,
+        "is_mw": int(is_mw),
+        "maps": sorted(selected_maps),
+        "rounds": sorted(selected_rounds or []),
+        "player_elo_min": player_elo_min,
+        "player_elo_max": player_elo_max,
+        "opponent_elo_min": opponent_elo_min,
+        "opponent_elo_max": opponent_elo_max,
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "completed_only": completed_only,
+        "arena_only": bool(arena_only),
+        "tournament_only": bool(tournament_only),
+        "starting_positions": sorted(starting_positions or []),
+        "rows": sorted(item["row_key"] for item in rows),
+    }
+    digest = hashlib.sha256(
+        json.dumps(scope, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:40]
+    return f"{CACHE_PREFIX}/filters/synergy-ci/{digest}.json"
+
+
+def _load_synergy_ci(
+    data_version,
+    stats_page,
+    view,
+    rows,
+    is_mw,
+    selected_maps,
+    selected_rounds,
+    player_elo_min,
+    player_elo_max,
+    opponent_elo_min,
+    opponent_elo_max,
+    date_from,
+    date_to,
+    completed_only,
+    arena_only=False,
+    tournament_only=False,
+    starting_positions=None,
+    force_refresh=False,
+    persist_synchronously=False,
+    row_limit=100,
+):
+    parsed_rows = _parse_synergy_ci_rows(rows, stats_page, view, limit=row_limit)
+    if not parsed_rows:
+        return {
+            "status": "ok", "data_version": data_version,
+            "data": [], "source": "synergy_ci_empty",
+        }
+    blob_name = _synergy_ci_cache_blob_name(
+        data_version, stats_page, view, is_mw, selected_maps, selected_rounds,
+        player_elo_min, player_elo_max, opponent_elo_min, opponent_elo_max,
+        date_from, date_to, completed_only, arena_only, tournament_only,
+        starting_positions,
+        parsed_rows,
+    )
+    if not force_refresh:
+        cached = _read_cache_blob(blob_name, "synergy_ci_hit")
+        if cached is not None:
+            return cached
+
+    where_sql, parameters = _build_where_sql(
+        is_mw, selected_maps, player_elo_min, player_elo_max,
+        opponent_elo_min, opponent_elo_max, date_from, date_to,
+        completed_only, arena_only=arena_only, tournament_only=tournament_only,
+        starting_positions=starting_positions,
+    )
+    query = _build_synergy_ci_query(
+        where_sql, stats_page, view, selected_rounds=selected_rounds,
+        requested_rows=parsed_rows,
+    )
+    parameters.append(bigquery.ScalarQueryParameter(
+        "synergy_ci_rows_json", "STRING",
+        json.dumps(parsed_rows, ensure_ascii=False, separators=(",", ":")),
+    ))
+    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    started_at = time.perf_counter()
+    job = client.query(
+        query,
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=parameters,
+            use_query_cache=not force_refresh,
+        ),
+        location=BIGQUERY_LOCATION,
+    )
+    result = []
+    for row in job.result():
+        item = dict(row.items())
+        for field, value in list(item.items()):
+            if field == "interaction" or field.endswith("_ci95_low") or field.endswith("_ci95_high") or field.endswith("_ci95_se"):
+                item[field] = float(value) if value is not None else None
+            elif field.endswith("_ci95_n") or field.endswith("_ci95_cluster_n"):
+                item[field] = int(value or 0)
+        result.append(item)
+    payload = {
+        "status": "ok",
+        "data_version": data_version,
+        "stats_page": stats_page,
+        "combinations_view": view if stats_page == STATS_PAGE_COMBINATIONS else None,
+        "mw_action_cards_view": view if stats_page == STATS_PAGE_MW_ACTION_CARDS else None,
+        "data": result,
+        "source": "synergy_ci_query",
+        "total_ms": _ms_since(started_at),
+        "job_id": job.job_id,
+    }
+    # Make exact repeats instant on this instance. Interactive CI batches do
+    # not wait for Cloud Storage; snapshot generation keeps the synchronous
+    # write so atomic publication never references a CI payload that was not
+    # durably cached.
+    _memory_cache_put(blob_name, payload)
+    if force_refresh or persist_synchronously:
+        if not _write_cache_blob(
+            blob_name, payload, "synergy_ci_refreshed", compresslevel=1
+        ):
+            logging.warning("Could not persist Synergy CI cache %s", blob_name)
+    else:
+        _enqueue_cache_blob_write(
+            blob_name, payload, "synergy_ci_refreshed", compresslevel=1
+        )
+    return payload
+
+
 def _build_combinations_query(
     where_sql,
     combinations_view,
@@ -8096,6 +9916,7 @@ def _build_combinations_query(
             conditions.append("played_round >= 6")
         round_sql = f" AND ({' OR '.join(conditions)})"
     pair_round_sql = ""
+    action_pair_round_sql = ""
     if apply_round_filter:
         pair_conditions_1 = []
         pair_conditions_2 = []
@@ -8122,6 +9943,9 @@ def _build_combinations_query(
             f" AND ({' OR '.join(pair_conditions_1)})"
             f" AND ({' OR '.join(pair_conditions_2)})"
         )
+        action_pair_round_sql = (
+            f" AND ({' OR '.join(pair_conditions_1)})"
+        ).replace("played_rounds_1_json", "played_rounds_json")
     if combinations_view == COMBINATIONS_VIEW_CARD_CARD:
         common_ctes = f"""
         filtered AS (
@@ -8149,10 +9973,11 @@ def _build_combinations_query(
         common_ctes = f"""
         filtered AS (
           SELECT
-            table_id, player, Map, elo, opponent_elo, elo_delta,
+            table_id, player, Map, pre_match_elo, opponent_pre_match_elo, elo_delta,
             card_name, card_type, played_round
-          FROM `{PREPARED_CARD_PLAYS_TABLE}`
+          FROM `{PREPARED_CARD_MOMENTS_TABLE}`
           WHERE {where_sql}
+            AND moment = 'played'
             {round_sql}
         ),
         played AS (
@@ -8182,13 +10007,75 @@ def _build_combinations_query(
       END
     """
 
+    if combinations_view == COMBINATIONS_VIEW_CARD_ACTION_CARD:
+        return f"""
+        WITH
+        card_individual AS (
+          SELECT card_name, ANY_VALUE(card_type) AS card_type,
+                 SAFE_DIVIDE(SUM(delta_sum), SUM(delta_count)) AS individual_delta
+          FROM `{PREPARED_CARD_ACTION_CARD_AGGREGATES_TABLE}`
+          WHERE {where_sql}{action_pair_round_sql}
+          GROUP BY card_name
+        ),
+        action_individual AS (
+          SELECT card_key, ANY_VALUE(card_name) AS card_name,
+                 ANY_VALUE(card_type) AS card_type,
+                 AVG(elo_delta) AS individual_delta
+          FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}`
+          WHERE {where_sql}
+          GROUP BY card_key
+        ),
+        pair_observations AS (
+          SELECT *
+          FROM `{PREPARED_CARD_ACTION_CARD_AGGREGATES_TABLE}`
+          WHERE {where_sql}{action_pair_round_sql}
+        ),
+        pair_agg AS (
+          SELECT
+            card_name, ANY_VALUE(card_type) AS card_type,
+            action_card_key, ANY_VALUE(action_card_name) AS action_card_name,
+            ANY_VALUE(action_card_type) AS action_card_type,
+            ANY_VALUE(action_card_number) AS action_card_number,
+            SAFE_DIVIDE(SUM(delta_sum), SUM(delta_count)) AS delta_actual,
+            SQRT(GREATEST(0, SAFE_DIVIDE(
+              SUM(delta_sum_squares) - SAFE_DIVIDE(POW(SUM(delta_sum), 2), SUM(delta_count)),
+              SUM(delta_count) - 1
+            ))) AS delta_actual_ci_sd,
+            SUM(delta_count) AS delta_actual_ci_n,
+            SAFE_DIVIDE(SUM(elo_sum), SUM(elo_count)) AS avg_elo,
+            SUM(observation_count) AS n_played
+          FROM pair_observations
+          GROUP BY card_name, action_card_key
+        )
+        SELECT
+          p.card_name, p.card_type,
+          ROUND(c.individual_delta, 3) AS delta_card,
+          p.action_card_key, p.action_card_name, p.action_card_type, p.action_card_number,
+          ROUND(a.individual_delta, 3) AS delta_action,
+          ROUND(c.individual_delta + a.individual_delta, 3) AS delta_combined,
+          ROUND(p.delta_actual, 3) AS delta_actual,
+          p.delta_actual AS delta_actual_ci_mean,
+          p.delta_actual_ci_sd, p.delta_actual_ci_n,
+          ROUND(p.delta_actual - (c.individual_delta + a.individual_delta), 3) AS interaction,
+          ROUND(p.avg_elo, 0) AS avg_elo,
+          p.n_played,
+          CONCAT(
+            UPPER(SUBSTR(p.card_type, 1, 1)), SUBSTR(p.card_type, 2),
+            ' + ', p.action_card_type
+          ) AS pair_type
+        FROM pair_agg p
+        JOIN card_individual c USING(card_name)
+        JOIN action_individual a ON a.card_key = p.action_card_key
+        ORDER BY interaction DESC, n_played DESC, card_name, action_card_key
+        """
+
     if combinations_view == COMBINATIONS_VIEW_CARD_ENDGAME:
         return f"""
         WITH
         {common_ctes},
         scored AS (
           SELECT DISTINCT
-            table_id, player, card_name AS endgame_name, elo_delta, elo
+            table_id, player, card_name AS endgame_name, elo_delta, pre_match_elo
           FROM `{PREPARED_ENDGAME_EVENTS_TABLE}`
           WHERE {where_sql} AND event_role = 'scored'
         ),
@@ -8253,7 +10140,7 @@ def _build_combinations_query(
             AVG(elo_delta) AS map_delta,
             STDDEV_SAMP(elo_delta) AS map_delta_ci_sd,
             COUNT(elo_delta) AS map_delta_ci_n,
-            AVG(elo) AS avg_elo,
+            AVG(pre_match_elo) AS avg_elo,
             COUNT(*) AS n_played
           FROM played
           WHERE Map IN UNNEST(@combination_maps)
@@ -8288,7 +10175,7 @@ def _build_combinations_query(
             AVG(elo_delta) AS round_delta,
             STDDEV_SAMP(elo_delta) AS round_delta_ci_sd,
             COUNT(elo_delta) AS round_delta_ci_n,
-            AVG(elo) AS avg_elo,
+            AVG(pre_match_elo) AS avg_elo,
             COUNT(*) AS n_played
           FROM played
           WHERE played_round IS NOT NULL
@@ -8453,6 +10340,19 @@ def _build_combinations_paged_query(
         range_fields = ["avg_elo", "interaction", "delta_1", "delta_2", "delta_combined", "delta_actual"]
         card_options_sql = "ARRAY<STRING>[]"
         endgame_options_sql = "ARRAY<STRING>[]"
+        action_card_options_sql = "ARRAY<STRING>[]"
+    elif combinations_view == COMBINATIONS_VIEW_CARD_ACTION_CARD:
+        sort_expressions = {}
+        stable_fields = ["card_name", "action_card_key", "pair_type"]
+        visible_filter = """
+        pair_type IN UNNEST(@combination_pair_types)
+        AND (@combination_primary = '' OR card_name = @combination_primary)
+        AND (@combination_secondary = '' OR action_card_key = @combination_secondary)
+        """
+        range_fields = ["avg_elo", "interaction", "delta_card", "delta_action", "delta_combined", "delta_actual"]
+        card_options_sql = "ARRAY_AGG(DISTINCT card_name IGNORE NULLS ORDER BY card_name)"
+        endgame_options_sql = "ARRAY<STRING>[]"
+        action_card_options_sql = "ARRAY_AGG(DISTINCT action_card_key IGNORE NULLS ORDER BY action_card_key)"
     else:
         context_field = {
             COMBINATIONS_VIEW_CARD_MAP: "map_name",
@@ -8470,11 +10370,13 @@ def _build_combinations_paged_query(
             range_fields = ["avg_elo", "interaction", "delta_general", "delta_map"]
             card_options_sql = "ARRAY_AGG(DISTINCT card_name IGNORE NULLS ORDER BY card_name)"
             endgame_options_sql = "ARRAY<STRING>[]"
+            action_card_options_sql = "ARRAY<STRING>[]"
         elif combinations_view == COMBINATIONS_VIEW_CARD_ROUND:
             visible_filter += " AND round_name IN UNNEST(@combination_header_rounds)"
             range_fields = ["avg_elo", "interaction", "delta_general", "delta_round"]
             card_options_sql = "ARRAY_AGG(DISTINCT card_name IGNORE NULLS ORDER BY card_name)"
             endgame_options_sql = "ARRAY<STRING>[]"
+            action_card_options_sql = "ARRAY<STRING>[]"
         else:
             visible_filter += (
                 " AND (@combination_secondary = '' OR endgame_name = @combination_secondary)"
@@ -8482,11 +10384,12 @@ def _build_combinations_paged_query(
             range_fields = ["avg_elo", "interaction", "delta_card", "delta_endgame", "delta_combined", "delta_actual"]
             card_options_sql = "ARRAY_AGG(DISTINCT card_name IGNORE NULLS ORDER BY card_name)"
             endgame_options_sql = "ARRAY_AGG(DISTINCT endgame_name IGNORE NULLS ORDER BY endgame_name)"
+            action_card_options_sql = "ARRAY<STRING>[]"
 
     direct_sort_fields = {
         "delta_combined", "delta_actual", "delta_general", "delta_map", "delta_round",
-        "delta_card", "delta_endgame", "interaction", "avg_elo", "n_played",
-        "pair_type", "card_name", "map_name", "round_name", "endgame_name", "card_type",
+        "delta_card", "delta_action", "delta_endgame", "interaction", "avg_elo", "n_played",
+        "pair_type", "card_name", "action_card_name", "action_card_key", "map_name", "round_name", "endgame_name", "card_type",
     }
     if sort_field not in COMBINATION_SORT_FIELDS[combinations_view]:
         sort_field = "interaction"
@@ -8533,7 +10436,8 @@ def _build_combinations_paged_query(
     options AS (
       SELECT
         {card_options_sql} AS card_options,
-        {endgame_options_sql} AS endgame_options
+        {endgame_options_sql} AS endgame_options,
+        {action_card_options_sql} AS action_card_options
       FROM base
     )
     SELECT
@@ -8543,6 +10447,7 @@ def _build_combinations_paged_query(
       ranges.*,
       options.card_options,
       options.endgame_options,
+      options.action_card_options,
       ARRAY(
         SELECT AS STRUCT *
         FROM visible
@@ -8554,6 +10459,298 @@ def _build_combinations_paged_query(
     CROSS JOIN candidate_summary
     CROSS JOIN options
     """
+
+
+def _build_mw_action_cards_query(
+    selected_maps,
+    player_elo_min,
+    player_elo_max,
+    opponent_elo_min,
+    opponent_elo_max,
+    date_from,
+    date_to,
+    completed_only,
+    arena_only,
+    tournament_only,
+    starting_positions=None,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
+):
+    parameters = []
+    if mw_action_cards_view != MW_ACTION_CARDS_VIEW_BY_MAP:
+        parameters.append(bigquery.ArrayQueryParameter("selected_maps", "STRING", selected_maps))
+    for name, value in (
+        ("player_elo_min", player_elo_min),
+        ("player_elo_max", player_elo_max),
+        ("opponent_elo_min", opponent_elo_min),
+        ("opponent_elo_max", opponent_elo_max),
+    ):
+        if value is not None:
+            parameters.append(bigquery.ScalarQueryParameter(name, "INT64", value))
+    if date_from is not None:
+        parameters.append(bigquery.ScalarQueryParameter("date_from", "DATE", date_from))
+    if date_to is not None:
+        parameters.append(bigquery.ScalarQueryParameter("date_to", "DATE", date_to))
+    if starting_positions:
+        parameters.append(bigquery.ArrayQueryParameter(
+            "starting_positions", "STRING", starting_positions
+        ))
+
+    def rating_bounds(alias):
+        clauses = []
+        for field, name, value, operator in (
+            ("pre_match_elo", "player_elo_min", player_elo_min, ">="),
+            ("pre_match_elo", "player_elo_max", player_elo_max, "<="),
+            ("opponent_pre_match_elo", "opponent_elo_min", opponent_elo_min, ">="),
+            ("opponent_pre_match_elo", "opponent_elo_max", opponent_elo_max, "<="),
+        ):
+            if value is not None:
+                clauses.append(f"COALESCE({alias}.{field}, 0) {operator} @{name}")
+        return clauses
+
+    def common_where(alias, map_mode="own"):
+        clauses = rating_bounds(alias)
+        if map_mode in ("own", "both"):
+            clauses.append(f"{alias}.Map IN UNNEST(@selected_maps)")
+        if map_mode == "both":
+            clauses.append(f"{alias}.opponent_map IN UNNEST(@selected_maps)")
+        if date_from is not None:
+            clauses.append(f"{alias}.game_date >= @date_from")
+        if date_to is not None:
+            clauses.append(f"{alias}.game_date <= @date_to")
+        if completed_only:
+            clauses.append(f"({_completed_game_sql(alias)})")
+        if arena_only:
+            clauses.append(f"{alias}.arena_season IS NOT NULL")
+        if tournament_only:
+            clauses.append(f"COALESCE({alias}.is_tournament, FALSE) = TRUE")
+        if starting_positions:
+            clauses.append(f"{alias}.starting_position IN UNNEST(@starting_positions)")
+        return clauses or ["TRUE"]
+
+    if mw_action_cards_view == MW_ACTION_CARDS_VIEW_BY_MAP:
+        where_sql = " AND ".join(common_where("a", map_mode="none"))
+        map_columns = []
+        for map_item in ALL_MAPS_FOR_METRICS[:15]:
+            key = map_item["key"]
+            full = map_item["full"].replace("'", "''")
+            map_columns.extend([
+                f"ROUND(MAX(IF(m.Map = '{full}', m.delta_mean, NULL)), 3) AS {key}",
+                f"MAX(IF(m.Map = '{full}', m.delta_mean, NULL)) AS {key}_ci_mean",
+                f"MAX(IF(m.Map = '{full}', m.delta_sd, NULL)) AS {key}_ci_sd",
+                f"COALESCE(MAX(IF(m.Map = '{full}', m.delta_n, NULL)), 0) AS {key}_ci_n",
+            ])
+        return f"""
+        WITH filtered AS (
+          SELECT *
+          FROM `{PREPARED_MW_ACTION_CARD_MAP_AGGREGATES_TABLE}` a
+          WHERE {where_sql}
+        ), per_map AS (
+          SELECT
+            card_key, Map,
+            SAFE_DIVIDE(SUM(delta_sum), SUM(delta_count)) AS delta_mean,
+            SQRT(GREATEST(0, SAFE_DIVIDE(
+              SUM(delta_sum_squares)
+                - SAFE_DIVIDE(POW(SUM(delta_sum), 2), SUM(delta_count)),
+              SUM(delta_count) - 1
+            ))) AS delta_sd,
+            SUM(delta_count) AS delta_n
+          FROM filtered
+          GROUP BY card_key, Map
+        ), overall AS (
+          SELECT
+            card_key,
+            SAFE_DIVIDE(SUM(delta_sum), SUM(delta_count)) AS delta_mean,
+            SQRT(GREATEST(0, SAFE_DIVIDE(
+              SUM(delta_sum_squares)
+                - SAFE_DIVIDE(POW(SUM(delta_sum), 2), SUM(delta_count)),
+              SUM(delta_count) - 1
+            ))) AS delta_sd,
+            SUM(delta_count) AS delta_n
+          FROM filtered
+          GROUP BY card_key
+        ), catalog AS ({_mw_action_card_catalog_sql()})
+        SELECT
+          c.card_order, c.card_type AS type, c.card_number, c.card_name,
+          {', '.join(map_columns)},
+          ROUND(o.delta_mean, 3) AS delta_overall,
+          o.delta_mean AS delta_overall_ci_mean,
+          o.delta_sd AS delta_overall_ci_sd,
+          COALESCE(o.delta_n, 0) AS delta_overall_ci_n
+        FROM catalog c
+        LEFT JOIN per_map m USING(card_key)
+        LEFT JOIN overall o USING(card_key)
+        GROUP BY
+          c.card_order, c.card_type, c.card_number, c.card_name,
+          o.delta_mean, o.delta_sd, o.delta_n
+        ORDER BY c.card_order
+        """, parameters
+
+    if mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES:
+        pair_where = " AND ".join(common_where("p", map_mode="own"))
+        standalone_where = " AND ".join(common_where("s", map_mode="own"))
+        return f"""
+        WITH standalone AS (
+          SELECT card_key, AVG(elo_delta) AS individual_delta
+          FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}` s
+          WHERE {standalone_where}
+          GROUP BY card_key
+        ), pair_agg AS (
+          SELECT
+            card_1_order, card_1_key, card_1_type, card_1_number, card_1_name,
+            card_2_order, card_2_key, card_2_type, card_2_number, card_2_name,
+            SAFE_DIVIDE(SUM(delta_sum), SUM(delta_count)) AS delta_actual,
+            SQRT(GREATEST(0, SAFE_DIVIDE(
+              SUM(delta_sum_squares)
+                - SAFE_DIVIDE(POW(SUM(delta_sum), 2), SUM(delta_count)),
+              SUM(delta_count) - 1
+            ))) AS delta_actual_ci_sd,
+            SUM(delta_count) AS delta_actual_ci_n,
+            SAFE_DIVIDE(SUM(elo_sum), SUM(elo_count)) AS avg_elo,
+            SUM(observation_count) AS n_picked
+          FROM `{PREPARED_MW_ACTION_CARD_SYNERGY_AGGREGATES_TABLE}` p
+          WHERE {pair_where}
+          GROUP BY
+            card_1_order, card_1_key, card_1_type, card_1_number, card_1_name,
+            card_2_order, card_2_key, card_2_type, card_2_number, card_2_name
+        )
+        SELECT
+          p.card_1_order, p.card_1_key, p.card_1_type, p.card_1_number, p.card_1_name,
+          ROUND(s1.individual_delta, 3) AS delta_1,
+          p.card_2_order, p.card_2_key, p.card_2_type, p.card_2_number, p.card_2_name,
+          ROUND(s2.individual_delta, 3) AS delta_2,
+          ROUND(s1.individual_delta + s2.individual_delta, 3) AS delta_combined,
+          ROUND(p.delta_actual, 3) AS delta_actual,
+          p.delta_actual AS delta_actual_ci_mean,
+          p.delta_actual_ci_sd,
+          p.delta_actual_ci_n,
+          ROUND(
+            p.delta_actual - (s1.individual_delta + s2.individual_delta), 3
+          ) AS interaction,
+          ROUND(p.avg_elo, 0) AS avg_elo,
+          p.n_picked,
+          CONCAT(p.card_1_type, ' + ', p.card_2_type) AS pair_type
+        FROM pair_agg p
+        JOIN standalone s1 ON p.card_1_key = s1.card_key
+        JOIN standalone s2 ON p.card_2_key = s2.card_key
+        ORDER BY interaction DESC, n_picked DESC,
+          p.card_1_order, p.card_2_order
+        """, parameters
+
+    player_where = common_where("p", map_mode="own")
+    table_where = [
+        "d.p1_map IN UNNEST(@selected_maps)",
+        "d.p2_map IN UNNEST(@selected_maps)",
+    ]
+    # Draft percentages are table-level observations, so neither stored player
+    # owns the Player/Opponent role. Match the requested Elo pairing in either
+    # orientation: p1 as Player and p2 as Opponent, or the reverse. The player-
+    # level Delta/Elo query above keeps its natural selected-player orientation.
+    def role_bounds(field, role):
+        values = (
+            (f"{role}_elo_min", player_elo_min if role == "player" else opponent_elo_min, ">="),
+            (f"{role}_elo_max", player_elo_max if role == "player" else opponent_elo_max, "<="),
+        )
+        return [
+            f"COALESCE({field}, 0) {operator} @{parameter_name}"
+            for parameter_name, value, operator in values
+            if value is not None
+        ]
+
+    if any(value is not None for value in (
+        player_elo_min, player_elo_max, opponent_elo_min, opponent_elo_max,
+    )):
+        p1_as_player = (
+            role_bounds("d.p1_pre_match_elo", "player")
+            + role_bounds("d.p2_pre_match_elo", "opponent")
+        )
+        p2_as_player = (
+            role_bounds("d.p2_pre_match_elo", "player")
+            + role_bounds("d.p1_pre_match_elo", "opponent")
+        )
+        if starting_positions == ["First player"]:
+            table_where.append("(" + " AND ".join(p1_as_player) + ")")
+        elif starting_positions == ["Second player"]:
+            table_where.append("(" + " AND ".join(p2_as_player) + ")")
+        else:
+            table_where.append(
+                "((" + " AND ".join(p1_as_player) + ") OR ("
+                + " AND ".join(p2_as_player) + "))"
+            )
+    if date_from is not None:
+        table_where.append("d.game_date >= @date_from")
+    if date_to is not None:
+        table_where.append("d.game_date <= @date_to")
+    if completed_only:
+        table_where.append(f"({_completed_game_sql('d')})")
+    if arena_only:
+        table_where.append("d.arena_season IS NOT NULL")
+    if tournament_only:
+        table_where.append("COALESCE(d.is_tournament, FALSE) = TRUE")
+
+    catalog_sql = _mw_action_card_catalog_sql()
+    query = f"""
+    WITH
+    catalog AS ({catalog_sql}),
+    player_stats AS (
+      SELECT
+        p.card_key,
+        ROUND(AVG(p.elo_delta), 3) AS delta_picked,
+        AVG(p.elo_delta) AS delta_picked_ci_mean,
+        STDDEV_SAMP(p.elo_delta) AS delta_picked_ci_sd,
+        COUNT(p.elo_delta) AS delta_picked_ci_n,
+        ROUND(AVG(IF(p.upgraded, p.elo_delta, NULL)), 3) AS delta_picked_upgraded,
+        AVG(IF(p.upgraded, p.elo_delta, NULL)) AS delta_picked_upgraded_ci_mean,
+        STDDEV_SAMP(IF(p.upgraded, p.elo_delta, NULL)) AS delta_picked_upgraded_ci_sd,
+        COUNTIF(p.upgraded AND p.elo_delta IS NOT NULL) AS delta_picked_upgraded_ci_n,
+        ROUND(AVG(IF(NOT p.upgraded, p.elo_delta, NULL)), 3) AS delta_picked_basic,
+        AVG(IF(NOT p.upgraded, p.elo_delta, NULL)) AS delta_picked_basic_ci_mean,
+        STDDEV_SAMP(IF(NOT p.upgraded, p.elo_delta, NULL)) AS delta_picked_basic_ci_sd,
+        COUNTIF(NOT p.upgraded AND p.elo_delta IS NOT NULL) AS delta_picked_basic_ci_n,
+        ROUND(AVG(p.pre_match_elo), 0) AS elo_picked
+      FROM `{PREPARED_MW_ACTION_CARD_PLAYERS_TABLE}` p
+       WHERE {' AND '.join(player_where)}
+      GROUP BY p.card_key
+    ),
+    draft_stats AS (
+      SELECT
+        d.card_key,
+        COUNT(*) AS available_n,
+        COUNTIF(d.picked) AS picked_n,
+        COUNTIF(d.drafted_first) AS drafted_first_n,
+        COUNTIF(d.drafted_second) AS drafted_second_n,
+        COUNTIF(d.undrafted) AS undrafted_n
+      FROM `{PREPARED_MW_ACTION_CARD_DRAFTS_TABLE}` d
+      WHERE {' AND '.join(table_where)}
+      GROUP BY d.card_key
+    )
+    SELECT
+      c.card_order, c.card_type AS type, c.card_number, c.card_name,
+      p.delta_picked, p.delta_picked_ci_mean, p.delta_picked_ci_sd,
+      COALESCE(p.delta_picked_ci_n, 0) AS delta_picked_ci_n,
+      p.delta_picked_upgraded,
+      p.delta_picked_upgraded_ci_mean,
+      p.delta_picked_upgraded_ci_sd,
+      COALESCE(p.delta_picked_upgraded_ci_n, 0) AS delta_picked_upgraded_ci_n,
+      p.delta_picked_basic,
+      p.delta_picked_basic_ci_mean,
+      p.delta_picked_basic_ci_sd,
+      COALESCE(p.delta_picked_basic_ci_n, 0) AS delta_picked_basic_ci_n,
+      p.elo_picked,
+      COALESCE(d.available_n, 0) AS available_n,
+      COALESCE(d.picked_n, 0) AS picked_n,
+      ROUND(100 * SAFE_DIVIDE(d.picked_n, d.available_n), 4) AS picked_pct,
+      COALESCE(d.drafted_first_n, 0) AS drafted_first_n,
+      ROUND(100 * SAFE_DIVIDE(d.drafted_first_n, d.available_n), 4) AS drafted_first_pct,
+      COALESCE(d.drafted_second_n, 0) AS drafted_second_n,
+      ROUND(100 * SAFE_DIVIDE(d.drafted_second_n, d.available_n), 4) AS drafted_second_pct,
+      COALESCE(d.undrafted_n, 0) AS undrafted_n,
+      ROUND(100 * SAFE_DIVIDE(d.undrafted_n, d.available_n), 4) AS undrafted_pct
+    FROM catalog c
+    LEFT JOIN player_stats p USING(card_key)
+    LEFT JOIN draft_stats d USING(card_key)
+    ORDER BY c.card_order
+    """
+    return query, parameters
 
 
 def _query_card_stats(
@@ -8572,6 +10769,7 @@ def _query_card_stats(
     completed_only,
     arena_only=False,
     tournament_only=False,
+    starting_positions=None,
     endgames_view=ENDGAMES_VIEW_GENERAL,
     maps_view=MAPS_VIEW_METRICS,
     sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP,
@@ -8591,6 +10789,7 @@ def _query_card_stats(
     players_arena_only=False,
     players_arena_seasons=None,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
     records_player=None,
     records_arena_only=False,
     records_tournament_only=False,
@@ -8613,7 +10812,24 @@ def _query_card_stats(
     use_query_cache=True,
     query_priority=bigquery.QueryPriority.INTERACTIVE,
 ):
-    if stats_page == STATS_PAGE_HOME:
+    if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+        if int(is_mw) != 1:
+            raise ValueError("MW Action Cards is only available for Marine Worlds")
+        query, query_parameters = _build_mw_action_cards_query(
+            selected_maps,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            completed_only,
+            arena_only,
+            tournament_only,
+            starting_positions,
+            mw_action_cards_view,
+        )
+    elif stats_page == STATS_PAGE_HOME:
         # Home is the deliberate all-map exception: Maps 1-8, A, and 0 remain
         # eligible because the Home filter bar exposes them as active defaults.
         where_sql, query_parameters = _build_full_sample_where_sql(
@@ -8629,6 +10845,7 @@ def _query_card_stats(
             exclude_invalid_maps=False,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         query = _build_home_stats_query(where_sql)
     elif stats_page == STATS_PAGE_MAPS:
@@ -8649,6 +10866,7 @@ def _query_card_stats(
                 date_to,
                 arena_only,
                 tournament_only,
+                starting_positions,
             )
             query = _build_maps_metrics_query(where_sql)
     elif stats_page == STATS_PAGE_ICONS:
@@ -8664,6 +10882,7 @@ def _query_card_stats(
             None,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         query = _build_icons_query(where_sql)
     elif stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
@@ -8679,6 +10898,7 @@ def _query_card_stats(
             None,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         query = _build_build_hexes_query(where_sql, expanded=hexes_expanded)
     elif stats_page == STATS_PAGE_PREDICTORS:
@@ -8694,8 +10914,11 @@ def _query_card_stats(
             completed_only,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
-        query = _build_predictors_query(where_sql, predictors_view)
+        query = _build_predictors_query(
+            where_sql, predictors_view, starting_positions=starting_positions
+        )
     elif stats_page == STATS_PAGE_ACTIONS and actions_view in (
         ACTIONS_VIEW_UPGRADES,
         ACTIONS_VIEW_UPGRADES_BY_MAP,
@@ -8712,6 +10935,7 @@ def _query_card_stats(
             completed_only,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         query = _build_actions_query(where_sql, actions_view)
     elif stats_page == STATS_PAGE_CONSERVATION and conservation_view == CONSERVATION_VIEW_PROJECTS:
@@ -8727,6 +10951,7 @@ def _query_card_stats(
             None,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         query = _build_conservation_query(where_sql, conservation_view)
     elif stats_page == STATS_PAGE_SCORING:
@@ -8742,6 +10967,7 @@ def _query_card_stats(
             None,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         query = _build_scoring_query(where_sql, scoring_view, expanded=scoring_expanded)
     elif stats_page == STATS_PAGE_WORKERS and workers_view == WORKERS_VIEW_GENERAL:
@@ -8757,6 +10983,7 @@ def _query_card_stats(
             None,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         query = _build_workers_query(where_sql, workers_view)
     elif stats_page == STATS_PAGE_WORKERS:
@@ -8772,9 +10999,15 @@ def _query_card_stats(
             completed_only,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         query = _build_workers_query(where_sql, workers_view)
     elif stats_page == STATS_PAGE_PLAYERS:
+        players_completion_filter = (
+            completed_only
+            if players_view == PLAYERS_VIEW_PERFORMANCE_BY_MAP
+            else True
+        )
         where_sql, query_parameters = _build_full_sample_where_sql(
             is_mw,
             selected_maps,
@@ -8784,10 +11017,11 @@ def _query_card_stats(
             opponent_elo_max,
             date_from,
             date_to,
-            True,
+            players_completion_filter,
             exclude_invalid_maps=False,
             arena_only=False,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
         if players_arena_only:
             where_sql += " AND f.arena_season IN UNNEST(@players_arena_seasons)"
@@ -8855,7 +11089,12 @@ def _query_card_stats(
         rollup_where_sql = where_sql.replace(
             "CAST(f.game_ended_at AS DATE)", "f.game_date"
         )
-        if players_view == PLAYERS_VIEW_COMPARISON:
+        if players_view == PLAYERS_VIEW_PERFORMANCE_BY_MAP:
+            query = _build_players_performance_by_map_query(
+                where_sql if last_x_games else rollup_where_sql,
+                use_last_x=bool(last_x_games),
+            )
+        elif players_view == PLAYERS_VIEW_COMPARISON:
             query = (
                 _build_players_comparison_query(
                     where_sql, PREPARED_PLAYERS_RECENT_TABLE
@@ -8893,6 +11132,7 @@ def _query_card_stats(
             exclude_invalid_maps=False,
             arena_only=(records_arena_only or arena_only),
             tournament_only=(records_tournament_only or tournament_only),
+            starting_positions=starting_positions,
         )
         if records_player:
             # The player predicate is part of the Records SQL, while its value
@@ -8920,6 +11160,7 @@ def _query_card_stats(
             completed_only,
             arena_only=arena_only,
             tournament_only=tournament_only,
+            starting_positions=starting_positions,
         )
     if stats_page == STATS_PAGE_SPONSOR_ENDGAMES:
         query = _build_sponsor_endgames_query(where_sql, sponsor_endgames_view)
@@ -9042,6 +11283,33 @@ def _query_card_stats(
         return rows, timing
 
     if stats_page == STATS_PAGE_PLAYERS:
+        if players_view == PLAYERS_VIEW_PERFORMANCE_BY_MAP:
+            schema_field_names = {field.name for field in results.schema}
+            for row in results:
+                item = {
+                    "sort_order": int(row.sort_order or 0),
+                    "player": row.player,
+                }
+                for map_meta in ALL_MAPS_FOR_METRICS:
+                    key = map_meta["key"]
+                    item[key] = getattr(row, key, None)
+                    _attach_ci95(item, row, schema_field_names, key)
+                rows.append(item)
+            iteration_ms = _ms_since(iteration_started_at)
+            timing = {
+                "client_ms": client_ms,
+                "submit_ms": submit_ms,
+                "query_wait_ms": query_wait_ms,
+                "iteration_ms": iteration_ms,
+                "job_id": job.job_id,
+                "job_created": _dt_iso(job.created),
+                "job_started": _dt_iso(job.started),
+                "job_ended": _dt_iso(job.ended),
+                "job_cache_hit": job.cache_hit,
+                "job_total_bytes_processed": job.total_bytes_processed,
+                "job_total_slot_ms": job.slot_millis,
+            }
+            return rows, timing
         if players_view == PLAYERS_VIEW_COMPARISON:
             for row in results:
                 values = []
@@ -9143,7 +11411,10 @@ def _query_card_stats(
                 "game_date": getattr(row, "game_date", None),
                 "result_code": getattr(row, "result_code", None),
                 "ept": getattr(row, "ept", 0),
-                "opponent_elo": getattr(row, "opponent_elo", None),
+                # Public Records payload compatibility. The value is derived
+                # from the opponent row's pre_match_elo.
+                "opponent_elo": getattr(row, "opponent_pre_match_elo", None),
+                "starting_position": getattr(row, "starting_position", None),
                 "source_enriched": bool(getattr(row, "source_enriched", False)),
                 "is_arena": bool(getattr(row, "is_arena", False)),
                 "is_tournament": bool(getattr(row, "is_tournament", False)),
@@ -9569,6 +11840,84 @@ def _query_card_stats(
         }
         return rows, timing
 
+    if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+        schema_field_names = {field.name for field in results.schema}
+        for row in results:
+            if mw_action_cards_view == MW_ACTION_CARDS_VIEW_BY_MAP:
+                item = {
+                    "card_order": row.card_order,
+                    "type": row.type,
+                    "card_number": row.card_number,
+                    "card_name": row.card_name,
+                    "delta_overall": row.delta_overall,
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_overall")
+                for map_item in ALL_MAPS_FOR_METRICS[:15]:
+                    key = map_item["key"]
+                    item[key] = getattr(row, key, None)
+                    _attach_ci95(item, row, schema_field_names, key)
+            elif mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES:
+                item = {
+                    "card_1_order": row.card_1_order,
+                    "card_1_key": row.card_1_key,
+                    "card_1_type": row.card_1_type,
+                    "card_1_number": row.card_1_number,
+                    "card_1_name": row.card_1_name,
+                    "delta_1": row.delta_1,
+                    "card_2_order": row.card_2_order,
+                    "card_2_key": row.card_2_key,
+                    "card_2_type": row.card_2_type,
+                    "card_2_number": row.card_2_number,
+                    "card_2_name": row.card_2_name,
+                    "delta_2": row.delta_2,
+                    "delta_actual": row.delta_actual,
+                    "avg_elo": row.avg_elo,
+                    "n_picked": row.n_picked,
+                    "pair_type": row.pair_type,
+                    "delta_combined": row.delta_combined,
+                    "interaction": row.interaction,
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_actual")
+            else:
+                item = {
+                    "card_order": row.card_order,
+                    "type": row.type,
+                    "card_number": row.card_number,
+                    "card_name": row.card_name,
+                    "delta_picked": row.delta_picked,
+                    "delta_picked_upgraded": row.delta_picked_upgraded,
+                    "delta_picked_basic": row.delta_picked_basic,
+                    "elo_picked": row.elo_picked,
+                    "available_n": row.available_n,
+                    "picked_n": row.picked_n,
+                    "picked_pct": row.picked_pct,
+                    "drafted_first_n": row.drafted_first_n,
+                    "drafted_first_pct": row.drafted_first_pct,
+                    "drafted_second_n": row.drafted_second_n,
+                    "drafted_second_pct": row.drafted_second_pct,
+                    "undrafted_n": row.undrafted_n,
+                    "undrafted_pct": row.undrafted_pct,
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_picked")
+                _attach_ci95(item, row, schema_field_names, "delta_picked_upgraded")
+                _attach_ci95(item, row, schema_field_names, "delta_picked_basic")
+            rows.append(item)
+        iteration_ms = _ms_since(iteration_started_at)
+        timing = {
+            "client_ms": client_ms,
+            "submit_ms": submit_ms,
+            "query_wait_ms": query_wait_ms,
+            "iteration_ms": iteration_ms,
+            "job_id": job.job_id,
+            "job_created": _dt_iso(job.created),
+            "job_started": _dt_iso(job.started),
+            "job_ended": _dt_iso(job.ended),
+            "job_cache_hit": job.cache_hit,
+            "job_total_bytes_processed": job.total_bytes_processed,
+            "job_total_slot_ms": job.slot_millis,
+        }
+        return rows, timing
+
     if stats_page == STATS_PAGE_COMBINATIONS:
         if combination_scope_compact:
             wrapper = next(iter(results), None)
@@ -9604,6 +11953,7 @@ def _query_card_stats(
                 COMBINATIONS_VIEW_CARD_MAP: ["delta_map"],
                 COMBINATIONS_VIEW_CARD_ROUND: ["delta_round"],
                 COMBINATIONS_VIEW_CARD_ENDGAME: ["delta_actual"],
+                COMBINATIONS_VIEW_CARD_ACTION_CARD: ["delta_actual"],
             }[combinations_view]
             for prefix in ci_prefixes:
                 schema_field_names.update({f"{prefix}_ci_mean", f"{prefix}_ci_sd", f"{prefix}_ci_n"})
@@ -9612,6 +11962,7 @@ def _query_card_stats(
                 COMBINATIONS_VIEW_CARD_MAP: ["avg_elo", "interaction", "delta_general", "delta_map"],
                 COMBINATIONS_VIEW_CARD_ROUND: ["avg_elo", "interaction", "delta_general", "delta_round"],
                 COMBINATIONS_VIEW_CARD_ENDGAME: ["avg_elo", "interaction", "delta_card", "delta_endgame", "delta_combined", "delta_actual"],
+                COMBINATIONS_VIEW_CARD_ACTION_CARD: ["avg_elo", "interaction", "delta_card", "delta_action", "delta_combined", "delta_actual"],
             }[combinations_view]
             combination_ranges = {}
             for field in range_fields:
@@ -9634,6 +11985,7 @@ def _query_card_stats(
                 "combination_ranges": combination_ranges,
                 "combination_card_options": list(getattr(wrapper, "card_options", None) or []) if wrapper else [],
                 "combination_endgame_options": list(getattr(wrapper, "endgame_options", None) or []) if wrapper else [],
+                "combination_action_card_options": list(getattr(wrapper, "action_card_options", None) or []) if wrapper else [],
             }
         else:
             result_rows = results
@@ -9651,6 +12003,24 @@ def _query_card_stats(
                     "interaction": row.interaction,
                     "avg_elo": row.avg_elo,
                     "n_played": row.n_played,
+                }
+                _attach_ci95(item, row, schema_field_names, "delta_actual")
+            elif combinations_view == COMBINATIONS_VIEW_CARD_ACTION_CARD:
+                item = {
+                    "card_name": row.card_name,
+                    "card_type": row.card_type,
+                    "delta_card": row.delta_card,
+                    "action_card_key": row.action_card_key,
+                    "action_card_name": row.action_card_name,
+                    "action_card_type": row.action_card_type,
+                    "action_card_number": row.action_card_number,
+                    "delta_action": row.delta_action,
+                    "delta_combined": row.delta_combined,
+                    "delta_actual": row.delta_actual,
+                    "interaction": row.interaction,
+                    "avg_elo": row.avg_elo,
+                    "n_played": row.n_played,
+                    "pair_type": row.pair_type,
                 }
                 _attach_ci95(item, row, schema_field_names, "delta_actual")
             elif combinations_view == COMBINATIONS_VIEW_CARD_MAP:
@@ -9774,6 +12144,7 @@ def _players_component_cache_blob_name(
     arena_only=False,
     arena_seasons=None,
     tournament_only=False,
+    starting_positions=None,
 ):
     cache_key = {
         "version": FILTER_CACHE_VERSION,
@@ -9792,7 +12163,8 @@ def _players_component_cache_blob_name(
         "arena_only": bool(arena_only),
         "arena_seasons": sorted(arena_seasons or []) if arena_only else [],
         "tournament_only": bool(tournament_only),
-        "rollup_schema": 3,
+        "starting_positions": sorted(starting_positions or []),
+        "rollup_schema": 6,
     }
     digest = hashlib.sha256(
         json.dumps(cache_key, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -9808,15 +12180,17 @@ def _is_default_players_filter_scope(
     date_to,
     arena_only=False,
     tournament_only=False,
+    starting_positions=None,
 ):
     return (
-        set(selected_maps) == set(VALID_MAPS)
+        set(selected_maps) == set(ALL_KNOWN_MAPS)
         and opponent_elo_min == 0
         and opponent_elo_max is None
         and date_from is None
         and date_to is None
         and not arena_only
         and not tournament_only
+        and not starting_positions
     )
 
 
@@ -9975,13 +12349,14 @@ def _query_players_components(query_args, query_kwargs, data_version, use_compon
     arena_only = bool(query_kwargs.get("players_arena_only"))
     arena_seasons = query_kwargs.get("players_arena_seasons") or []
     tournament_only = bool(query_kwargs.get("tournament_only"))
+    starting_positions = query_kwargs.get("starting_positions") or []
     baseline_rows = None
     selected_rows = None
     component_timings = {}
 
     default_scope = _is_default_players_filter_scope(
         selected_maps, opponent_elo_min, opponent_elo_max, date_from, date_to,
-        arena_only, tournament_only,
+        arena_only, tournament_only, starting_positions,
     )
     if default_scope:
         snapshot = _read_cached_snapshot(
@@ -9995,12 +12370,13 @@ def _query_players_components(query_args, query_kwargs, data_version, use_compon
         opponent_elo_min, opponent_elo_max, date_from, date_to,
         arena_only=arena_only, arena_seasons=arena_seasons,
         tournament_only=tournament_only,
+        starting_positions=starting_positions,
     )
     selected_blob = _players_component_cache_blob_name(
         "selected", data_version, is_mw, selected_maps,
         opponent_elo_min, opponent_elo_max, date_from, date_to,
         player_identity, last_x_games, arena_only, arena_seasons,
-        tournament_only,
+        tournament_only, starting_positions,
     ) if player_identity else None
     cache_reads = {}
     if use_component_cache and baseline_rows is None:
@@ -10129,7 +12505,7 @@ def _decode_card_card_compact_rows(compact_rows):
 def _card_card_scope_cache_blob_name(query_args, query_kwargs, data_version):
     """Cache the complete filtered pair aggregate independently of table controls."""
     scope = {
-        "schema": 4,
+        "schema": 6,
         "data_version": data_version,
         "is_mw": query_args[0],
         "maps": sorted(query_args[1]),
@@ -10144,6 +12520,7 @@ def _card_card_scope_cache_blob_name(query_args, query_kwargs, data_version):
         "completed_only": query_args[12],
         "arena_only": bool(query_kwargs.get("arena_only")),
         "tournament_only": bool(query_kwargs.get("tournament_only")),
+        "starting_positions": sorted(query_kwargs.get("starting_positions") or []),
     }
     digest = hashlib.sha256(
         json.dumps(scope, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -10523,6 +12900,7 @@ def _combination_ranges(rows, combinations_view):
         COMBINATIONS_VIEW_CARD_MAP: ["avg_elo", "interaction", "delta_general", "delta_map"],
         COMBINATIONS_VIEW_CARD_ROUND: ["avg_elo", "interaction", "delta_general", "delta_round"],
         COMBINATIONS_VIEW_CARD_ENDGAME: ["avg_elo", "interaction", "delta_card", "delta_endgame", "delta_combined", "delta_actual"],
+        COMBINATIONS_VIEW_CARD_ACTION_CARD: ["avg_elo", "interaction", "delta_card", "delta_action", "delta_combined", "delta_actual"],
     }[combinations_view]
     result = {}
     for field in fields:
@@ -10541,6 +12919,109 @@ def _combination_ranges(rows, combinations_view):
     return result
 
 
+def _synergy_ci_request_row(stats_page, view, row):
+    if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+        return {
+            "card_1_key": row.get("card_1_key"),
+            "card_2_key": row.get("card_2_key"),
+        }
+    if view == COMBINATIONS_VIEW_CARD_CARD:
+        return {"card_1": row.get("card_1"), "card_2": row.get("card_2")}
+    if view == COMBINATIONS_VIEW_CARD_MAP:
+        return {"card_name": row.get("card_name"), "map_name": row.get("map_name")}
+    if view == COMBINATIONS_VIEW_CARD_ROUND:
+        return {"card_name": row.get("card_name"), "round_name": row.get("round_name")}
+    if view == COMBINATIONS_VIEW_CARD_ENDGAME:
+        return {
+            "card_name": row.get("card_name"),
+            "endgame_name": row.get("endgame_name"),
+        }
+    if view == COMBINATIONS_VIEW_CARD_ACTION_CARD:
+        return {
+            "card_name": row.get("card_name"),
+            "action_card_key": row.get("action_card_key"),
+        }
+    raise ValueError("Unsupported Synergy snapshot view")
+
+
+def _attach_snapshot_synergy_cis(
+    rows,
+    data_version,
+    stats_page,
+    view,
+    is_mw,
+    selected_maps,
+    selected_rounds,
+    player_elo_min,
+    player_elo_max,
+    opponent_elo_min,
+    opponent_elo_max,
+    date_from,
+    date_to,
+    completed_only,
+    new_batch_budget=6,
+):
+    """Attach complete default-scope Synergy CIs before atomic publication."""
+    if not rows:
+        return rows
+    requests = [_synergy_ci_request_row(stats_page, view, row) for row in rows]
+    # Snapshot populations can contain many thousands of combinations. Keep
+    # the existing views at the same proven size as a visible-page request:
+    # large Card + Card batches have an expensive join fan-out and can prevent
+    # useful checkpoints before the Cloud Run request deadline. Card + Action
+    # Card is backed by a compact, key-addressable MW derivative and safely uses
+    # 500-row batches. Larger all-snapshot batches exceed BigQuery's on-demand
+    # CPU-per-byte limit, while 100-row batches repeat the same scan excessively.
+    ci_by_key = {}
+    snapshot_batch_size = (
+        500
+        if stats_page == "combinations" and view == COMBINATIONS_VIEW_CARD_ACTION_CARD
+        else 100
+    )
+    new_batches = 0
+    for offset in range(0, len(requests), snapshot_batch_size):
+        payload = _load_synergy_ci(
+            data_version,
+            stats_page,
+            view,
+            requests[offset:offset + snapshot_batch_size],
+            is_mw,
+            selected_maps,
+            selected_rounds,
+            player_elo_min,
+            player_elo_max,
+            opponent_elo_min,
+            opponent_elo_max,
+            date_from,
+            date_to,
+            completed_only,
+            # The cache key includes the current data version and exact batch
+            # row keys, so a hit can only belong to this publication. Reusing
+            # completed batches makes the maintenance operation restartable
+            # across the Cloud Run request deadline without mixing versions.
+            force_refresh=False,
+            persist_synchronously=True,
+            row_limit=snapshot_batch_size,
+        )
+        if not payload.get("cache_status"):
+            new_batches += 1
+        for item in payload.get("data") or []:
+            ci_by_key[item.get("row_key")] = item
+        if (
+            new_batches >= new_batch_budget
+            and offset + snapshot_batch_size < len(requests)
+        ):
+            return None
+    for row, request_row in zip(rows, requests):
+        key = _synergy_ci_row_key(stats_page, view, request_row)
+        ci = ci_by_key.get(key) or {}
+        for field, value in ci.items():
+            if field == "row_key" or "_ci95_" not in field:
+                continue
+            row[field] = value
+    return rows
+
+
 def _refresh_default_snapshot_from_prepared(
     is_mw,
     stats_page=STATS_PAGE_CARDS,
@@ -10556,8 +13037,11 @@ def _refresh_default_snapshot_from_prepared(
     workers_view=WORKERS_VIEW_GENERAL,
     players_view=PLAYERS_VIEW_GENERAL,
     records_view=RECORDS_VIEW_ELO_LEADERBOARD,
+    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
     completed_only_override=None,
     cache_blob_override=None,
+    include_synergy_cis=True,
+    data_version_override=None,
 ):
     started_at = time.perf_counter()
     is_home = stats_page == STATS_PAGE_HOME
@@ -10596,6 +13080,7 @@ def _refresh_default_snapshot_from_prepared(
         "workers_view": workers_view,
         "players_view": players_view,
         "records_view": records_view,
+        "mw_action_cards_view": mw_action_cards_view,
         "records_player": None,
         "records_arena_only": False,
         "records_tournament_only": False,
@@ -10615,8 +13100,53 @@ def _refresh_default_snapshot_from_prepared(
     if stats_page == STATS_PAGE_COMBINATIONS:
         combination_ranges = _combination_ranges(rows, combinations_view)
         rows = [row for row in rows if int(row.get("n_played") or 0) >= COMBINATION_DEFAULT_MIN_PLAYS]
+    is_synergy_snapshot = (
+        stats_page == STATS_PAGE_COMBINATIONS
+        or (
+            stats_page == STATS_PAGE_MW_ACTION_CARDS
+            and mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES
+        )
+    )
+    # The main refresh passes the version it just created explicitly. Reading
+    # the mutable marker again here made one publication vulnerable to a
+    # concurrent maintenance request observing or republishing a different
+    # version between individual snapshot writes.
+    data_version = data_version_override or _read_data_version()
+    if is_synergy_snapshot and include_synergy_cis:
+        ci_view = (
+            combinations_view
+            if stats_page == STATS_PAGE_COMBINATIONS
+            else mw_action_cards_view
+        )
+        rows = _attach_snapshot_synergy_cis(
+            rows,
+            data_version,
+            stats_page,
+            ci_view,
+            int(is_mw),
+            list(query_args[1]),
+            [],
+            query_args[6],
+            query_args[7],
+            query_args[8],
+            query_args[9],
+            query_args[10],
+            query_args[11],
+            query_args[12],
+        )
+        if rows is None:
+            _active_refresh_snapshot_completed()
+            return {
+                "status": "staged",
+                "is_mw": int(is_mw),
+                "stats_page": stats_page,
+                "view": ci_view,
+                "cache_status": "ci_batches_checkpointed",
+                "total_ms": _ms_since(started_at),
+            }
     payload = {
         "status": "ok",
+        "data_version": data_version,
         "round_filter_active": False,
         "stats_page": stats_page,
         "endgames_view": endgames_view if stats_page == STATS_PAGE_ENDGAMES else None,
@@ -10635,6 +13165,9 @@ def _refresh_default_snapshot_from_prepared(
         "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
         "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
         "records_view": records_view if stats_page == STATS_PAGE_RECORDS else None,
+        "mw_action_cards_view": (
+            mw_action_cards_view if stats_page == STATS_PAGE_MW_ACTION_CARDS else None
+        ),
         "maps": (
             ALL_MAPS_FOR_METRICS
             if stats_page in (
@@ -10666,6 +13199,8 @@ def _refresh_default_snapshot_from_prepared(
             if stats_page == STATS_PAGE_SCORING
             else f"{stats_page}_{workers_view}_default_snapshot"
             if stats_page == STATS_PAGE_WORKERS
+            else f"{stats_page}_{mw_action_cards_view}_default_snapshot"
+            if stats_page == STATS_PAGE_MW_ACTION_CARDS
             else f"{stats_page}_default_snapshot"
         ),
         "is_mw": int(is_mw),
@@ -10684,6 +13219,16 @@ def _refresh_default_snapshot_from_prepared(
     if combination_ranges is not None:
         payload["combination_snapshot_min_plays"] = COMBINATION_DEFAULT_MIN_PLAYS
         payload["combination_ranges"] = combination_ranges
+    if is_synergy_snapshot:
+        # Point estimates are part of the critical daily publication. Clustered
+        # intervals are a same-version enrichment and must never hold those
+        # point estimates back or be copied from an older publication.
+        ci_complete = bool(include_synergy_cis)
+        payload["synergy_ci_status"] = "complete" if ci_complete else "pending"
+        payload["synergy_ci_data_version"] = data_version if ci_complete else None
+        # Retained temporarily for older clients while the explicit status
+        # fields become the canonical contract.
+        payload["synergy_ci_complete"] = ci_complete
     if expanded_rows is not None:
         payload["expanded_data"] = expanded_rows
     cache_write_ok = (
@@ -10692,9 +13237,11 @@ def _refresh_default_snapshot_from_prepared(
         else _write_cached_snapshot(
             is_mw, payload, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
-            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
+            build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view,
+            mw_action_cards_view
         )
     )
+    _active_refresh_snapshot_completed()
     return {
         "status": "ok" if cache_write_ok else "error",
         "is_mw": int(is_mw),
@@ -10713,6 +13260,9 @@ def _refresh_default_snapshot_from_prepared(
         "conservation_view": conservation_view if stats_page == STATS_PAGE_CONSERVATION else None,
         "scoring_view": scoring_view if stats_page == STATS_PAGE_SCORING else None,
         "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
+        "mw_action_cards_view": (
+            mw_action_cards_view if stats_page == STATS_PAGE_MW_ACTION_CARDS else None
+        ),
         "cache_status": "refreshed" if cache_write_ok else "cache_write_failed",
         "rows": len(rows),
         "total_ms": payload["total_ms"],
@@ -10722,19 +13272,303 @@ def _refresh_default_snapshot_from_prepared(
     }
 
 
-def _run_daily_refresh():
+def _refresh_synergy_ci_snapshots():
+    """Enrich current point snapshots with same-version clustered intervals.
+
+    Each view is promoted independently as soon as its current-version CI work
+    completes. The main daily publication never waits for this maintenance job.
+    """
+    if not CACHE_BUCKET:
+        raise RuntimeError("CACHE_BUCKET is required for Synergy CI publication")
     started_at = time.perf_counter()
+    active_refresh = _read_refresh_lock()
+    if active_refresh:
+        # The main refresh publishes current point estimates first. CI staging
+        # must not inspect or promote the newly written data-version marker
+        # while that atomic point-estimate pack is still being assembled.
+        return {
+            "status": "running",
+            "message": "Main refresh is still publishing point estimates",
+            "retryable": True,
+            "total_ms": _ms_since(started_at),
+        }
+    data_version = _read_data_version()
+    # Stable per-version staging lets scheduler retries reuse completed
+    # snapshots and per-batch inference caches after a request deadline.
+    stage_id = hashlib.sha256(
+        f"{data_version}:synergy-ci-schema-4".encode("utf-8")
+    ).hexdigest()[:20]
+    completion_marker = (
+        f"{CACHE_PREFIX}/staging/synergy-ci/completed/{stage_id}.json"
+    )
+    completed = _read_cache_blob(completion_marker, "synergy_ci_complete_hit")
+    if isinstance(completed, dict) and completed.get("data_version") == data_version:
+        return {
+            "status": "ok",
+            "data_version": data_version,
+            "snapshots": [],
+            "default_pack": "already_published",
+            "total_ms": _ms_since(started_at),
+        }
+    specs = [
+        {
+            "stats_page": STATS_PAGE_COMBINATIONS,
+            "is_mw": dataset,
+            "view": view,
+            "canonical": _cache_blob_name(
+                dataset, STATS_PAGE_COMBINATIONS, combinations_view=view
+            ),
+        }
+        for dataset in (1, 0)
+        for view in (
+            COMBINATIONS_VIEW_CARD_CARD,
+            COMBINATIONS_VIEW_CARD_MAP,
+            COMBINATIONS_VIEW_CARD_ROUND,
+            COMBINATIONS_VIEW_CARD_ENDGAME,
+        )
+    ]
+    specs.append({
+        "stats_page": STATS_PAGE_COMBINATIONS,
+        "is_mw": 1,
+        "view": COMBINATIONS_VIEW_CARD_ACTION_CARD,
+        "canonical": _cache_blob_name(
+            1, STATS_PAGE_COMBINATIONS,
+            combinations_view=COMBINATIONS_VIEW_CARD_ACTION_CARD,
+        ),
+    })
+    specs.append({
+        "stats_page": STATS_PAGE_MW_ACTION_CARDS,
+        "is_mw": 1,
+        "view": MW_ACTION_CARDS_VIEW_SYNERGIES,
+        "canonical": _cache_blob_name(
+            1, STATS_PAGE_MW_ACTION_CARDS,
+            mw_action_cards_view=MW_ACTION_CARDS_VIEW_SYNERGIES,
+        ),
+    })
+    for spec in specs:
+        suffix = spec["canonical"][len(CACHE_PREFIX):].lstrip("/")
+        spec["stage"] = f"{CACHE_PREFIX}/staging/synergy-ci/{stage_id}/{suffix}"
+        spec["backup"] = f"{CACHE_PREFIX}/staging/synergy-ci/{stage_id}/backup/{suffix}"
+
+    def build(spec):
+        staged = _read_cache_blob(spec["stage"], "synergy_ci_stage_hit")
+        if (
+            isinstance(staged, dict)
+            and staged.get("data_version") == data_version
+            and staged.get("synergy_ci_status") == "complete"
+            and staged.get("synergy_ci_data_version") == data_version
+        ):
+            return {
+                "status": "ok",
+                "is_mw": spec["is_mw"],
+                "stats_page": spec["stats_page"],
+                "view": spec["view"],
+                "rows": len(staged.get("data") or []),
+                "cache_status": "staged_reused",
+            }
+        kwargs = {"cache_blob_override": spec["stage"]}
+        if spec["stats_page"] == STATS_PAGE_COMBINATIONS:
+            kwargs["combinations_view"] = spec["view"]
+        else:
+            kwargs["mw_action_cards_view"] = spec["view"]
+        return _refresh_default_snapshot_from_prepared(
+            spec["is_mw"], spec["stats_page"], **kwargs
+        )
+
+    def stage_is_complete(spec):
+        staged = _read_cache_blob(spec["stage"], "synergy_ci_stage_probe")
+        return (
+            isinstance(staged, dict)
+            and staged.get("data_version") == data_version
+            and staged.get("synergy_ci_status") == "complete"
+            and staged.get("synergy_ci_data_version") == data_version
+        )
+
+    missing = [spec for spec in specs if not stage_is_complete(spec)]
+    heavy = next((
+        spec for spec in missing
+        if spec["stats_page"] == STATS_PAGE_COMBINATIONS
+        and spec["is_mw"] == 1
+        and spec["view"] == COMBINATIONS_VIEW_CARD_CARD
+    ), None)
+    # Finish every smaller snapshot before giving the high-cardinality MW
+    # Card + Card population a request window of its own. Scheduler retries
+    # then resume only that snapshot from its durable 100-row CI batches.
+    build_specs = [spec for spec in missing if spec is not heavy] if len(missing) > 1 else missing
+    # New or low-cardinality products must not wait behind the older, much
+    # larger Combos populations. ThreadPoolExecutor starts queued work in list
+    # order, so keep Card + Action Card first and its related MW summary next.
+    # Every completed 100-row CI batch remains durable across later retries.
+    def stage_priority(spec):
+        if (
+            spec["stats_page"] == STATS_PAGE_COMBINATIONS
+            and spec["view"] == COMBINATIONS_VIEW_CARD_ACTION_CARD
+        ):
+            return 0
+        if spec["stats_page"] == STATS_PAGE_MW_ACTION_CARDS:
+            return 1
+        return 2
+
+    build_specs.sort(key=stage_priority)
+    executor = ThreadPoolExecutor(max_workers=min(4, max(1, len(build_specs))))
+    try:
+        futures = [executor.submit(build, spec) for spec in build_specs]
+        results = [future.result() for future in futures]
+    finally:
+        executor.shutdown(wait=True)
+    if any(item.get("status") not in ("ok", "staged") for item in results):
+        return {
+            "status": "error",
+            "data_version": data_version,
+            "snapshots": results,
+            "message": "At least one staged Synergy CI snapshot failed",
+            "total_ms": _ms_since(started_at),
+        }
+
+    # A CI job may have started just before the main refresh acquired its lock.
+    # Recheck after the potentially long staging work and before touching any
+    # canonical snapshot, so that in-flight work cannot race point publication.
+    if _read_refresh_lock():
+        return {
+            "status": "running",
+            "message": "Main refresh is still publishing point estimates",
+            "retryable": True,
+            "snapshots": results,
+            "total_ms": _ms_since(started_at),
+        }
+
+    bucket = storage.Client().bucket(CACHE_BUCKET)
+    promoted = []
+
+    def canonical_is_complete(spec):
+        payload = _read_cache_blob(spec["canonical"], "synergy_ci_canonical_probe")
+        return (
+            isinstance(payload, dict)
+            and payload.get("data_version") == data_version
+            and payload.get("synergy_ci_status") == "complete"
+            and payload.get("synergy_ci_data_version") == data_version
+        )
+
+    promotable = [
+        spec for spec in specs
+        if stage_is_complete(spec) and not canonical_is_complete(spec)
+    ]
+    try:
+        for spec in promotable:
+            canonical_blob = bucket.blob(spec["canonical"])
+            if not canonical_blob.exists():
+                raise RuntimeError(
+                    f"Cannot back up missing Synergy snapshot {spec['canonical']}"
+                )
+            bucket.copy_blob(canonical_blob, bucket, spec["backup"])
+        for spec in promotable:
+            stage_blob = bucket.blob(spec["stage"])
+            if not stage_blob.exists():
+                raise RuntimeError(
+                    f"Staged Synergy snapshot is missing: {spec['stage']}"
+                )
+            bucket.copy_blob(stage_blob, bucket, spec["canonical"])
+            staged_payload = _read_cache_blob(spec["stage"], "synergy_ci_promoted")
+            if isinstance(staged_payload, dict):
+                _memory_cache_put(spec["canonical"], staged_payload)
+            promoted.append(spec)
+        if promoted and not _write_default_snapshot_pack(data_version):
+            raise RuntimeError("Could not publish the default pack after Synergy CI promotion")
+        remaining = [spec for spec in specs if not canonical_is_complete(spec)]
+        if not remaining and not _write_cache_blob(
+            completion_marker,
+            {
+                "status": "ok",
+                "data_version": data_version,
+                "published_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "synergy_ci_complete",
+        ):
+            # Publication itself is already complete. A missing marker merely
+            # causes a later maintenance call to verify/re-promote the same
+            # staged version instead of treating a healthy release as failed.
+            logging.warning("Could not publish the Synergy CI completion marker")
+    except Exception:
+        logging.exception("Synergy CI promotion failed; restoring previous snapshots")
+        for spec in promoted:
+            backup_blob = bucket.blob(spec["backup"])
+            if backup_blob.exists():
+                bucket.copy_blob(backup_blob, bucket, spec["canonical"])
+                backup_payload = _read_cache_blob(spec["backup"], "synergy_ci_restore")
+                if isinstance(backup_payload, dict):
+                    _memory_cache_put(spec["canonical"], backup_payload)
+        raise
+    else:
+        # A promoted view no longer needs its stage or backup. Incomplete views
+        # retain their durable stage so the next scheduler call resumes them.
+        for spec in promoted:
+            for name in (spec["stage"], spec["backup"]):
+                try:
+                    blob = bucket.blob(name)
+                    if blob.exists():
+                        blob.delete()
+                except Exception:
+                    logging.warning("Could not remove staging object %s", name)
+
+    remaining = [spec for spec in specs if not canonical_is_complete(spec)]
+    return {
+        "status": "staged" if remaining else "ok",
+        "data_version": data_version,
+        "snapshots": results,
+        "promoted": [
+            {
+                "stats_page": spec["stats_page"],
+                "is_mw": spec["is_mw"],
+                "view": spec["view"],
+            }
+            for spec in promoted
+        ],
+        "remaining": [
+            {
+                "stats_page": spec["stats_page"],
+                "is_mw": spec["is_mw"],
+                "view": spec["view"],
+            }
+            for spec in remaining
+        ],
+        "default_pack": "updated" if promoted else "unchanged",
+        "total_ms": _ms_since(started_at),
+    }
+
+
+def _run_daily_refresh(progress=None):
+    started_at = time.perf_counter()
+    if progress:
+        progress.report(1, "Validating source metadata")
     card_attributes = _load_card_attribute_groups(force_refresh=True)
     # Arena CSV metadata is validated before the prepared table is rebuilt so
     # season assignment and every static Top 100 artifact use one coherent
     # definition during the entire daily publication.
     arena_metadata = _load_arena_metadata(force_refresh=True, publish_manifest=False)
     merge_metadata = _load_merge_players_metadata(force_refresh=True)
-    prepared = _refresh_prepared_tables(arena_metadata, merge_metadata)
+    if progress:
+        progress.report(4, "Rebuilding prepared data")
+    prepared = _refresh_prepared_tables(
+        arena_metadata,
+        merge_metadata,
+        progress_callback=progress.prepared if progress else None,
+    )
     data_version = _write_data_version(prepared)
+    if not data_version:
+        raise RuntimeError("Could not publish the prepared-data version marker")
+
+    def refresh_snapshot(*args, **kwargs):
+        """Build one member of this publication against its fixed version."""
+        kwargs["data_version_override"] = data_version
+        return _refresh_default_snapshot_from_prepared(*args, **kwargs)
+
+    if progress:
+        progress.report(46, "Publishing Arena and player indexes")
     arena_top100 = _refresh_arena_top100_bundle(arena_metadata, data_version)
     players_index_mw = _refresh_player_index_snapshot(1, merge_metadata)
     players_index_base = _refresh_player_index_snapshot(0, merge_metadata)
+    if progress:
+        progress.report(50, "Generating default snapshots")
     # Card + Card's complete reusable scopes are intentionally warmed by a
     # separate low-priority maintenance job. Snapshot-pack publication must
     # never wait for that optional performance cache.
@@ -10744,7 +13578,7 @@ def _run_daily_refresh():
     conservation_executor = ThreadPoolExecutor(max_workers=3)
     conservation_futures = {
         (dataset, view): conservation_executor.submit(
-            _refresh_default_snapshot_from_prepared,
+            refresh_snapshot,
             dataset,
             STATS_PAGE_CONSERVATION,
             conservation_view=view,
@@ -10759,7 +13593,7 @@ def _run_daily_refresh():
     scoring_executor = ThreadPoolExecutor(max_workers=4)
     scoring_futures = {
         (dataset, view): scoring_executor.submit(
-            _refresh_default_snapshot_from_prepared,
+            refresh_snapshot,
             dataset,
             STATS_PAGE_SCORING,
             scoring_view=view,
@@ -10772,154 +13606,162 @@ def _run_daily_refresh():
             SCORING_VIEW_REPUTATION,
         )
     }
-    home_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_HOME)
-    home_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_HOME)
+    home_mw = refresh_snapshot(1, STATS_PAGE_HOME)
+    home_base = refresh_snapshot(0, STATS_PAGE_HOME)
     home_bootstrap = _write_home_bootstrap_asset()
-    mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_CARDS)
-    base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_CARDS)
-    opening_hand_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_OPENING_HAND)
-    opening_hand_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_OPENING_HAND)
-    endgames_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_ENDGAMES)
-    endgames_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_ENDGAMES)
-    endgames_cp_distribution_mw = _refresh_default_snapshot_from_prepared(
+    mw = refresh_snapshot(1, STATS_PAGE_CARDS)
+    base = refresh_snapshot(0, STATS_PAGE_CARDS)
+    opening_hand_mw = refresh_snapshot(1, STATS_PAGE_OPENING_HAND)
+    opening_hand_base = refresh_snapshot(0, STATS_PAGE_OPENING_HAND)
+    endgames_mw = refresh_snapshot(1, STATS_PAGE_ENDGAMES)
+    endgames_base = refresh_snapshot(0, STATS_PAGE_ENDGAMES)
+    endgames_cp_distribution_mw = refresh_snapshot(
         1, STATS_PAGE_ENDGAMES, ENDGAMES_VIEW_CP_DISTRIBUTION
     )
-    endgames_cp_distribution_base = _refresh_default_snapshot_from_prepared(
+    endgames_cp_distribution_base = refresh_snapshot(
         0, STATS_PAGE_ENDGAMES, ENDGAMES_VIEW_CP_DISTRIBUTION
     )
-    endgames_cp_by_map_mw = _refresh_default_snapshot_from_prepared(
+    endgames_cp_by_map_mw = refresh_snapshot(
         1, STATS_PAGE_ENDGAMES, ENDGAMES_VIEW_CP_BY_MAP
     )
-    endgames_cp_by_map_base = _refresh_default_snapshot_from_prepared(
+    endgames_cp_by_map_base = refresh_snapshot(
         0, STATS_PAGE_ENDGAMES, ENDGAMES_VIEW_CP_BY_MAP
     )
-    maps_metrics_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_MAPS)
-    maps_metrics_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_MAPS)
-    maps_h2h_mw = _refresh_default_snapshot_from_prepared(
+    maps_metrics_mw = refresh_snapshot(1, STATS_PAGE_MAPS)
+    maps_metrics_base = refresh_snapshot(0, STATS_PAGE_MAPS)
+    maps_h2h_mw = refresh_snapshot(
         1, STATS_PAGE_MAPS, maps_view=MAPS_VIEW_TOURNAMENT_H2H
     )
-    maps_h2h_base = _refresh_default_snapshot_from_prepared(
+    maps_h2h_base = refresh_snapshot(
         0, STATS_PAGE_MAPS, maps_view=MAPS_VIEW_TOURNAMENT_H2H
     )
-    sponsor_endgames_cp_mw = _refresh_default_snapshot_from_prepared(
+    sponsor_endgames_cp_mw = refresh_snapshot(
         1, STATS_PAGE_SPONSOR_ENDGAMES, sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP
     )
-    sponsor_endgames_cp_base = _refresh_default_snapshot_from_prepared(
+    sponsor_endgames_cp_base = refresh_snapshot(
         0, STATS_PAGE_SPONSOR_ENDGAMES, sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_CP
     )
-    sponsor_endgames_appeal_mw = _refresh_default_snapshot_from_prepared(
+    sponsor_endgames_appeal_mw = refresh_snapshot(
         1, STATS_PAGE_SPONSOR_ENDGAMES, sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_APPEAL
     )
-    sponsor_endgames_appeal_base = _refresh_default_snapshot_from_prepared(
+    sponsor_endgames_appeal_base = refresh_snapshot(
         0, STATS_PAGE_SPONSOR_ENDGAMES, sponsor_endgames_view=SPONSOR_ENDGAMES_VIEW_APPEAL
     )
-    icons_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_ICONS)
-    icons_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_ICONS)
-    build_delta_mw = _refresh_default_snapshot_from_prepared(1, STATS_PAGE_BUILD)
-    build_delta_base = _refresh_default_snapshot_from_prepared(0, STATS_PAGE_BUILD)
-    build_frequency_mw = _refresh_default_snapshot_from_prepared(
+    icons_mw = refresh_snapshot(1, STATS_PAGE_ICONS)
+    icons_base = refresh_snapshot(0, STATS_PAGE_ICONS)
+    build_delta_mw = refresh_snapshot(1, STATS_PAGE_BUILD)
+    build_delta_base = refresh_snapshot(0, STATS_PAGE_BUILD)
+    build_frequency_mw = refresh_snapshot(
         1, STATS_PAGE_BUILD, completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/build/enclosures/frequency/default-mw.json",
     )
-    build_frequency_base = _refresh_default_snapshot_from_prepared(
+    build_frequency_base = refresh_snapshot(
         0, STATS_PAGE_BUILD, completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/build/enclosures/frequency/default-base.json",
     )
-    build_hexes_delta_mw = _refresh_default_snapshot_from_prepared(
+    build_hexes_delta_mw = refresh_snapshot(
         1, STATS_PAGE_BUILD, build_view=BUILD_VIEW_HEXES
     )
-    build_hexes_delta_base = _refresh_default_snapshot_from_prepared(
+    build_hexes_delta_base = refresh_snapshot(
         0, STATS_PAGE_BUILD, build_view=BUILD_VIEW_HEXES
     )
-    build_hexes_frequency_mw = _refresh_default_snapshot_from_prepared(
+    build_hexes_frequency_mw = refresh_snapshot(
         1, STATS_PAGE_BUILD, build_view=BUILD_VIEW_HEXES,
         completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/build/hexes/frequency/default-mw.json",
     )
-    build_hexes_frequency_base = _refresh_default_snapshot_from_prepared(
+    build_hexes_frequency_base = refresh_snapshot(
         0, STATS_PAGE_BUILD, build_view=BUILD_VIEW_HEXES,
         completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/build/hexes/frequency/default-base.json",
     )
-    predictors_general_mw = _refresh_default_snapshot_from_prepared(
+    predictors_general_mw = refresh_snapshot(
         1, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_GENERAL
     )
-    predictors_general_base = _refresh_default_snapshot_from_prepared(
+    predictors_general_base = refresh_snapshot(
         0, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_GENERAL
     )
-    predictors_icon_mw = _refresh_default_snapshot_from_prepared(
+    predictors_icon_mw = refresh_snapshot(
         1, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_ICON
     )
-    predictors_icon_base = _refresh_default_snapshot_from_prepared(
+    predictors_icon_base = refresh_snapshot(
         0, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_ICON
     )
-    predictors_specific_mw = _refresh_default_snapshot_from_prepared(
+    predictors_specific_mw = refresh_snapshot(
         1, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_SPECIFIC
     )
-    predictors_specific_base = _refresh_default_snapshot_from_prepared(
+    predictors_specific_base = refresh_snapshot(
         0, STATS_PAGE_PREDICTORS, predictors_view=PREDICTORS_VIEW_SPECIFIC
     )
-    actions_starting_position_mw = _refresh_default_snapshot_from_prepared(
+    actions_starting_position_mw = refresh_snapshot(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_STARTING_POSITION
     )
-    actions_starting_position_base = _refresh_default_snapshot_from_prepared(
+    actions_starting_position_base = refresh_snapshot(
         0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_STARTING_POSITION
     )
-    actions_upgrades_delta_mw = _refresh_default_snapshot_from_prepared(
+    actions_upgrades_delta_mw = refresh_snapshot(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES
     )
-    actions_upgrades_delta_base = _refresh_default_snapshot_from_prepared(
+    actions_upgrades_delta_base = refresh_snapshot(
         0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES
     )
-    actions_upgrade_order_delta_mw = _refresh_default_snapshot_from_prepared(
+    actions_upgrade_order_delta_mw = refresh_snapshot(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER
     )
-    actions_upgrade_order_delta_base = _refresh_default_snapshot_from_prepared(
+    actions_upgrade_order_delta_base = refresh_snapshot(
         0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER
     )
-    actions_upgrade_order_frequency_mw = _refresh_default_snapshot_from_prepared(
+    actions_upgrade_order_frequency_mw = refresh_snapshot(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER,
         completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/actions/upgrade_order/frequency/default-mw.json",
     )
-    actions_upgrade_order_frequency_base = _refresh_default_snapshot_from_prepared(
+    actions_upgrade_order_frequency_base = refresh_snapshot(
         0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADE_ORDER,
         completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/actions/upgrade_order/frequency/default-base.json",
     )
-    actions_upgrades_by_map_delta_mw = _refresh_default_snapshot_from_prepared(
+    actions_upgrades_by_map_delta_mw = refresh_snapshot(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_BY_MAP
     )
-    actions_upgrades_by_map_delta_base = _refresh_default_snapshot_from_prepared(
+    actions_upgrades_by_map_delta_base = refresh_snapshot(
         0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_BY_MAP
     )
-    actions_upgrades_by_map_frequency_mw = _refresh_default_snapshot_from_prepared(
+    actions_upgrades_by_map_frequency_mw = refresh_snapshot(
         1, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_BY_MAP,
         completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_by_map/frequency/default-mw.json",
     )
-    actions_upgrades_by_map_frequency_base = _refresh_default_snapshot_from_prepared(
+    actions_upgrades_by_map_frequency_base = refresh_snapshot(
         0, STATS_PAGE_ACTIONS, actions_view=ACTIONS_VIEW_UPGRADES_BY_MAP,
         completed_only_override=True,
         cache_blob_override=f"{CACHE_PREFIX}/actions/upgrades_by_map/frequency/default-base.json",
     )
-    workers_general_mw = _refresh_default_snapshot_from_prepared(
+    workers_general_mw = refresh_snapshot(
         1, STATS_PAGE_WORKERS, workers_view=WORKERS_VIEW_GENERAL
     )
-    workers_general_base = _refresh_default_snapshot_from_prepared(
+    workers_general_base = refresh_snapshot(
         0, STATS_PAGE_WORKERS, workers_view=WORKERS_VIEW_GENERAL
     )
-    workers_two_cp_mw = _refresh_default_snapshot_from_prepared(
+    workers_two_cp_mw = refresh_snapshot(
         1, STATS_PAGE_WORKERS, workers_view=WORKERS_VIEW_TWO_CP_WORKER
     )
-    workers_two_cp_base = _refresh_default_snapshot_from_prepared(
+    workers_two_cp_base = refresh_snapshot(
         0, STATS_PAGE_WORKERS, workers_view=WORKERS_VIEW_TWO_CP_WORKER
     )
-    players_general_mw = _refresh_default_snapshot_from_prepared(
+    players_general_mw = refresh_snapshot(
         1, STATS_PAGE_PLAYERS, players_view=PLAYERS_VIEW_GENERAL
     )
-    players_general_base = _refresh_default_snapshot_from_prepared(
+    players_general_base = refresh_snapshot(
         0, STATS_PAGE_PLAYERS, players_view=PLAYERS_VIEW_GENERAL
+    )
+    mw_action_cards_general = refresh_snapshot(
+        1, STATS_PAGE_MW_ACTION_CARDS,
+        mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
+    )
+    mw_action_cards_by_map = refresh_snapshot(
+        1, STATS_PAGE_MW_ACTION_CARDS,
+        mw_action_cards_view=MW_ACTION_CARDS_VIEW_BY_MAP,
     )
     elo_leaderboard_snapshots = _refresh_records_elo_leaderboard_snapshots()
     records_snapshots = []
@@ -10930,7 +13772,7 @@ def _run_daily_refresh():
         RECORDS_VIEW_MOST_ICONS,
     ):
         for dataset in (1, 0):
-            records_snapshots.append(_refresh_default_snapshot_from_prepared(
+            records_snapshots.append(refresh_snapshot(
                 dataset, STATS_PAGE_RECORDS, records_view=records_view
             ))
     try:
@@ -10953,29 +13795,57 @@ def _run_daily_refresh():
         scoring_reputation_base = scoring_futures[(0, SCORING_VIEW_REPUTATION)].result()
     finally:
         scoring_executor.shutdown(wait=True)
-    combinations_card_card_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_CARD
-    )
-    combinations_card_card_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_CARD
-    )
-    combinations_card_round_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_ROUND
-    )
-    combinations_card_round_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_ROUND
-    )
-    combinations_card_map_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_MAP
-    )
-    combinations_card_map_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_MAP
-    )
-    combinations_card_endgame_mw = _refresh_default_snapshot_from_prepared(
-        1, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_ENDGAME
-    )
-    combinations_card_endgame_base = _refresh_default_snapshot_from_prepared(
-        0, STATS_PAGE_COMBINATIONS, combinations_view=COMBINATIONS_VIEW_CARD_ENDGAME
+    # Synergy point estimates belong to the critical daily publication. Their
+    # covariance-aware CIs are enriched independently afterward, one view at a
+    # time, and only when they match this exact data version.
+    synergy_specs = [
+        (dataset, STATS_PAGE_COMBINATIONS, view)
+        for dataset in (1, 0)
+        for view in (
+            COMBINATIONS_VIEW_CARD_CARD,
+            COMBINATIONS_VIEW_CARD_MAP,
+            COMBINATIONS_VIEW_CARD_ROUND,
+            COMBINATIONS_VIEW_CARD_ENDGAME,
+        )
+    ] + [
+        (1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ACTION_CARD),
+        (1, STATS_PAGE_MW_ACTION_CARDS, MW_ACTION_CARDS_VIEW_SYNERGIES),
+    ]
+
+    def refresh_synergy_points(spec):
+        dataset, stats_page, view = spec
+        kwargs = {"include_synergy_cis": False}
+        if stats_page == STATS_PAGE_COMBINATIONS:
+            kwargs["combinations_view"] = view
+        else:
+            kwargs["mw_action_cards_view"] = view
+        return refresh_snapshot(dataset, stats_page, **kwargs)
+
+    with ThreadPoolExecutor(max_workers=4) as synergy_executor:
+        synergy_results = list(synergy_executor.map(refresh_synergy_points, synergy_specs))
+    synergy_by_spec = dict(zip(synergy_specs, synergy_results))
+    (
+        combinations_card_card_mw,
+        combinations_card_round_mw,
+        combinations_card_map_mw,
+        combinations_card_endgame_mw,
+        combinations_card_card_base,
+        combinations_card_round_base,
+        combinations_card_map_base,
+        combinations_card_endgame_base,
+        combinations_card_action_card_mw,
+        mw_action_cards_synergies,
+    ) = (
+        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_CARD)],
+        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ROUND)],
+        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_MAP)],
+        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ENDGAME)],
+        synergy_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_CARD)],
+        synergy_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ROUND)],
+        synergy_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_MAP)],
+        synergy_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ENDGAME)],
+        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ACTION_CARD)],
+        synergy_by_spec[(1, STATS_PAGE_MW_ACTION_CARDS, MW_ACTION_CARDS_VIEW_SYNERGIES)],
     )
     snapshots = [
         home_mw, home_base, mw, base, opening_hand_mw, opening_hand_base, endgames_mw, endgames_base,
@@ -11006,19 +13876,26 @@ def _run_daily_refresh():
          workers_general_mw, workers_general_base,
          workers_two_cp_mw, workers_two_cp_base,
          players_general_mw, players_general_base,
+         mw_action_cards_general, mw_action_cards_by_map,
+         mw_action_cards_synergies,
          *elo_leaderboard_snapshots,
          *records_snapshots,
         combinations_card_card_mw, combinations_card_card_base,
         combinations_card_round_mw, combinations_card_round_base,
         combinations_card_map_mw, combinations_card_map_base,
          combinations_card_endgame_mw, combinations_card_endgame_base,
+         combinations_card_action_card_mw,
     ]
     snapshots_ok = all(item["status"] == "ok" for item in snapshots)
+    if progress:
+        progress.report(94, "Publishing the atomic snapshot pack")
     default_pack = (
         _write_default_snapshot_pack(data_version)
         if snapshots_ok
         else False
     )
+    if progress:
+        progress.report(99, "Finalizing refresh")
     status = (
         "ok"
         if data_version and home_bootstrap and default_pack
@@ -11108,6 +13985,9 @@ def _run_daily_refresh():
         "players_index_base": players_index_base,
         "players_general_mw": players_general_mw,
         "players_general_base": players_general_base,
+        "mw_action_cards_general": mw_action_cards_general,
+        "mw_action_cards_by_map": mw_action_cards_by_map,
+        "mw_action_cards_synergies": mw_action_cards_synergies,
         "combinations_card_card_mw": combinations_card_card_mw,
         "combinations_card_card_base": combinations_card_card_base,
         "combinations_card_round_mw": combinations_card_round_mw,
@@ -11116,7 +13996,40 @@ def _run_daily_refresh():
         "combinations_card_map_base": combinations_card_map_base,
         "combinations_card_endgame_mw": combinations_card_endgame_mw,
         "combinations_card_endgame_base": combinations_card_endgame_base,
+        "combinations_card_action_card_mw": combinations_card_action_card_mw,
     }
+
+
+def _run_tracked_daily_refresh():
+    """Run one main refresh with a cross-instance lock and public progress."""
+    global _ACTIVE_REFRESH_PROGRESS
+    run_id = uuid.uuid4().hex
+    if not _acquire_refresh_lock(run_id):
+        status = _read_refresh_status()
+        return {
+            "status": "running",
+            "message": "A refresh is already running",
+            "refresh_status": status,
+        }
+
+    progress = _RefreshProgress(run_id)
+    with _REFRESH_PROGRESS_STATE_LOCK:
+        _ACTIVE_REFRESH_PROGRESS = progress
+    try:
+        payload = _run_daily_refresh(progress)
+        if payload.get("status") == "ok":
+            progress.complete(payload.get("data_version"))
+        else:
+            progress.fail()
+        return payload
+    except Exception:
+        progress.fail()
+        raise
+    finally:
+        with _REFRESH_PROGRESS_STATE_LOCK:
+            if _ACTIVE_REFRESH_PROGRESS is progress:
+                _ACTIVE_REFRESH_PROGRESS = None
+        _release_refresh_lock(run_id)
 
 
 @functions_framework.http
@@ -11162,7 +14075,10 @@ def get_card_stats(request):
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, X-Ark-Nova-Maintenance-Token",
+        "Access-Control-Allow-Headers": (
+            "Content-Type, X-Ark-Nova-Maintenance-Token, "
+            "X-Ark-Nova-Refresh-Password"
+        ),
         "Content-Type": "application/json",
     }
 
@@ -11173,19 +14089,55 @@ def get_card_stats(request):
     request.environ["ark_started_perf"] = request_started_at
     request.environ["ark_request_id"] = uuid.uuid4().hex[:16]
     params = request.get_json(silent=True) or {}
+    if params.get("refresh_status") is True:
+        status_headers = dict(headers)
+        status_headers["Cache-Control"] = "no-store, max-age=0"
+        return _json_http_response(
+            {"status": "ok", "refresh_status": _read_refresh_status()},
+            200,
+            status_headers,
+            request,
+        )
+
+    manual_refresh_requested = params.get("manual_refresh") is True
+    if manual_refresh_requested and not _has_refresh_page_auth(request):
+        return _refresh_page_auth_error(headers)
+
     refresh_data = params.get("refresh_data") is True
     debug_timing = params.get("debug") is True
     maintenance_requested = (
         refresh_data
         or debug_timing
         or params.get("refresh_prepared") is True
+        or params.get("refresh_mw_action_cards_prepared") is True
+        or params.get("refresh_mw_action_cards") is True
         or params.get("refresh_players_prepared") is True
         or params.get("daily_refresh") is True
+        or params.get("refresh_default_pack") is True
+        or params.get("refresh_synergy_cis") is True
         or params.get("warm_card_card_defaults") is True
     )
 
     if maintenance_requested and not _has_maintenance_auth(request):
         return _maintenance_auth_error(headers)
+
+    if manual_refresh_requested:
+        try:
+            payload = _run_tracked_daily_refresh()
+            status_code = (
+                200 if payload.get("status") == "ok"
+                else 409 if payload.get("status") == "running"
+                else 500
+            )
+            return _json_http_response(payload, status_code, headers, request)
+        except Exception:
+            logging.exception("Failed to run manual daily refresh")
+            return _json_http_response(
+                {"status": "error", "message": "Refresh failed"},
+                500,
+                headers,
+                request,
+            )
 
     if params.get("refresh_prepared") is True:
         try:
@@ -11201,6 +14153,56 @@ def get_card_stats(request):
             logging.exception("Failed to refresh prepared tables")
             return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
 
+    if params.get("refresh_mw_action_cards_prepared") is True:
+        try:
+            payload = _refresh_prepared_mw_action_card_tables()
+            return _json_http_response(payload, 200, headers, request)
+        except Exception as exc:
+            logging.exception("Failed to refresh prepared MW Action Cards tables")
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 500, headers, request
+            )
+
+    if params.get("refresh_mw_action_cards") is True:
+        try:
+            prepared = _refresh_prepared_mw_action_card_tables()
+            snapshots = {
+                "general": _refresh_default_snapshot_from_prepared(
+                    1, STATS_PAGE_MW_ACTION_CARDS,
+                    mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
+                ),
+                "by_map": _refresh_default_snapshot_from_prepared(
+                    1, STATS_PAGE_MW_ACTION_CARDS,
+                    mw_action_cards_view=MW_ACTION_CARDS_VIEW_BY_MAP,
+                ),
+                "synergies": _refresh_default_snapshot_from_prepared(
+                    1, STATS_PAGE_MW_ACTION_CARDS,
+                    mw_action_cards_view=MW_ACTION_CARDS_VIEW_SYNERGIES,
+                ),
+            }
+            data_version = _read_data_version()
+            snapshots_ok = all(item.get("status") == "ok" for item in snapshots.values())
+            default_pack = (
+                bool(data_version)
+                and snapshots_ok
+                and _write_default_snapshot_pack(data_version)
+            )
+            payload = {
+                "status": "ok" if prepared.get("status") == "ok" and default_pack else "error",
+                "data_version": data_version,
+                "prepared": prepared,
+                "snapshots": snapshots,
+                "default_pack": "ok" if default_pack else "error",
+            }
+            return _json_http_response(
+                payload, 200 if payload["status"] == "ok" else 500, headers, request
+            )
+        except Exception as exc:
+            logging.exception("Failed to refresh MW Action Cards")
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 500, headers, request
+            )
+
     if params.get("refresh_players_prepared") is True:
         try:
             # Physical Players tuning can be rebuilt independently because it
@@ -11214,10 +14216,40 @@ def get_card_stats(request):
             logging.exception("Failed to refresh the prepared Players table")
             return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
 
+    if params.get("refresh_default_pack") is True:
+        try:
+            data_version = _read_data_version()
+            published = bool(data_version) and _write_default_snapshot_pack(data_version)
+            return _json_http_response({
+                "status": "ok" if published else "error",
+                "data_version": data_version,
+                "default_pack": "ok" if published else "error",
+            }, 200 if published else 500, headers, request)
+        except Exception as exc:
+            logging.exception("Failed to republish the default snapshot pack")
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 500, headers, request
+            )
+
+    if params.get("refresh_synergy_cis") is True:
+        try:
+            payload = _refresh_synergy_ci_snapshots()
+            status_code = 200 if payload.get("status") in ("ok", "staged") else 500
+            return _json_http_response(payload, status_code, headers, request)
+        except Exception as exc:
+            logging.exception("Failed to refresh staged Synergy CI snapshots")
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 500, headers, request
+            )
+
     if params.get("daily_refresh") is True:
         try:
-            payload = _run_daily_refresh()
-            status_code = 200 if payload.get("status") == "ok" else 500
+            payload = _run_tracked_daily_refresh()
+            status_code = (
+                200 if payload.get("status") == "ok"
+                else 409 if payload.get("status") == "running"
+                else 500
+            )
             return _json_http_response(payload, status_code, headers, request)
         except Exception as exc:
             logging.exception("Failed to run daily refresh")
@@ -11273,6 +14305,12 @@ def get_card_stats(request):
         combination_header_maps = list(VALID_MAPS)
         combination_header_rounds = ["1", "2", "3", "4", "5", "6+"]
         if stats_page == STATS_PAGE_COMBINATIONS:
+            allowed_pair_types = (
+                CARD_ACTION_PAIR_TYPES
+                if combinations_view == COMBINATIONS_VIEW_CARD_ACTION_CARD
+                else COMBINATION_PAIR_TYPES
+            )
+            combination_pair_types = list(allowed_pair_types)
             combination_paged = bool(_parse_optional_bool(
                 params.get("combination_paged"), "combination_paged"
             ))
@@ -11298,7 +14336,7 @@ def get_card_stats(request):
             if combination_sort_direction not in {"asc", "desc"}:
                 raise ValueError("combination_sort_dir must be asc or desc")
             combination_pair_types = _parse_combination_list(
-                params.get("combination_pair_types"), "combination_pair_types", COMBINATION_PAIR_TYPES, COMBINATION_PAIR_TYPES
+                params.get("combination_pair_types"), "combination_pair_types", allowed_pair_types, allowed_pair_types
             )
             combination_card_types = _parse_combination_list(
                 params.get("combination_card_types"), "combination_card_types", VALID_CARD_TYPES, DEFAULT_CARD_TYPES
@@ -11354,10 +14392,20 @@ def get_card_stats(request):
             if stats_page == STATS_PAGE_PLAYERS
             else PLAYERS_VIEW_GENERAL
         )
+        arena_view = (
+            _parse_arena_view(params.get("arena_view"))
+            if stats_page == STATS_PAGE_ARENA
+            else ARENA_VIEW_TOP_100
+        )
         records_view = (
             _parse_records_view(params.get("records_view"))
             if stats_page == STATS_PAGE_RECORDS
             else RECORDS_VIEW_ELO_LEADERBOARD
+        )
+        mw_action_cards_view = (
+            _parse_mw_action_cards_view(params.get("mw_action_cards_view"))
+            if stats_page == STATS_PAGE_MW_ACTION_CARDS
+            else MW_ACTION_CARDS_VIEW_GENERAL
         )
         records_player = params.get("records_player")
         if records_player is not None and not isinstance(records_player, str):
@@ -11385,8 +14433,11 @@ def get_card_stats(request):
                 item.strip() for item in raw_players
                 if isinstance(item, str) and item.strip()
             ]
-            if len(players_players) > 5:
-                raise ValueError("players_players may contain at most five players")
+            players_limit = 8 if players_view == PLAYERS_VIEW_PERFORMANCE_BY_MAP else 5
+            if len(players_players) > players_limit:
+                raise ValueError(
+                    f"players_players may contain at most {players_limit} players"
+                )
             if len(set(players_players)) != len(players_players):
                 raise ValueError("Invalid comparison player selection")
             players_search = bool(
@@ -11409,16 +14460,43 @@ def get_card_stats(request):
                 if key and key not in players_history_metrics:
                     players_history_metrics.append(key)
         is_mw = _parse_is_mw(params.get("is_mw", 1))
+        raw_starting_positions = params.get("starting_positions")
+        starting_positions = []
+        if raw_starting_positions is not None:
+            if not isinstance(raw_starting_positions, list) or not raw_starting_positions:
+                raise ValueError("starting_positions must be a non-empty array")
+            valid_starting_positions = {"First player", "Second player"}
+            for item in raw_starting_positions:
+                token = str(item or "").strip()
+                if token not in valid_starting_positions:
+                    raise ValueError("starting_positions contains an invalid value")
+                if token not in starting_positions:
+                    starting_positions.append(token)
+            if len(starting_positions) == 2:
+                starting_positions = []
+        if stats_page == STATS_PAGE_MW_ACTION_CARDS and is_mw != 1:
+            raise ValueError("MW Action Cards is only available for Marine Worlds")
+        if (
+            stats_page == STATS_PAGE_COMBINATIONS
+            and combinations_view == COMBINATIONS_VIEW_CARD_ACTION_CARD
+            and is_mw != 1
+        ):
+            raise ValueError("Card + Action Card is only available for Marine Worlds")
         arena_only = bool(_parse_optional_bool(params.get("arena_only"), "arena_only"))
         tournament_only = bool(_parse_optional_bool(
             params.get("tournament_only"), "tournament_only"
         ))
         if arena_only and tournament_only:
             raise ValueError("Arena games only and Tournament games only are mutually exclusive")
+        synergy_ci = bool(_parse_optional_bool(
+            params.get("synergy_ci"), "synergy_ci"
+        ))
         players_arena_only = False
         players_arena_seasons = []
         if stats_page == STATS_PAGE_PLAYERS and players_view in (
-            PLAYERS_VIEW_GENERAL, PLAYERS_VIEW_COMPARISON
+            PLAYERS_VIEW_GENERAL,
+            PLAYERS_VIEW_COMPARISON,
+            PLAYERS_VIEW_PERFORMANCE_BY_MAP,
         ):
             players_arena_only = bool(_parse_optional_bool(
                 params.get("players_arena_only"), "players_arena_only"
@@ -11470,10 +14548,13 @@ def get_card_stats(request):
         if players_search:
             if (
                 stats_page != STATS_PAGE_PLAYERS
-                or players_view != PLAYERS_VIEW_COMPARISON
+                or players_view not in (
+                    PLAYERS_VIEW_COMPARISON,
+                    PLAYERS_VIEW_PERFORMANCE_BY_MAP,
+                )
             ):
                 raise ValueError(
-                    "Player search is only valid for Players Comparison"
+                    "Player search is only valid for multi-player Players views"
                 )
             if len(players_search_term) < 3:
                 raise ValueError(
@@ -11519,6 +14600,19 @@ def get_card_stats(request):
         if stats_page == STATS_PAGE_PLAYERS and players_view == PLAYERS_VIEW_ARENA_TOP_100:
             # The page normally reads this public object directly. This proxy
             # is only a CORS-safe fallback and never runs a database query.
+            arena_payload = _read_cache_blob(ARENA_TOP100_BUNDLE_BLOB, "arena_top100_proxy")
+            if arena_payload is None:
+                return _json_http_response(
+                    {"status": "error", "message": "Arena Top 100 snapshot is unavailable"},
+                    503,
+                    headers,
+                    request,
+                )
+            arena_payload["source"] = "arena_top100_snapshot"
+            return _json_http_response(arena_payload, 200, headers, request)
+        if stats_page == STATS_PAGE_ARENA and arena_view == ARENA_VIEW_TOP_100:
+            # Standalone Arena reuses the same atomically published static
+            # bundle. This fallback never scans BigQuery.
             arena_payload = _read_cache_blob(ARENA_TOP100_BUNDLE_BLOB, "arena_top100_proxy")
             if arena_payload is None:
                 return _json_http_response(
@@ -11599,6 +14693,13 @@ def get_card_stats(request):
             players_player = None
             if last_x_games is not None and not players_players:
                 last_x_games = None
+        elif players_view == PLAYERS_VIEW_PERFORMANCE_BY_MAP:
+            players_player = None
+            if last_x_games is not None and not players_players:
+                # Keep an empty Performance table local while retaining the
+                # sidebar value. Once an alias is selected, Last X is applied
+                # independently inside every identity/map partition.
+                last_x_games = None
         else:
             players_player = None
             players_players = []
@@ -11612,13 +14713,17 @@ def get_card_stats(request):
         if stats_page == STATS_PAGE_PLAYERS and players_view in (
             PLAYERS_VIEW_GENERAL,
             PLAYERS_VIEW_COMPARISON,
+            PLAYERS_VIEW_PERFORMANCE_BY_MAP,
         ):
             merge_metadata = _load_merge_players_metadata()
             if players_view == PLAYERS_VIEW_GENERAL and players_player:
                 players_identity = _player_identity(
                     players_player, merge_metadata
                 )
-            elif players_view == PLAYERS_VIEW_COMPARISON:
+            elif players_view in (
+                PLAYERS_VIEW_COMPARISON,
+                PLAYERS_VIEW_PERFORMANCE_BY_MAP,
+            ):
                 players_identities = [
                     _player_identity(player, merge_metadata)
                     for player in players_players
@@ -11663,6 +14768,7 @@ def get_card_stats(request):
         STATS_PAGE_SCORING,
         STATS_PAGE_WORKERS,
         STATS_PAGE_PLAYERS,
+        STATS_PAGE_MW_ACTION_CARDS,
     ):
         selected_rounds, round_filter_active = [], False
     if stats_page == STATS_PAGE_COMBINATIONS and combinations_view == COMBINATIONS_VIEW_CARD_ROUND:
@@ -11688,8 +14794,9 @@ def get_card_stats(request):
     if stats_page == STATS_PAGE_WORKERS and workers_view == WORKERS_VIEW_GENERAL:
         # General Workers is intentionally a hard completed-table population.
         completed_only = None
-    if stats_page == STATS_PAGE_PLAYERS:
-        # Players always compares completed player-game observations.
+    if stats_page == STATS_PAGE_PLAYERS and players_view != PLAYERS_VIEW_PERFORMANCE_BY_MAP:
+        # General and Comparison always use completed observations. Performance
+        # by map is the deliberate all-game default and owns an optional toggle.
         completed_only = None
     if stats_page == STATS_PAGE_CONSERVATION and conservation_view == CONSERVATION_VIEW_CP_REWARDS:
         selected_maps = VALID_MAPS
@@ -11702,6 +14809,49 @@ def get_card_stats(request):
         date_to = None
         arena_only = False
         tournament_only = False
+
+    if synergy_ci:
+        try:
+            if stats_page == STATS_PAGE_COMBINATIONS:
+                synergy_view = combinations_view
+            elif (
+                stats_page == STATS_PAGE_MW_ACTION_CARDS
+                and mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES
+            ):
+                synergy_view = mw_action_cards_view
+            else:
+                raise ValueError(
+                    "Synergy confidence intervals are only valid for Combinations and MW Action Cards/Synergies"
+                )
+            payload = _load_synergy_ci(
+                _read_data_version(),
+                stats_page,
+                synergy_view,
+                params.get("synergy_ci_rows", []),
+                is_mw,
+                selected_maps,
+                selected_rounds if round_filter_active else [],
+                player_elo_min,
+                player_elo_max,
+                opponent_elo_min,
+                opponent_elo_max,
+                date_from,
+                date_to,
+                completed_only,
+                arena_only=arena_only,
+                tournament_only=tournament_only,
+                starting_positions=starting_positions,
+            )
+            return _json_http_response(payload, 200, headers, request)
+        except ValueError as exc:
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 400, headers, request
+            )
+        except Exception as exc:
+            logging.exception("Failed to query Synergy confidence intervals")
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 500, headers, request
+            )
 
     if players_history:
         try:
@@ -11758,6 +14908,7 @@ def get_card_stats(request):
                 last_x_games,
                 players_arena_seasons if players_arena_only else [],
                 tournament_only,
+                starting_positions,
             )
             return _json_http_response(payload, 200, headers, request)
         except ValueError as exc:
@@ -11790,14 +14941,17 @@ def get_card_stats(request):
         players_view,
         players_players,
         last_x_games,
-        records_view,
-        records_player,
-        records_arena_only,
-        records_tournament_only,
+        records_view=records_view,
+        mw_action_cards_view=mw_action_cards_view,
+        records_player=records_player,
+        records_arena_only=records_arena_only,
+        records_tournament_only=records_tournament_only,
     )
     if stats_page == STATS_PAGE_PLAYERS and players_arena_only:
         cacheable_default_request = False
     if arena_only or tournament_only:
+        cacheable_default_request = False
+    if starting_positions:
         cacheable_default_request = False
     if stats_page == STATS_PAGE_COMBINATIONS and (
         combination_paged or combination_min_plays != COMBINATION_DEFAULT_MIN_PLAYS
@@ -11809,9 +14963,12 @@ def get_card_stats(request):
             is_mw, stats_page, endgames_view, maps_view,
             sponsor_endgames_view, combinations_view,
             build_view, predictors_view, actions_view
-            , conservation_view, scoring_view, workers_view, players_view, records_view
+            , conservation_view, scoring_view, workers_view, players_view, records_view,
+            mw_action_cards_view
         )
         if cached_payload:
+            if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+                cached_payload["mw_action_cards_view"] = mw_action_cards_view
             return _json_http_response(cached_payload, 200, headers, request)
 
     data_version = _read_data_version()
@@ -11841,6 +14998,13 @@ def get_card_stats(request):
         conservation_view if stats_page == STATS_PAGE_CONSERVATION else
         scoring_view if stats_page == STATS_PAGE_SCORING else
         workers_view if stats_page == STATS_PAGE_WORKERS else
+        # General and Draft render different columns from one combined payload;
+        # only those two share a canonical filtered cache.
+        (
+            MW_ACTION_CARDS_VIEW_GENERAL
+            if mw_action_cards_view == MW_ACTION_CARDS_VIEW_DRAFT
+            else mw_action_cards_view
+        ) if stats_page == STATS_PAGE_MW_ACTION_CARDS else
         {
             "view": players_view,
             "player": players_player,
@@ -11861,7 +15025,8 @@ def get_card_stats(request):
         "subview": filter_subview,
         "arena_only": arena_only,
         "tournament_only": tournament_only,
-        "rollup_schema": 4,
+        "starting_positions": sorted(starting_positions),
+        "rollup_schema": 7,
     }
     filter_cache_blob_name = None
     if (
@@ -11892,6 +15057,8 @@ def get_card_stats(request):
         )
         cached_payload = _read_cache_blob(filter_cache_blob_name, "filter_hit")
         if cached_payload:
+            if stats_page == STATS_PAGE_MW_ACTION_CARDS:
+                cached_payload["mw_action_cards_view"] = mw_action_cards_view
             return _json_http_response(cached_payload, 200, headers, request)
 
     try:
@@ -11944,11 +15111,13 @@ def get_card_stats(request):
             "players_arena_only": players_arena_only,
             "players_arena_seasons": players_arena_seasons,
             "records_view": records_view,
+            "mw_action_cards_view": mw_action_cards_view,
             "records_player": records_player,
             "records_arena_only": records_arena_only,
             "records_tournament_only": records_tournament_only,
             "arena_only": arena_only,
             "tournament_only": tournament_only,
+            "starting_positions": starting_positions,
             # Prepared tables are replaced atomically each day, so BigQuery's
             # own cache is safe for every view and is invalidated naturally.
             "use_query_cache": not debug_timing,
@@ -11976,8 +15145,11 @@ def get_card_stats(request):
             and not last_x_games
             and not players_arena_only
             and not tournament_only
+            and not starting_positions
             and _is_default_players_filter_scope(
-                selected_maps, opponent_elo_min, opponent_elo_max, date_from, date_to, players_arena_only
+                selected_maps, opponent_elo_min, opponent_elo_max, date_from,
+                date_to, players_arena_only, tournament_only,
+                starting_positions,
             )
         ):
             rows, timing = _query_default_players_comparison(
@@ -12022,6 +15194,7 @@ def get_card_stats(request):
             rows = [row for row in rows if int(row.get("n_played") or 0) >= COMBINATION_DEFAULT_MIN_PLAYS]
         payload = {
             "status": "ok",
+            "data_version": data_version,
             "round_filter_active": round_filter_active,
             "stats_page": stats_page,
             "endgames_view": endgames_view if stats_page == STATS_PAGE_ENDGAMES else None,
@@ -12040,12 +15213,16 @@ def get_card_stats(request):
             "workers_view": workers_view if stats_page == STATS_PAGE_WORKERS else None,
             "players_view": players_view if stats_page == STATS_PAGE_PLAYERS else None,
             "records_view": records_view if stats_page == STATS_PAGE_RECORDS else None,
+            "mw_action_cards_view": (
+                mw_action_cards_view if stats_page == STATS_PAGE_MW_ACTION_CARDS else None
+            ),
             "players_player": players_player if stats_page == STATS_PAGE_PLAYERS else None,
             "last_x_games": last_x_games if stats_page == STATS_PAGE_PLAYERS else None,
             "players_arena_only": players_arena_only if stats_page == STATS_PAGE_PLAYERS else None,
             "players_arena_seasons": players_arena_seasons if stats_page == STATS_PAGE_PLAYERS else None,
             "arena_only": arena_only,
             "tournament_only": tournament_only,
+            "starting_positions": starting_positions,
             "maps": (
                 ALL_MAPS_FOR_METRICS
                 if stats_page in (
@@ -12057,11 +15234,20 @@ def get_card_stats(request):
             "data": rows,
             "cache_status": "live",
         }
+        if (
+            stats_page == STATS_PAGE_COMBINATIONS
+            or (
+                stats_page == STATS_PAGE_MW_ACTION_CARDS
+                and mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES
+            )
+        ):
+            payload["synergy_ci_status"] = "pending"
+            payload["synergy_ci_data_version"] = None
         if stats_page == STATS_PAGE_PLAYERS:
             payload["players_players"] = players_players
             if players_view == PLAYERS_VIEW_COMPARISON:
                 payload["players"] = comparison_response_summaries
-            else:
+            elif players_view == PLAYERS_VIEW_GENERAL:
                 summary = player_response_summary or {
                     "game_count": 0,
                     "selected_game_count": 0,
@@ -12090,6 +15276,7 @@ def get_card_stats(request):
                 is_mw, payload, stats_page, endgames_view, maps_view,
                 sponsor_endgames_view, combinations_view,
                 build_view, predictors_view, actions_view, conservation_view, scoring_view, workers_view, players_view, records_view
+                , mw_action_cards_view
             )
             payload["cache_status"] = "refreshed" if refresh_data and cache_write_ok else "miss"
             if not cache_write_ok:

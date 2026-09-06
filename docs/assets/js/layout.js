@@ -65,14 +65,14 @@ const sideNavContentHtml = `
       <span>Icons</span>
     </a>
     <div class="nav-divider"></div>
-    <button type="button" class="side-nav-link nav-placeholder">
+    <a class="side-nav-link" href="#/mw-action-cards" data-page-id="mw-action-cards">
       <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none">
         <rect x="5" y="2.5" width="14" height="19" rx="2" />
         <path d="M8 12c2-3 5-3 7 0-2 3-5 3-7 0Zm7 0 2-2v4l-2-2Z" />
         <circle cx="11" cy="11.5" r=".6" fill="currentColor" stroke="none" />
       </svg>
       <span>MW Action<br />Cards</span>
-    </button>
+    </a>
     <div class="nav-divider"></div>
     <a class="side-nav-link" href="#/build" data-page-id="build">
       <span class="nav-icon nav-icon-build" aria-hidden="true"></span>
@@ -106,6 +106,13 @@ const sideNavContentHtml = `
         <path d="M7 20c.3-4 2-7 5-7s4.7 3 5 7M1.5 20c.2-3.2 1.7-5.5 4.5-5.5 1 0 1.8.3 2.5.8M22.5 20c-.2-3.2-1.7-5.5-4.5-5.5-1 0-1.8.3-2.5.8" />
       </svg>
       <span>Players</span>
+    </a>
+    <div class="nav-divider"></div>
+    <a class="side-nav-link" href="#/arena" data-page-id="arena">
+      <svg class="nav-icon nav-icon-arena" viewBox="0 0 24 24" aria-hidden="true" fill="none">
+        <path d="M3 20h18M5 20v-7l3-4 4-2 4 2 3 4v7M8 20v-5h8v5M7 12h10M9 9l-2-4M15 9l2-4" />
+      </svg>
+      <span>Arena</span>
     </a>
     <div class="nav-divider"></div>
     <a class="side-nav-link" href="#/records" data-page-id="records">
@@ -186,6 +193,17 @@ export function setTopbarDatasetLock(value = null) {
     const lockedOut = value !== null && buttonValue !== Number(value);
     button.disabled = lockedOut;
     button.classList.toggle('dataset-locked-out', lockedOut);
+  });
+}
+
+export function setTopbarDatasetCombined(active = true) {
+  document.querySelectorAll('.tab-btn').forEach(button => {
+    button.disabled = Boolean(active);
+    button.classList.toggle('dataset-combined', Boolean(active));
+    if (active) {
+      button.classList.add('active');
+      button.classList.remove('dataset-locked-out');
+    }
   });
 }
 

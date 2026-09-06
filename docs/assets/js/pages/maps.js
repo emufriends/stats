@@ -9,7 +9,7 @@ import {
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260711-1';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260728-3';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';

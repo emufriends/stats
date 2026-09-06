@@ -16,7 +16,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260728-3';
+import { loadStats } from '../snapshot-cache.js?v=20260819-3';
 
 export const id = 'workers';
 export const title = 'Workers';
@@ -127,6 +127,7 @@ function syncControls() {
   document.querySelectorAll('.workers-mode button').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
   document.querySelectorAll('.workers-compare button').forEach(btn => btn.classList.toggle('active', btn.dataset.compare === compare));
   document.getElementById('workersCompletedSection')?.classList.toggle('is-hidden', view !== 'two_cp_worker');
+  window.syncGlobalModeFilterGrouping?.();
 }
 
 function value(id) { return document.getElementById(id)?.value ?? ''; }
