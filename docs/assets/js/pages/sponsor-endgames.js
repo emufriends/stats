@@ -12,6 +12,7 @@ import {
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
+import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
 
 export const title = 'Sponsor Endgames';
 export const navLabel = 'Sponsor Endgames';
@@ -393,7 +394,7 @@ function rowHtml(row, rank, minScore, maxScore, frequencyRanges, deltaRanges) {
   return `
     <tr>
       <td class="rank-cell">${rank ?? '\u2014'}</td>
-      <td class="sponsor-name-cell">${escapeHtml(row.sponsor)}</td>
+      <td class="sponsor-name-cell"><a class="card-details-link" href="${escapeAttr(cardDetailsHref(row.sponsor))}">${escapeHtml(row.sponsor)}</a></td>
       <td class="sponsor-avg-cell" style="color:${scoreColor(avg, minScore, maxScore)}">${formatNumber(avg, 2)}</td>
       ${buckets.map(([field, value]) => bucketCell(
         row, field, value, buckets, frequencyRanges[field], deltaRanges[field],

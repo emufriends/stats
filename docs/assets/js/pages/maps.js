@@ -279,6 +279,7 @@ function syncFilterVisibility() {
     arena: !isH2h,
     tournament: !isH2h,
   });
+  window.setCompletedFilterMode?.(isH2h ? 'hidden' : 'locked');
   document.querySelectorAll('.maps-metrics-filter').forEach(el => {
     el.style.display = isH2h ? 'none' : '';
   });

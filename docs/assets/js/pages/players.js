@@ -11,7 +11,10 @@ const API_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
 const INDEX_URL = dataset => `${API_ROOT}/index/default-${dataset ? 'mw' : 'base'}.json`;
 const SNAPSHOT_URL = dataset => `${API_ROOT}/general/default-${dataset ? 'mw' : 'base'}.json`;
-const ARENA_MANIFEST_URL = `${API_ROOT}/arena/manifest.json`;
+// The manifest is updated independently of the static frontend. Keep a small
+// deployment cache-buster here so an already-open dashboard cannot retain an
+// older season list after Arena settings are activated.
+const ARENA_MANIFEST_URL = `${API_ROOT}/arena/manifest.json?v=20260908-s14`;
 // General metric colors are assigned by the metric's fixed position inside its
 // compatibility group. The longest group contains all 16 icon metrics, so a
 // 16-color palette prevents colors from changing or repeating as lines are
@@ -154,14 +157,18 @@ export const sidebarHtml = `
     <input class="range-input players-last-games-input" type="number" id="playersLastX" min="1" placeholder="e.g. 500" oninput="onPlayersLastInput()" />
   </div>
   <hr class="divider" />
+  <!-- Keep Arena Seasons as its own section. Completed and Tournament are
+       separate consecutive mode controls; the app joins those controls while
+       preserving this separator above them. -->
   <div class="filter-group players-arena-filter"><div class="players-arena-season-filter" id="playersArenaSeasonFilter">
     <div class="players-arena-season-heading"><span class="filter-label">Arena Seasons</span><span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllPlayersArenaSeasons()">all</span> / <span class="map-toggle-link" onclick="selectNonePlayersArenaSeasons()">none</span>)</span></div>
     <div class="chip-grid players-arena-season-chips" id="playersArenaSeasonChips"></div>
-  </div>
-  <hr class="divider players-performance-mode-divider is-hidden" id="playersPerformanceModeDivider" />
+  </div></div>
+  <hr class="divider players-arena-completed-divider" />
   <div class="filter-group players-performance-completed is-hidden" id="playersPerformanceCompleted">
     <div class="toggle-row"><span class="toggle-label">Completed games only</span><label class="toggle"><input type="checkbox" id="playersCompletedOnly" /><span class="toggle-track"></span></label></div>
-  </div></div>
+  </div>
+  <hr class="divider players-mode-final-divider" />
   <div class="filter-action-stack"><button class="apply-btn" onclick="applyPlayersFilters()">Apply filters</button></div>`;
 
 let mounted = false;
@@ -220,6 +227,10 @@ let historyRequests = {
 };
 let historyHover = null;
 let historyRenderState = null;
+// Comparison history lines keep their color by player identity. Assigning
+// colors from the response index would recolor a surviving player when a
+// different player is removed from the comparison.
+let historyColorByPlayer = new Map();
 let historyLegendScrollTop = { general: 0, comparison: 0 };
 let historyLegendFocusMetric = { general: '', comparison: '' };
 let historyLegendSelectionScrollLock = { general: null, comparison: null };
@@ -266,6 +277,7 @@ export function mount({ dataset = 1 } = {}) {
   };
   historyHover = null;
   historyRenderState = null;
+  historyColorByPlayer = new Map();
   historyLegendScrollTop = { general: 0, comparison: 0 };
   historyLegendFocusMetric = { general: '', comparison: '' };
   historyLegendSelectionScrollLock = { general: null, comparison: null };
@@ -354,13 +366,12 @@ function syncTabs() {
     arena: false,
     tournament: true,
   });
-  document.getElementById('playersPerformanceCompleted')?.classList.toggle('is-hidden', view !== 'performance_by_map');
-  document.getElementById('playersPerformanceModeDivider')?.classList.toggle('is-hidden', view !== 'performance_by_map');
+  document.getElementById('playersPerformanceCompleted')?.classList.remove('is-hidden');
   document.getElementById('playersMapFilter')?.classList.toggle('is-hidden', view === 'performance_by_map');
   document.getElementById('playersMapFilterTrailingDivider')?.classList.toggle('is-hidden', view === 'performance_by_map');
   document.querySelector('.players-arena-filter')?.classList.toggle('players-performance-mode-host', view === 'performance_by_map');
   document.querySelector('.global-mode-filter-shell')?.classList.toggle('players-performance-joined', view === 'performance_by_map');
-  window.syncGlobalModeFilterGrouping?.();
+  window.setCompletedFilterMode?.(view === 'performance_by_map' ? 'optional' : 'locked');
   renderPerformanceControls();
   ['general', 'comparison'].forEach(tabView => {
     const toggle = document.getElementById(`players${tabView === 'general' ? 'General' : 'Comparison'}GraphToggle`);
@@ -1179,6 +1190,31 @@ function historyMetricColor(metricKey, catalog = historyMetricCatalog()) {
   return HISTORY_LINE_COLORS[Math.max(0, groupIndex) % HISTORY_LINE_COLORS.length];
 }
 
+function syncHistoryPlayerColorAssignments(players) {
+  const selectedPlayers = [...new Set(players || [])].filter(Boolean);
+  const used = new Set();
+  const assigned = new Set();
+  selectedPlayers.forEach(player => {
+    const index = historyColorByPlayer.get(player);
+    if (Number.isInteger(index) && index >= 0 && index < HISTORY_LINE_COLORS.length && !used.has(index)) {
+      used.add(index);
+      assigned.add(player);
+    }
+  });
+  selectedPlayers.forEach(player => {
+    if (assigned.has(player)) return;
+    const next = HISTORY_LINE_COLORS.findIndex((_, index) => !used.has(index));
+    const index = next >= 0 ? next : selectedPlayers.indexOf(player) % HISTORY_LINE_COLORS.length;
+    historyColorByPlayer.set(player, index);
+    used.add(index);
+  });
+}
+
+function historyPlayerColor(player) {
+  const index = historyColorByPlayer.get(player);
+  return Number.isInteger(index) ? HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length] : HISTORY_LINE_COLORS[0];
+}
+
 function captureHistoryLegendState(targetView = view) {
   const list = document.getElementById('playersHistoryLegendList');
   if (list && !Number.isFinite(historyLegendSelectionScrollLock[targetView])) {
@@ -1585,10 +1621,11 @@ function renderPlayersHistoryGraphCanvas() {
     });
   } else {
     const metricKey = selectedMetrics[0];
-    (payload.players || []).forEach((player, index) => series.push({
+    syncHistoryPlayerColorAssignments((payload.players || []).map(player => player.name));
+    (payload.players || []).forEach(player => series.push({
       id: player.name, label: player.name,
       format: metricMap.get(metricKey)?.format || 'number',
-      color: HISTORY_LINE_COLORS[index % HISTORY_LINE_COLORS.length],
+      color: historyPlayerColor(player.name),
       gameCount: historyGameCount(player),
       gameNumbers: player.game_numbers || [], timestamps: player.timestamps || [],
       values: player.series?.[metricKey] || [],

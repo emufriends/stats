@@ -73,8 +73,8 @@ export const sidebarHtml = `
     <input class="range-input" type="number" id="opponentEloMin" placeholder="Min" value="300" min="0" />
     <input class="range-input" type="number" id="opponentEloMax" placeholder="Max" min="0" />
   </div></div>
-  <hr class="divider" />
-  <div class="filter-group"><div style="display:flex;align-items:baseline;gap:6px;margin-bottom:8px;">
+  <hr class="divider build-map-divider" />
+  <div class="filter-group build-map-filter"><div style="display:flex;align-items:baseline;gap:6px;margin-bottom:8px;">
     <span class="filter-label" style="margin-bottom:0">Maps</span>
     <span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllMaps()">all</span> / <span class="map-toggle-link" onclick="selectNoneMaps()">none</span>)</span>
   </div><div class="chip-grid" id="mapChips"></div></div>
@@ -160,22 +160,27 @@ function syncControls() {
   document.querySelectorAll('.build-compare-mode button').forEach(button => button.classList.toggle('active', button.dataset.compare === compareMode));
   document.querySelectorAll('.build-tabs .endgames-tab').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   document.querySelector('.build-compare-mode')?.classList.toggle('is-hidden', view !== 'hexes');
-  document.getElementById('completedFilterGroup')?.classList.toggle('is-hidden', view === 'hexes');
+  // Hexes already renders the map breakdown as table columns, so its sidebar
+  // must not offer a redundant map population filter.
+  document.querySelector('.build-map-filter')?.classList.toggle('is-hidden', view === 'hexes');
+  document.querySelector('.build-map-divider')?.classList.toggle('is-hidden', view === 'hexes');
   syncCompleted();
-  window.syncGlobalModeFilterGrouping?.();
+  window.setCompletedFilterMode?.(view === 'hexes' ? 'locked' : 'optional');
 }
 function syncCompleted() {
   const input = document.getElementById('endGameToggle');
   if (input) input.checked = completedByMode[mode];
 }
 function rememberBuildCompleted() {
+  if (view === 'hexes') return;
   completedByMode[mode] = Boolean(document.getElementById('endGameToggle')?.checked);
 }
 
 function getParams() {
   const value = id => document.getElementById(id)?.value ?? '';
   return {
-    stats_page: 'build', build_view: view, is_mw: isMW, maps: selectedMaps,
+    stats_page: 'build', build_view: view, is_mw: isMW,
+    maps: view === 'hexes' ? MAPS.map(([, , full]) => full) : selectedMaps,
     player_elo_min: value('playerEloMin') === '' ? 0 : Number(value('playerEloMin')),
     player_elo_max: value('playerEloMax') === '' ? null : Number(value('playerEloMax')),
     opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
@@ -189,7 +194,7 @@ function isDefault(params) {
   return params.player_elo_min === 300 && params.player_elo_max === null &&
     params.opponent_elo_min === 300 && params.opponent_elo_max === null &&
     params.date_from === '2025-01-01' && params.date_to === null &&
-    selectedMaps.length === MAPS.length &&
+    (view === 'hexes' || selectedMaps.length === MAPS.length) &&
     params.completed_only === (view === 'hexes' ? null : (mode === 'frequency' ? true : null));
 }
 

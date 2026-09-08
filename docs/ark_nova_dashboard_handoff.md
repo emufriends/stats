@@ -1,7 +1,7 @@
 # Ark Nova Statistics Dashboard Handoff
 
 Date: 2026-06-21  
-Last updated: 2026-09-07  
+Last updated: 2026-09-08  
 Project owner: pr0paganda-panda / Panda  
 Current repository: https://github.com/emufriends/stats
 
@@ -9,7 +9,7 @@ This handoff is for a future Codex/AI session continuing the Ark Nova statistics
 
 ## Executive Summary
 
-The project is a static GitHub Pages frontend backed by one Google Cloud Function. The frontend uses a reusable shell plus lazy page modules for Home, Cards, Opening Hand, Endgames, Maps, Sponsor Endgames, Combos, Actions, Predictors, Icons, MW Action Cards, Build, Conservation, Scoring, Workers, Players, Arena, Records, and the hidden Refresh page. Shared controls, snapshot loading, filters, and table behavior live in the shell; every page's population exceptions are documented below and in the executable parity contract.
+The project is a static GitHub Pages frontend backed by one Google Cloud Function. The frontend uses a reusable shell plus lazy page modules for Home, Cards, the unlinked Card Details route, Opening Hand, Endgames, Maps, Sponsor Endgames, Combos, Actions, Predictors, Icons, MW Action Cards, Build, Conservation, Scoring, Workers, Players, Arena, Records, and the hidden Refresh page. Shared controls, snapshot loading, filters, and table behavior live in the shell; every page's population exceptions are documented below and in the executable parity contract.
 
 The current version is considered public-release-ready. Future work should happen in the `emufriends/stats` repository and its local working copies.
 
@@ -51,11 +51,40 @@ and the completed subsets used by Arena Top 100. Automatic Records use the same
 predicate. Manual Fastest Games remain an explicit spreadsheet exception;
 Biggest Turns and Elo Leaderboard remain spreadsheet-only.
 
-Predictors/Specific is always hard-completed and has no Completed-games toggle.
-Its obsolete `Triggered endgame` predictor was removed because trigger status
-is now an eligibility rule rather than an outcome. Frequency is condition
+Every Filter sidebar where completion is meaningful shows `Completed games
+only` immediately above the Arena/Tournament controls. Optional populations
+use the normal editable switch. Hard-completed views show the switch checked,
+disabled, and accompanied by a current-color lock whose accessible explanation
+is `This view always uses completed games.` Switching tabs does not overwrite
+an optional tab's prior value. The control is omitted for Records/Elo
+Leaderboard, Fastest Games, and Biggest Turns; Maps/Tournament H2H; Arena; and
+Refresh. Predictors/Specific remains hard-completed; frequency is condition
 observations divided by all completed observations in the current scope. The
 current row counts are 21 for MW and 19 for Base.
+
+## Canonical Corrupted-Game Exclusion
+
+Every game-derived analytical population except Home excludes abandoned tables
+that can inflate one player's statistics. A table is flagged when a losing row
+(`Game_result = 2`) has non-null values for turns, all five action counts, and
+`X_Tokens_gained_instead_of_action`, and the following deficit is at least two:
+
+```text
+Number_of_turns - (
+  Animals_actions + Association_actions + Build_actions +
+  Cards_actions + Sponsors_actions + X_Tokens_gained_instead_of_action
+) >= 2
+```
+
+One qualifying losing row flags the complete `table_id`; both players and all
+matching Logs observations receive `is_corrupted_game = TRUE`. Missing inputs
+are not converted to zero and leave a table unclassified. Prepared Full Sample
+and Logs retain the flag, while Players, Cards, Opening Hand, Maps, Combos,
+Endgames, Sponsor Endgames, Actions, MW Action Cards, Icons, Predictors, Build,
+Conservation, Scoring, Workers, Arena, Records, player indexes, Tournament H2H,
+and Synergy inference derivatives exclude flagged tables at their first
+analytical boundary. Home and `home_observations_prepared` deliberately retain
+them. Source BigQuery tables are read-only.
 
 ## Population Contract Matrix
 
@@ -67,8 +96,8 @@ data versions or old Synergy CIs attached to new point estimates.
 
 | Family | Observation unit | Population contract |
 |---|---|---|
-| Home | table/player moments | all 25 configured maps; completion optional |
-| Cards | player-game-card | Full Sample card plays |
+| Home | table/player moments | all 25 configured maps; completion optional; includes corrupted tables |
+| Cards | player-game-card | Full Sample card plays; corrupted tables excluded |
 | Opening Hand | player-game-card | Log Sample dealt/kept observations |
 | Endgames / Sponsor Endgames | player-game-event | view-specific dealt, scored, and reward eligibility |
 | Combos except Card + Action Card | player-game combination | component scope defined by the selected pairing view |
@@ -77,13 +106,15 @@ data versions or old Synergy CIs attached to new point estimates.
 | Players General / Comparison | completed player-game | merged analytical identity |
 | Players Performance by map | player-game-map | merged identity; completion optional; Last X is per map |
 | Arena Top 100 | exact-alias Arena game | Games and most metrics use all matched Arena games; only Turns/PPT use completed games |
-| Records | ranked or record row | combined MW/Base; spreadsheet populations remain view-specific |
+| Records | ranked or record row | combined MW/Base; spreadsheet populations remain view-specific; Elo Leaderboard has no filter sidebar |
 
 Intentional differences are reported rather than failed: Home's all-map scope,
 Opening Hand's Log Sample, table-level versus player-level counts, merged
 Players identities versus exact Arena aliases, Records' combined datasets and
 manual spreadsheet rows, and spreadsheet-owned leaderboards. Supposedly equal
 populations must match in unrounded means and counts under identical filters.
+Unless a row explicitly says otherwise, every game-derived family after Home
+inherits the canonical corrupted-table exclusion above.
 
 ## Current Local Folders
 
@@ -197,11 +228,13 @@ assets/
     pages/
       home.js
       cards.js
+      card-details.js
       endgames.js
       maps.js
       opening-hand.js
       sponsor-endgames.js
       combos.js
+    card-catalog.js
 ```
 
 In GitHub Pages `/docs`, keep this same structure.
@@ -253,6 +286,7 @@ Simple hash router:
 ```text
 #/home
 #/cards
+#/card-details/<card-slug>
 #/endgames
 #/opening-hand
 #/maps
@@ -446,6 +480,20 @@ Round filtering is Cards-only. When fewer than all rounds are selected:
 
 - Backend aggregation changes.
 - Some stats become unavailable/hidden/disabled because they are not meaningful in played-round context.
+
+### Card Details Page
+
+Card details is a reusable, unlinked route for every card represented by the
+Cards page. Its route is `#/card-details/<card-slug>`, for example
+`#/card-details/explorer`. The page keeps the ordinary dashboard shell and
+sidebar, and currently contains only a card selector plus an intentionally
+empty placeholder for future card-specific content. Card slugs and the
+card-to-type lookup come from `cards_attributes.csv` through
+`assets/js/card-catalog.js`; no per-card route modules are created. Cards,
+Opening Hand, Sponsor Endgames, and the card columns in Combos link their card
+names to this route. The selector changes the URL, so a selected card survives reloads
+and can be bookmarked. Type-specific sections and optional per-card widgets
+will be added inside the shared module later.
 
 ### MW Action Cards Page
 
@@ -723,9 +771,10 @@ Home's backend-owned observation table is partitioned by game date and clustered
 by dataset, map, Arena season, and Tournament state. Canonical Elo values remain
 `FLOAT64`; they are never rounded merely to make them clustering dimensions.
 
-Every active dashboard Filter bar also exposes a separate `First-player
-advantage (FPA)` section immediately below Date Range (or after the last common
-section when Date Range is absent). `First player` and `Second player` are
+Every active dashboard Filter bar also exposes a separate `Starting position`
+section immediately below Date Range, or immediately below `Last X games` on
+Players; when neither control exists, it follows the last common section.
+`First player` and `Second player` are
 independent multi-select chips, both active by default; the last active chip
 cannot be cleared. The restrictive API field is `starting_positions`. It is
 omitted when both chips are active, preserving default-snapshot eligibility.
@@ -792,7 +841,7 @@ The enlarged graph toggle at the selector's right edge swaps the table for an En
 
 The graph and legend keep a fixed height with a stable scrollbar gutter, so reducing the available icon lines does not resize or shift the chart. Icon bucket headers use the same styled header-tooltip event path as Sponsor Endgames.
 
-Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table cells are tooltip-free dashes and are absent from graphs and color ranges. The `#` column follows the current sort. Delta-column sorting places valid values first, sub-1,000 values second, and impossible/missing values last while respecting numeric direction inside the first two tiers; only valid values receive ranks. Frequency sorting similarly leaves impossible/missing rows unranked. Unranked rows display an em dash. The page supports MW/Base plus player/opponent Elo, maps, and date filters, with no Completed-only control. Default snapshots are `card-stats/icons/default-{mw|base}.json`.
+Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table cells are tooltip-free dashes and are absent from graphs and color ranges. The `#` column follows the current sort. Delta-column sorting places valid values first, sub-1,000 values second, and impossible/missing values last while respecting numeric direction inside the first two tiers; only valid values receive ranks. Frequency sorting similarly leaves impossible/missing rows unranked. Unranked rows display an em dash. The page supports MW/Base plus player/opponent Elo, maps, and date filters, and always uses completed games; its Completed-only control is shown checked and locked. Default snapshots are `card-stats/icons/default-{mw|base}.json`.
 - Frontend has no build step and no automated browser test suite.
 - There are global document listeners in page modules for popups/tooltips. They have not caused data bugs, but a future cleanup could centralize or guard them.
 - CSS is large and monolithic.
@@ -814,6 +863,10 @@ displayed Elo-delta statistics:
 - Sponsor Endgames: every valid CP/Appeal delta bucket
 - MW Action Cards: General/By-map Delta means, standalone Synergy card deltas,
   Synergies Delta Actual, and every MW Synergy value
+
+User-facing table headers abbreviate Elo-delta statistics as `EV` (for example,
+`EV (played)` and `EV (in hand)`); the underlying statistic remains the source
+`elo_delta` described above.
 
 The standalone component intervals are ordinary table-clustered mean intervals
 shown when hovering the parenthetical Delta beneath a card name. The Synergy
@@ -1143,10 +1196,21 @@ Definitions:
 - Backend returns standard maps plus hidden legacy maps `1`-`8`, `A`, and `0`.
 - Frontend defaults are Legacy Maps excluded, Beginner Maps excluded, and Map Pack 2 included. Each category uses `-` Exclude, `O` Include, and `+` Only; Only forces the other categories to Exclude and requires no new API request.
 - Extra maps retain the standard map-column width, so the table scrolls horizontally when either group is enabled.
+- In filter sidebars that show grouped map chips, Standard, Legacy, and Beginner Maps use balanced internal spacing with a thin dashed subgroup separator; the outer Maps section keeps the normal 2px stronger divider.
+- When horizontal scrolling is active, the sticky `Games` footer has a bottom
+  border so it remains visually separated from the scrollbar.
 - Natural order is `1a`-`8a`, `9`-`14`, `T1`, `1`-`8`, `A`, `0`.
 - `Turns` and `Rounds` are lower-is-better and sort ascending; `Turns` is the default sort.
 - Other metrics sort descending and color higher values greener.
 - `Games` counts distinct `table_id`; other rows average player-level values.
+
+### Build page
+
+The Build route is `#/build`, with `build_view: "enclosures" | "hexes"`.
+Enclosures uses the shared standard-map filter. Hexes already displays the map
+breakdown in its table, so its sidebar hides the redundant Maps control and the
+request uses the complete standard-map set. Hexes is always completed-only;
+Enclosures keeps its optional Completed-games control.
 
 ### Frontend Card Name Display
 
@@ -1222,8 +1286,10 @@ card-stats/conservation/cp-rewards/default-{mw|base}.json
 ```
 
 The Projects path includes both Projects and Releases; there is deliberately no
-second Releases asset. Filter-bar Elo, maps, and date predicates apply before
-both subjects are aggregated.
+second Releases asset. Filter-bar Elo and date predicates apply before both
+subjects are aggregated. Projects always uses the complete map universe because
+its table already displays the map columns; Project Rewards applies its selected
+map filter.
 
 ## Scoring page (current behavior)
 
@@ -1488,10 +1554,12 @@ cells share one zero-centered table color range, with intensity and CI metadata
 clamped to -2/+2.
 
 Performance includes incomplete games by default. Its sidebar has Opponent Elo,
-Date Range, Last X, Arena Seasons, Completed games only, and Tournament games
-only. Arena seasons, completion, and Tournament are one visual section;
-Tournament and Arena seasons remain mutually exclusive while completion is
-independent. Last X is applied after the other predicates separately for every
+Date Range, Last X, Starting position, Arena Seasons, Completed games only, and
+Tournament games only. Starting position is a separate section after Last X;
+Arena Seasons is separated from the final mode-filter section, while Completed
+and Tournament remain consecutive within that section. Tournament and Arena
+seasons remain mutually exclusive while completion is independent. Last X is
+applied after the other predicates separately for every
 merged identity/map pair, before null Elo deltas are removed from the average
 and CI count. A requested 100 therefore uses all 83 qualifying games when only
 83 exist on a map. The daily `players_map_performance_rollup` stores count, sum,
@@ -1625,6 +1693,8 @@ can remain unique. General and Comparison remember their legend scroll
 positions independently across selection rerenders and completed requests.
 Comparison requires two to five identities, each with at least 250 filtered
 games, permits exactly one metric, and draws one color-coded line per player.
+Player colors are retained by identity during the mounted comparison graph,
+so removing or adding another selected identity does not shift existing colors.
 Its unselected metrics remain muted but selectable, and its selected-metric dot
 uses a dedicated color outside the player-line palette.
 Both graphs default to game-count x coordinates, can switch locally to UTC date
@@ -1690,9 +1760,20 @@ through `effective_end_utc`. A season is computationally complete after the
 effective end, while Top 100 availability is controlled by the presence of a
 validated `sN.csv` ranking file.
 
-S13 is the current newest Arena Top 100 season and is MW. The daily refresh
-validates all 100 S13 ranks, rebuilds prepared Arena assignments, recalculates
-every available season, and atomically publishes
+The Arena graph assigns colors by player identity within the mounted season,
+not by the current row order. Adding, removing, or searching for another
+player therefore never recolors a player who remains selected. The standalone
+Arena graph and Players Comparison history graph use this identity-first rule;
+metric-history graphs use deterministic metric colors, and other charts use
+stable row/card/icon identities.
+
+S14 is the newest configured and currently ongoing MW Arena season. The Players
+Arena Seasons filter exposes every started configured season from the manifest,
+even when no ranking sheet exists. The Arena Top 100 bundle includes only
+seasons with a validated `sN.csv` ranking file, so S13 is the newest available
+Top 100 season while S14 has no ranking sheet. The daily refresh validates all
+available ranks, rebuilds prepared Arena assignments, recalculates every
+available season, and atomically publishes
 `card-stats/players/arena-top-100/all-seasons.json`. Season switching,
 table/graph switching, graph search, and Day X-Y zoom remain client-side after
 that bundle is cached.
@@ -1732,6 +1813,8 @@ both player indexes. Elo Leaderboard is loaded once rather than concatenating
 its identical assets. FPA filtering is local for the four game-derived Records
 views using each focal player's `starting_position`; it does not alter Elo
 Leaderboard because that spreadsheet ranking is not a player-game population.
+Elo Leaderboard has no active Filter UI: the shared Filters button and drawer
+are disabled and hidden while that tab is selected.
 
 Automatic Records rows are individual player-game observations from the
 backend-owned `full_stats_prepared` table. Fastest Games also unions manually
@@ -1844,11 +1927,12 @@ Completed-games-only toggle, the three controls form one consecutive stack with
 20px toggle rows, the same 12px row spacing, and no divider between them. Pages
 without that toggle use the same reserved bottom section with one divider separating it
 from the preceding filter section and one divider before Apply. A standalone
-mode section has equal 16px clearance from its first and last toggle row to the
-adjacent separators. Existing page
-exceptions remain: Players exposes Tournament-only alongside its Arena-season
-chips, Maps/Tournament H2H exposes neither, and Records uses its own equivalent
-mode controls. Players and Records table headers use the shared 39.1667px
+ mode section has equal 16px clearance from its first and last toggle row to the
+ adjacent separators. Existing page
+ exceptions remain: Players exposes Arena Seasons in a separate section followed
+ by Tournament-only because Arena is selected through season chips,
+ Maps/Tournament H2H exposes neither, and Records uses its own equivalent mode
+ controls. Players and Records table headers use the shared 39.1667px
 header geometry; their search inputs are constrained inside that row so search
 controls cannot change table positioning.
 
@@ -1908,6 +1992,9 @@ filter is an immediate in-memory operation.
 - Clearing any Player/Opponent minimum-Elo input means zero; a blank maximum is
   unrestricted. Home serializes blank minima as zero so its unrestricted
   bootstrap payload still renders synchronously without an API request.
+- Where both Player and Opponent Elo ranges are present, the shared linking
+  preference sits below the Opponent Elo inputs with deliberate vertical space,
+  while remaining part of the same Elo filter section.
 - Generic filtered requests accept `arena_only` and `tournament_only`. Both
   default false and are mutually exclusive. Arena means a non-null validated
   `arena_season`, including the configured two-hour end grace period;
@@ -1922,6 +2009,11 @@ filter is an immediate in-memory operation.
   clears Tournament. Arena Top 100 remains static and unfiltered. Reset turns
   both generic switches off. Default snapshots are eligible only while both are
   off.
+- Completion controls remain visible on every applicable Filter sidebar.
+  Optional views retain their editable value across tab switches; hard-completed
+  views display the same control checked and locked. The control is omitted only
+  where completion is not a coherent filter, as listed in the canonical
+  completed-game section.
 - Restrictive FPA requests send `starting_positions` with exactly one of
   `First player` or `Second player`; both selected is represented by omitting
   the field. Every prepared analytical derivative and cache key carries this
@@ -1935,10 +2027,17 @@ filter is an immediate in-memory operation.
   offset within one pixel.
 - Map tooltips use `Map name (code)`, for example `Observation Tower (1a)`;
   backend filter values retain the full `Map 1a: Observation Tower` string.
+- Build/Hexes and Conservation/Projects do not expose a Maps filter because
+  their tables already contain the relevant map breakdown; Project Rewards and
+  other applicable views retain their map controls.
+- Records/Elo Leaderboard is a filter-free static leaderboard; the shared Filters
+  button and drawer are disabled and hidden only for that Records tab.
 - Records, Players, Conservation, and Cards map chips use the same five-column
   chip geometry and padding so changing pages does not change their visual
   scale.
-- Arena Top 100 graph hover is line-specific. Pointer coordinates are
+- Arena Top 100 graph lines retain a player-specific palette assignment for the
+  mounted season, so adding or removing selected players does not recolor
+  existing lines. Graph hover is line-specific. Pointer coordinates are
   transformed through the SVG screen matrix, then matched against the exact
   plotted points for that player inside the active Day X-Y range. Only the
   stored rating is shown above the cursor; off-screen observations are never

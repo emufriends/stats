@@ -78,7 +78,10 @@ export const sidebarHtml = `
     <input class="date-input" type="text" id="workersDateFrom" value="2025-01-01" placeholder="yyyy-mm-dd" />
     <input class="date-input" type="text" id="workersDateTo" placeholder="yyyy-mm-dd" />
   </div>
-  <div id="workersCompletedSection" class="filter-group is-hidden"><hr class="divider" />
+  <!-- Starting position is injected after Date Range and before this mode
+       section. Keep Completed as a plain group so it joins the Arena/Tournament
+       controls without an internal divider or an extra gap. -->
+  <div id="workersCompletedSection" class="filter-group is-hidden">
     <div class="toggle-row"><span class="toggle-label">Completed games only</span><label class="toggle">
       <input type="checkbox" id="workersCompletedToggle" /><span class="toggle-track"></span>
     </label></div>
@@ -126,8 +129,8 @@ function syncControls() {
   document.querySelectorAll('.workers-tabs .endgames-tab').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
   document.querySelectorAll('.workers-mode button').forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
   document.querySelectorAll('.workers-compare button').forEach(btn => btn.classList.toggle('active', btn.dataset.compare === compare));
-  document.getElementById('workersCompletedSection')?.classList.toggle('is-hidden', view !== 'two_cp_worker');
-  window.syncGlobalModeFilterGrouping?.();
+  document.getElementById('workersCompletedSection')?.classList.remove('is-hidden');
+  window.setCompletedFilterMode?.(view === 'general' ? 'locked' : 'optional');
 }
 
 function value(id) { return document.getElementById(id)?.value ?? ''; }

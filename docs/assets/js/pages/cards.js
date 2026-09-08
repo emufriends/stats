@@ -8,6 +8,7 @@ import {
 } from '../color-scales.js?v=20260707-1';
 import { loadStats } from '../snapshot-cache.js?v=20260819-3';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
+import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
 
 export const title = 'Cards';
 export const navLabel = 'Cards';
@@ -938,7 +939,12 @@ function renderTable(data) {
 
     const tr = document.createElement('tr');
     appendCell(tr, 'rank-cell', row.global_rank ?? '\u2014');
-    appendCell(tr, 'card-name', titleCase(row.card_name));
+    const cardCell = appendCell(tr, 'card-name', '');
+    const cardLink = document.createElement('a');
+    cardLink.className = 'card-details-link';
+    cardLink.href = cardDetailsHref(row.card_name);
+    cardLink.textContent = titleCase(row.card_name);
+    cardCell.appendChild(cardLink);
     appendDeltaCiCell(tr, row, 'delta_played', dp, deltaPlayedRange);
     if (roundFilterActive) appendUnavailableCell(tr);
     else appendDeltaCiCell(tr, row, 'delta_in_hand', dh, deltaInHandRange);

@@ -107,8 +107,8 @@ RECORDS_ELO_LEADERBOARD_SHEET_URL = os.environ.get(
 )
 RECORDS_MANUAL_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-manual-source.json"
 RECORDS_ELO_LEADERBOARD_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-elo-leaderboard-source.json"
-FILTER_CACHE_VERSION = "v40-population-parity"
-DEFAULT_PACK_SCHEMA_VERSION = 19
+FILTER_CACHE_VERSION = "v41-corrupted-games"
+DEFAULT_PACK_SCHEMA_VERSION = 20
 PLAYERS_HISTORY_WINDOW = 100
 PLAYERS_GRAPH_MIN_GAMES = 250
 STATS_PAGE_CARDS = "cards"
@@ -2651,6 +2651,40 @@ def _completed_game_sql(alias=None):
     )
 
 
+def _corrupted_loser_sql(alias=None):
+    """Return the source-row predicate used to classify abandoned tables.
+
+    A deficit is classifiable only when every required source value is present.
+    The resulting table-level flag is materialized on both player rows later.
+    """
+    prefix = f"{alias}." if alias else ""
+    fields = (
+        "Number_of_turns",
+        "Animals_actions",
+        "Association_actions",
+        "Build_actions",
+        "Cards_actions",
+        "Sponsors_actions",
+        "X_Tokens_gained_instead_of_action",
+    )
+    present = " AND ".join(
+        f"SAFE_CAST({prefix}{field} AS FLOAT64) IS NOT NULL" for field in fields
+    )
+    action_sum = " + ".join(
+        f"SAFE_CAST({prefix}{field} AS FLOAT64)" for field in fields[1:]
+    )
+    return (
+        f"SAFE_CAST({prefix}Game_result AS INT64) = 2 AND {present} AND "
+        f"SAFE_CAST({prefix}Number_of_turns AS FLOAT64) - ({action_sum}) >= 2"
+    )
+
+
+def _non_corrupted_game_sql(alias=None):
+    """Canonical eligibility predicate for every game-derived view except Home."""
+    prefix = f"{alias}." if alias else ""
+    return f"NOT COALESCE({prefix}is_corrupted_game, FALSE)"
+
+
 def _refresh_prepared_logs_table(arena_metadata=None):
     """Prepare logs with reusable completion, Arena, and Tournament classifications."""
     arena_metadata = arena_metadata or _load_arena_metadata()
@@ -2679,9 +2713,10 @@ def _refresh_prepared_logs_table(arena_metadata=None):
       f.opponent_pre_match_elo,
       f.elo_delta,
       f.arena_season,
-      f.is_tournament,
-      f.starting_position,
-      l.played_animals,
+       f.is_tournament,
+       f.starting_position,
+       f.is_corrupted_game,
+       l.played_animals,
       l.played_sponsors,
       l.played_projects,
       l.cards_drawn,
@@ -2800,6 +2835,11 @@ def _refresh_prepared_full_stats_table(arena_metadata=None):
         ON me.table_id = opponent.table_id
        AND me.player != opponent.player
       GROUP BY me.table_id, me.player
+    ),
+    corrupted_tables AS (
+      SELECT DISTINCT table_id
+      FROM source_rows f
+      WHERE {_corrupted_loser_sql("f")}
     )
     SELECT
       f.* EXCEPT(
@@ -2810,6 +2850,7 @@ def _refresh_prepared_full_stats_table(arena_metadata=None):
       f.canonical_post_match_elo AS post_match_elo,
       opponent.opponent_pre_match_elo,
       f.canonical_end_game_triggered AS end_game_triggered,
+      corrupted.table_id IS NOT NULL AS is_corrupted_game,
       CASE LOWER(TRIM(CAST(f.Starting_position_in_first_round AS STRING)))
         WHEN 'first player' THEN 'First player'
         WHEN 'second player' THEN 'Second player'
@@ -2828,6 +2869,8 @@ def _refresh_prepared_full_stats_table(arena_metadata=None):
     LEFT JOIN opponent_ratings opponent
       ON f.table_id = opponent.table_id
      AND CAST(f.player AS STRING) = opponent.player
+    LEFT JOIN corrupted_tables corrupted
+      ON f.table_id = corrupted.table_id
     """
 
     started_at = time.perf_counter()
@@ -2880,7 +2923,8 @@ def _enrich_and_write_records_manual_table(source_payload):
         SAFE_CAST(arena_rating_delta AS FLOAT64) AS arena_rating_delta,
         SAFE_CAST(opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
         SAFE_CAST(pre_match_elo AS FLOAT64) AS pre_match_elo,
-        CAST(starting_position AS STRING) AS starting_position
+        CAST(starting_position AS STRING) AS starting_position,
+        COALESCE(is_corrupted_game, FALSE) AS is_corrupted_game
       FROM `{PREPARED_FULL_STATS_TABLE}`
       WHERE CAST(table_id AS STRING) IN UNNEST(@table_ids)
     """
@@ -2893,16 +2937,21 @@ def _enrich_and_write_records_manual_table(source_payload):
     )
     metadata = {}
     table_metadata = {}
+    corrupted_table_ids = set()
     for row in metadata_job.result():
         key = (str(row.table_id), str(row.player))
         if key in metadata:
             raise ValueError(f"Full Sample contains duplicate Records identity {key[0]}/{key[1]}")
         metadata[key] = row
         table_metadata.setdefault(str(row.table_id), []).append(row)
+        if bool(getattr(row, "is_corrupted_game", False)):
+            corrupted_table_ids.add(str(row.table_id))
 
     map_by_name = {item["full"]: item for item in ALL_MAPS_FOR_METRICS}
     enriched = []
     for item in source_rows:
+        if item["table_id"] in corrupted_table_ids:
+            continue
         key = (item["table_id"], item["player"])
         match = metadata.get(key)
         is_fastest = item["record_view"] == RECORDS_VIEW_FASTEST_GAMES
@@ -3072,6 +3121,7 @@ def _enrich_and_write_records_manual_table(source_payload):
         "biggest_turns": sum(item["record_view"] == RECORDS_VIEW_BIGGEST_TURNS for item in enriched),
         "source_enriched": sum(bool(item["source_enriched"]) for item in enriched),
         "source_absent": sum(not bool(item["source_enriched"]) for item in enriched),
+        "corrupted_games_excluded": len(corrupted_table_ids),
         "metadata_job_id": metadata_job.job_id,
         "job_id": load_job.job_id,
     }
@@ -3166,6 +3216,7 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
           OVER (PARTITION BY f.table_id) AS result_two_count,
         COUNT(*) OVER (PARTITION BY f.table_id) AS result_row_count
       FROM `{PREPARED_FULL_STATS_TABLE}` f
+      WHERE {_non_corrupted_game_sql("f")}
     )
     SELECT
       table_id,
@@ -3453,7 +3504,8 @@ def _refresh_prepared_card_plays_table():
         SAFE_CAST(pa.round AS INT64) AS played_round
       FROM `{PREPARED_LOGS_TABLE}`
       CROSS JOIN UNNEST(IFNULL(played_animals, [])) AS pa
-      WHERE pa.animal IS NOT NULL
+      WHERE {_non_corrupted_game_sql()}
+        AND pa.animal IS NOT NULL
 
       UNION ALL
 
@@ -3467,7 +3519,8 @@ def _refresh_prepared_card_plays_table():
         SAFE_CAST(ps.round AS INT64) AS played_round
       FROM `{PREPARED_LOGS_TABLE}`
       CROSS JOIN UNNEST(IFNULL(played_sponsors, [])) AS ps
-      WHERE ps.sponsor IS NOT NULL
+      WHERE {_non_corrupted_game_sql()}
+        AND ps.sponsor IS NOT NULL
 
       UNION ALL
 
@@ -3481,7 +3534,8 @@ def _refresh_prepared_card_plays_table():
         SAFE_CAST(pp.round AS INT64) AS played_round
       FROM `{PREPARED_LOGS_TABLE}`
       CROSS JOIN UNNEST(IFNULL(played_projects, [])) AS pp
-      WHERE pp.project IS NOT NULL
+      WHERE {_non_corrupted_game_sql()}
+        AND pp.project IS NOT NULL
         AND LOWER(pp.project) NOT IN ({excluded_projects_sql})
     )
     SELECT DISTINCT *
@@ -3824,7 +3878,8 @@ def _refresh_prepared_endgame_events_table():
     WITH completed AS (
       SELECT *
       FROM `{PREPARED_LOGS_TABLE}`
-      WHERE {_completed_game_sql()}
+      WHERE {_non_corrupted_game_sql()}
+        AND {_completed_game_sql()}
     ),
     players AS (
       SELECT DISTINCT table_id, player, starting_position FROM completed
@@ -3962,7 +4017,8 @@ def _refresh_prepared_action_starting_table():
         f.Starting_position_in_first_round
       FROM `{PREPARED_LOGS_TABLE}` l
       JOIN `{PREPARED_FULL_STATS_TABLE}` f USING(table_id, player)
-      WHERE {_completed_game_sql("f")}
+      WHERE {_non_corrupted_game_sql("f")}
+        AND {_completed_game_sql("f")}
     ),
     paired AS (
       SELECT
@@ -4030,7 +4086,8 @@ def _refresh_prepared_conservation_counts_table():
       END AS subject_count
     FROM `{PREPARED_FULL_STATS_TABLE}` f
     CROSS JOIN UNNEST(['projects', 'releases']) AS subject
-    WHERE {_completed_game_sql("f")}
+    WHERE {_non_corrupted_game_sql("f")}
+      AND {_completed_game_sql("f")}
       AND CASE subject
         WHEN 'projects' THEN SAFE_CAST(f.Conservation_project_association_tasks AS INT64)
         ELSE SAFE_CAST(f.Released_animals AS INT64)
@@ -4087,21 +4144,21 @@ def _refresh_prepared_card_moments_table():
       SELECT l.*, TRIM(p.animal) AS card_name, 'animal' AS card_type,
         SAFE_CAST(p.round AS INT64) AS played_round, 'played' AS moment
       FROM `{PREPARED_LOGS_TABLE}` l CROSS JOIN UNNEST(IFNULL(l.played_animals, [])) p
-      WHERE TRIM(p.animal) != ''
+      WHERE {_non_corrupted_game_sql("l")} AND TRIM(p.animal) != ''
       UNION ALL
       SELECT l.*, TRIM(p.sponsor), 'sponsor', SAFE_CAST(p.round AS INT64), 'played'
       FROM `{PREPARED_LOGS_TABLE}` l CROSS JOIN UNNEST(IFNULL(l.played_sponsors, [])) p
-      WHERE TRIM(p.sponsor) != ''
+      WHERE {_non_corrupted_game_sql("l")} AND TRIM(p.sponsor) != ''
       UNION ALL
       SELECT l.*, TRIM(p.project), 'project', SAFE_CAST(p.round AS INT64), 'played'
       FROM `{PREPARED_LOGS_TABLE}` l CROSS JOIN UNNEST(IFNULL(l.played_projects, [])) p
-      WHERE TRIM(p.project) != '' AND LOWER(TRIM(p.project)) NOT IN ({excluded})
+      WHERE {_non_corrupted_game_sql("l")} AND TRIM(p.project) != '' AND LOWER(TRIM(p.project)) NOT IN ({excluded})
     ),
     in_hand AS (
       SELECT l.*, TRIM(card) AS card_name, CAST(NULL AS STRING) AS card_type,
         CAST(NULL AS INT64) AS played_round, 'in_hand' AS moment
       FROM `{PREPARED_LOGS_TABLE}` l CROSS JOIN UNNEST(IFNULL(l.cards_drawn, [])) card
-      WHERE TRIM(card) != '' AND LOWER(TRIM(card)) NOT IN ({excluded})
+      WHERE {_non_corrupted_game_sql("l")} AND TRIM(card) != '' AND LOWER(TRIM(card)) NOT IN ({excluded})
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY l.table_id, l.player, TRIM(card) ORDER BY l.table_id
       ) = 1
@@ -4111,7 +4168,7 @@ def _refresh_prepared_card_moments_table():
         CAST(NULL AS INT64) AS played_round, 'seen' AS moment
       FROM `{PREPARED_LOGS_TABLE}` l
       CROSS JOIN UNNEST(ARRAY_CONCAT(IFNULL(l.cards_drawn, []), IFNULL(l.display_cards, []))) card
-      WHERE TRIM(card) != '' AND LOWER(TRIM(card)) NOT IN ({excluded})
+      WHERE {_non_corrupted_game_sql("l")} AND TRIM(card) != '' AND LOWER(TRIM(card)) NOT IN ({excluded})
       QUALIFY ROW_NUMBER() OVER (
         PARTITION BY l.table_id, l.player, TRIM(card) ORDER BY l.table_id
       ) = 1
@@ -4151,7 +4208,8 @@ def _refresh_prepared_sponsor_endgame_table():
     CLUSTER BY is_mw, Map, sponsor
     AS
     WITH completed AS (
-      SELECT * FROM `{PREPARED_LOGS_TABLE}` WHERE {_completed_game_sql()}
+      SELECT * FROM `{PREPARED_LOGS_TABLE}`
+      WHERE {_non_corrupted_game_sql()} AND {_completed_game_sql()}
     ),
     played AS (
       SELECT DISTINCT l.table_id, l.player, TRIM(p.sponsor) AS sponsor
@@ -4204,6 +4262,7 @@ def _refresh_prepared_project_reward_table():
         elo_delta, 'base' AS event_kind, CAST(NULL AS STRING) AS raw_value,
         CAST(NULL AS INT64) AS reward_order
       FROM `{PREPARED_LOGS_TABLE}`
+      WHERE {_non_corrupted_game_sql()}
     ),
     rewards AS (
       SELECT
@@ -4215,7 +4274,8 @@ def _refresh_prepared_project_reward_table():
         SAFE_CAST(r.`order` AS INT64) AS reward_order
       FROM `{PREPARED_LOGS_TABLE}` l
       CROSS JOIN UNNEST(IFNULL(l.project_rewards, [])) r
-      WHERE TRIM(r.reward) != ''
+      WHERE {_non_corrupted_game_sql("l")}
+        AND TRIM(r.reward) != ''
       GROUP BY
         l.is_mw, l.Map, l.game_date, l.table_conceded, l.end_game_triggered,
         l.arena_season, l.is_tournament, l.table_id, l.player, l.starting_position,
@@ -4252,6 +4312,7 @@ def _refresh_prepared_cp_reward_table():
       FROM `{PREPARED_LOGS_TABLE}` me
       LEFT JOIN `{PREPARED_LOGS_TABLE}` opp
         ON me.table_id = opp.table_id AND me.player != opp.player
+      WHERE {_non_corrupted_game_sql("me")}
     ),
     chosen_base AS (
       SELECT p.*, '5' AS scope, LOWER(TRIM(chosen_5cp_bonus)) AS raw_value
@@ -4442,6 +4503,7 @@ def _refresh_prepared_mw_action_card_tables():
       SELECT table_id
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       WHERE CAST(f.is_mw AS INT64) = 1
+        AND {_non_corrupted_game_sql("f")}
       GROUP BY table_id
       HAVING COUNT(*) = 2
         AND COUNT(DISTINCT player) = 2
@@ -5175,6 +5237,7 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
           SELECT table_id, player, played_animals, played_sponsors, played_projects, elo_delta, pre_match_elo
           FROM `{PREPARED_LOGS_TABLE}`
           WHERE {where_sql}
+            AND {_non_corrupted_game_sql()}
         ),
         played_animals AS (
           SELECT l.table_id, l.player, pa.animal AS card_name, 'animal' AS card_type, l.elo_delta, l.pre_match_elo
@@ -5251,6 +5314,7 @@ def _build_card_stats_query(where_sql, round_filter_active, selected_rounds):
         pre_match_elo
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
     ),
     played_animals AS (
       SELECT l.table_id, l.player, pa.animal AS card_name, 'animal' AS card_type, l.elo_delta, l.pre_match_elo
@@ -5365,6 +5429,7 @@ def _build_opening_hand_stats_query(where_sql):
         pre_match_elo
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
     ),
     card_universe AS (
       SELECT DISTINCT TRIM(pa.animal) AS card_name, 'animal' AS card_type
@@ -5531,11 +5596,13 @@ def _build_endgames_cp_distribution_query(where_sql):
         endgame_scores
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
     ),
     table_scope AS (
       SELECT table_id
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
       GROUP BY table_id
     ),
     completed_tables AS (
@@ -5587,11 +5654,13 @@ def _build_endgames_cp_by_map_query(where_sql):
         endgame_scores
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
     ),
     table_scope AS (
       SELECT table_id
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
       GROUP BY table_id
     ),
     completed_tables AS (
@@ -5859,6 +5928,7 @@ def _build_maps_metrics_query(where_sql):
       SELECT *
       FROM `{PREPARED_FULL_STATS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
     ),
     per_map_base AS (
       SELECT
@@ -7323,12 +7393,13 @@ def _build_maps_tournament_h2h_query():
         f.Map AS map_name,
         SAFE_CAST(f.Score AS FLOAT64) AS score,
         SAFE_CAST(f.Conservation_project_association_tasks AS FLOAT64) AS projects,
-        LOWER(TRIM(CAST(f.Starting_position_in_first_round AS STRING))) AS start_position,
+        LOWER(TRIM(CAST(f.starting_position AS STRING))) AS start_position,
         SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta
-      FROM `freestyle-190711.ark_nova.all_games_stat` f
+      FROM `{PREPARED_FULL_STATS_TABLE}` f
       JOIN tournament_tables t
         ON CAST(f.table_id AS STRING) = t.table_id
       WHERE CAST(f.is_mw AS INT64) = @is_mw
+        AND {_non_corrupted_game_sql("f")}
         AND f.Map IN UNNEST(@h2h_maps)
     ),
     asymmetric_tables AS (
@@ -7462,6 +7533,7 @@ def _build_build_enclosures_query(where_sql):
       SELECT *
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
     ),
     observations AS (
       SELECT
@@ -7619,6 +7691,7 @@ def _build_build_hexes_query(where_sql, expanded=False):
         SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql("f")}
         AND {_completed_game_sql("f")}
     ),
     bucketed AS (
@@ -7741,6 +7814,7 @@ def _build_scoring_query(where_sql, scoring_view, expanded=False):
         SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql("f")}
         AND {_completed_game_sql("f")}
     ),
     valid AS (
@@ -7898,6 +7972,7 @@ def _build_predictors_specific_query(where_sql, observations_only=False):
       SELECT f.*
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql("f")}
         AND {_completed_game_sql("f")}
     ),
     scoped AS (
@@ -8119,6 +8194,7 @@ def _build_predictors_query(where_sql, predictors_view, starting_positions=None)
       SELECT f.*
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql("f")}
         AND {_completed_game_sql("f")}
     ),
     paired AS (
@@ -8223,6 +8299,7 @@ def _build_actions_upgrades_query(where_sql):
       SELECT f.*
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql("f")}
         AND {_completed_game_sql("f")}
     ),
     number_rows AS (
@@ -8337,6 +8414,7 @@ def _build_actions_upgrade_order_query(where_sql):
       SELECT *
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
     ),
     scoped AS (
       SELECT l.*, f.table_conceded, f.end_game_triggered
@@ -8382,6 +8460,7 @@ def _build_actions_upgrades_by_map_query(where_sql):
       SELECT f.*
       FROM `{PREPARED_FULL_STATS_TABLE}` f
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql("f")}
         AND {_completed_game_sql("f")}
     ),
     observations AS (
@@ -8501,6 +8580,7 @@ def _build_workers_query(where_sql, workers_view):
         {', SUM(SAFE_CAST(f.Association_workers AS FLOAT64)) AS worker_sum' if workers_view == WORKERS_VIEW_GENERAL else ', CAST(NULL AS FLOAT64) AS worker_sum'}
       FROM `{source_table}` {source_alias}
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql(source_alias)}
         AND ({valid_sql})
       GROUP BY {source_alias}.Map, bucket
     ),
@@ -8785,6 +8865,7 @@ def _build_conservation_cp_rewards_query(where_sql):
       SELECT *
       FROM `{PREPARED_LOGS_TABLE}`
       WHERE {where_sql}
+        AND {_non_corrupted_game_sql()}
     ),
     paired AS (
       SELECT
@@ -8951,7 +9032,7 @@ def _build_records_query(where_sql, records_view, records_player=None,
     # enrichment remains NULL in storage but follows the dashboard-wide Elo
     # range rule and is evaluated as zero by `where_sql`.
     manual_where_sql = where_sql
-    scope_predicates = [where_sql]
+    scope_predicates = [where_sql, _non_corrupted_game_sql("f")]
     manual_scope_predicates = [manual_where_sql]
     if records_player:
         scope_predicates.append("CAST(f.player AS STRING) = @records_player")
@@ -8986,6 +9067,7 @@ def _build_records_query(where_sql, records_view, records_player=None,
         COUNTIF(SAFE_CAST(Game_result AS INT64) = 1) AS result_one_count,
         COUNTIF(SAFE_CAST(Game_result AS INT64) = 2) AS result_two_count
       FROM `{PREPARED_FULL_STATS_TABLE}`
+      WHERE {_non_corrupted_game_sql()}
       GROUP BY table_id
     )
     """
@@ -9156,7 +9238,7 @@ def _build_icons_query(where_sql):
             f"SAFE_CAST(f.{field_name} AS FLOAT64) AS amount, "
             "SAFE_CAST(f.elo_delta AS FLOAT64) AS elo_delta "
             f"FROM `{PREPARED_FULL_STATS_TABLE}` f WHERE {where_sql} "
-            f"AND {_completed_game_sql('f')}"
+            f"AND {_non_corrupted_game_sql('f')} AND {_completed_game_sql('f')}"
         )
         for display_name, field_name in ICON_FIELDS
     )
@@ -12164,7 +12246,7 @@ def _players_component_cache_blob_name(
         "arena_seasons": sorted(arena_seasons or []) if arena_only else [],
         "tournament_only": bool(tournament_only),
         "starting_positions": sorted(starting_positions or []),
-        "rollup_schema": 6,
+        "rollup_schema": 7,
     }
     digest = hashlib.sha256(
         json.dumps(cache_key, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -13296,7 +13378,7 @@ def _refresh_synergy_ci_snapshots():
     # Stable per-version staging lets scheduler retries reuse completed
     # snapshots and per-batch inference caches after a request deadline.
     stage_id = hashlib.sha256(
-        f"{data_version}:synergy-ci-schema-4".encode("utf-8")
+        f"{data_version}:synergy-ci-schema-5".encode("utf-8")
     ).hexdigest()[:20]
     completion_marker = (
         f"{CACHE_PREFIX}/staging/synergy-ci/completed/{stage_id}.json"
@@ -15026,7 +15108,7 @@ def get_card_stats(request):
         "arena_only": arena_only,
         "tournament_only": tournament_only,
         "starting_positions": sorted(starting_positions),
-        "rollup_schema": 7,
+        "rollup_schema": 8,
     }
     filter_cache_blob_name = None
     if (

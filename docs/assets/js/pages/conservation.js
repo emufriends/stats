@@ -145,21 +145,25 @@ function syncControls() {
   document.querySelector('.conservation-subject')?.classList.toggle('is-hidden', view !== 'projects');
   document.querySelector('.conservation-scope')?.classList.toggle('is-hidden', view !== 'cp_rewards');
   document.querySelector('.conservation-compare')?.classList.toggle('is-hidden', !['projects', 'cp_rewards'].includes(view));
-  document.querySelector('.conservation-map-filter')?.classList.toggle('is-hidden', view === 'cp_rewards');
-  document.querySelector('.conservation-map-divider')?.classList.toggle('is-hidden', view === 'cp_rewards');
-  const showCompleted = view === 'cp_rewards' || (view === 'project_rewards' && mode === 'delta');
-  document.querySelector('.conservation-completed-filter')?.classList.toggle('is-hidden', !showCompleted);
-  document.querySelector('.conservation-completed-divider')?.classList.toggle('is-hidden', !showCompleted);
+  // Projects and CP rewards already expose their map scope in the table or
+  // use the complete map universe; only Project Rewards has a map filter.
+  const mapsHidden = view === 'projects' || view === 'cp_rewards';
+  document.querySelector('.conservation-map-filter')?.classList.toggle('is-hidden', mapsHidden);
+  document.querySelector('.conservation-map-divider')?.classList.toggle('is-hidden', mapsHidden);
+  const completedMode = view === 'projects' || (view === 'project_rewards' && mode === 'frequency')
+    ? 'locked'
+    : 'optional';
+  document.querySelector('.conservation-completed-divider')?.classList.remove('is-hidden');
   document.querySelector('.conservation-switches')?.classList.toggle('is-cp-rewards', view === 'cp_rewards');
   document.querySelector('.conservation-switches')?.classList.toggle('is-projects', view === 'projects');
-  window.syncGlobalModeFilterGrouping?.();
+  window.setCompletedFilterMode?.(completedMode);
 }
 
 function params() {
   const value = id => document.getElementById(id)?.value ?? '';
   return {
     stats_page: 'conservation', conservation_view: view, is_mw: isMW,
-    maps: view === 'cp_rewards' ? MAPS.map(([, , full]) => full) : selectedMaps,
+    maps: view === 'projects' || view === 'cp_rewards' ? MAPS.map(([, , full]) => full) : selectedMaps,
     player_elo_min: value('playerEloMin') === '' ? 0 : Number(value('playerEloMin')),
     player_elo_max: value('playerEloMax') === '' ? null : Number(value('playerEloMax')),
     opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
@@ -171,7 +175,7 @@ function params() {
 function isDefault(p) {
   return p.player_elo_min === 300 && p.player_elo_max === null && p.opponent_elo_min === 300 &&
     p.opponent_elo_max === null && p.date_from === '2025-01-01' && p.date_to === null &&
-    p.completed_only === null && (view === 'cp_rewards' || selectedMaps.length === MAPS.length);
+    p.completed_only === null && (view === 'projects' || view === 'cp_rewards' || selectedMaps.length === MAPS.length);
 }
 function snapshotUrl() { return `${API_ROOT}/${VIEW_SLUG[view]}/default-${isMW ? 'mw' : 'base'}.json`; }
 

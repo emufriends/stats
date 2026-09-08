@@ -43,6 +43,10 @@ let loadError = '';
 let selectedSeason = null;
 let graphView = false;
 let graphSelected = new Set();
+// Keep a player's line color tied to that player for the mounted season. The
+// selected series is drawn in dataset order, so deriving colors from that
+// order would recolor existing lines whenever another player is selected.
+let graphColorByPlayer = new Map();
 let graphSearch = '';
 let graphDayStart = 1;
 let graphDayEnd = null;
@@ -56,6 +60,7 @@ export function mount({ dataset = 1 } = {}) {
   isMW = Number(dataset) === 0 ? 0 : 1;
   graphView = false;
   graphSelected = new Set();
+  graphColorByPlayer = new Map();
   graphSearch = '';
   graphDayStart = 1;
   graphDayEnd = null;
@@ -160,6 +165,31 @@ function resetGraphSelection() {
     .map(item => item.player));
 }
 
+function syncGraphColorAssignments(players) {
+  const selectedPlayers = [...new Set(players || [])].filter(Boolean);
+  const used = new Set();
+  const assigned = new Set();
+  selectedPlayers.forEach(player => {
+    const index = graphColorByPlayer.get(player);
+    if (Number.isInteger(index) && index >= 0 && index < LINE_COLORS.length && !used.has(index)) {
+      used.add(index);
+      assigned.add(player);
+    }
+  });
+  selectedPlayers.forEach(player => {
+    if (assigned.has(player)) return;
+    const next = LINE_COLORS.findIndex((_, index) => !used.has(index));
+    const index = next >= 0 ? next : selectedPlayers.indexOf(player) % LINE_COLORS.length;
+    graphColorByPlayer.set(player, index);
+    used.add(index);
+  });
+}
+
+function graphColorForPlayer(player) {
+  const index = graphColorByPlayer.get(player);
+  return Number.isInteger(index) ? LINE_COLORS[index % LINE_COLORS.length] : 'transparent';
+}
+
 function syncDayControl() {
   const control = document.getElementById('arenaDayControl');
   const data = currentData();
@@ -175,6 +205,7 @@ function syncDayControl() {
 function setArenaSeason(season) {
   if (!seasons().some(item => item.season === season)) return;
   selectedSeason = season;
+  graphColorByPlayer = new Map();
   graphSearch = '';
   graphDayStart = 1;
   graphDayEnd = null;
@@ -329,6 +360,8 @@ function renderGraphCanvas() {
   const data = currentData();
   if (!host || !data) return;
   syncDayRange(data);
+  const selectedPlayers = [...graphSelected].filter(player => data.series?.some(item => item.player === player && (item.ratings || []).length));
+  syncGraphColorAssignments(selectedPlayers);
   const selected = (data.series || []).filter(item => graphSelected.has(item.player) && (item.ratings || []).length);
   const width = 900; const height = 470;
   const margin = { left: 62, right: 24, top: 25, bottom: 34 };
@@ -359,9 +392,9 @@ function renderGraphCanvas() {
   const grid = yTicks.map(value => `<g><line x1="${margin.left}" y1="${y(value)}" x2="${width - margin.right}" y2="${y(value)}"/><text x="${margin.left - 10}" y="${y(value) + 4}" text-anchor="end">${Math.round(value)}</text></g>`).join('');
   const dates = xTicks.map(value => `<g><line x1="${x(value)}" y1="${margin.top}" x2="${x(value)}" y2="${height - margin.bottom}"/><text x="${x(value)}" y="${height - 18}" text-anchor="middle">${new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</text></g>`).join('');
   const plotted = selectedPoints.map(({ item, points }) => ({ item, points: points.map(point => ({ ...point, x: x(point.time), y: y(point.rating) })) }));
-  const lines = plotted.map(({ item, points }, index) => {
+  const lines = plotted.map(({ item, points }) => {
     const path = points.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
-    return path ? `<path class="players-arena-rating-line" d="${path}" stroke="${LINE_COLORS[index % LINE_COLORS.length]}" data-player="${escapeAttr(item.player)}"></path>` : '';
+    return path ? `<path class="players-arena-rating-line" d="${path}" stroke="${graphColorForPlayer(item.player)}" data-player="${escapeAttr(item.player)}"></path>` : '';
   }).join('');
   host.querySelector('svg')?.remove();
   host.querySelector('.players-arena-empty-chart')?.remove();
@@ -441,12 +474,11 @@ function renderGraphLegend() {
   const data = currentData();
   if (!host || !data) return;
   const term = graphSearch.trim().toLocaleLowerCase();
-  const selectedOrder = (data.series || []).filter(item => graphSelected.has(item.player)).map(item => item.player);
+  syncGraphColorAssignments([...graphSelected].filter(player => data.series?.some(item => item.player === player && (item.ratings || []).length)));
   host.innerHTML = (data.series || []).filter(item => !term || item.player.toLocaleLowerCase().includes(term)).map(item => {
     const selected = graphSelected.has(item.player);
     const disabled = !(item.ratings || []).length;
-    const colorIndex = selectedOrder.indexOf(item.player);
-    const color = colorIndex >= 0 ? LINE_COLORS[colorIndex % LINE_COLORS.length] : 'transparent';
+    const color = selected ? graphColorForPlayer(item.player) : 'transparent';
     return `<button type="button" class="players-arena-legend-item ${selected ? 'active' : ''}" data-player="${escapeAttr(item.player)}" onclick="toggleArenaGraphPlayer(this.dataset.player)" ${disabled ? 'disabled' : ''}><span class="players-arena-legend-swatch" style="background:${color}"></span><span class="players-arena-legend-rank">${item.rank}</span><span>${escapeHtml(item.player)}</span></button>`;
   }).join('');
 }

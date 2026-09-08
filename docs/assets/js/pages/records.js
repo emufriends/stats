@@ -1,6 +1,6 @@
 import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
 import { mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { setTopbarDatasetCombined } from '../layout.js?v=20260819-4';
+import { setFilterButtonDisabled, setTopbarDatasetCombined } from '../layout.js?v=20260819-4';
 
 export const id = 'records';
 export const title = 'Records';
@@ -124,6 +124,8 @@ export function mount({ dataset = 1 } = {}) {
   currentPage = 1;
   rows = [];
   renderTabs();
+  syncFilterAvailability();
+  syncCompletedControl();
   renderMapFilter();
   renderHead();
   renderPlayerSearch();
@@ -132,6 +134,7 @@ export function mount({ dataset = 1 } = {}) {
 
 export function unmount() {
   mounted = false;
+  syncFilterAvailability(false);
   setTopbarDatasetCombined(false);
   requestToken += 1;
   requestController?.abort();
@@ -157,7 +160,9 @@ function setRecordsView(next) {
   currentPage = 1;
   iconFilterOpen = false;
   document.getElementById('recordsIconFilterPopup')?.remove();
+  syncFilterAvailability();
   renderTabs();
+  syncCompletedControl();
   renderHead();
   renderPlayerSearch();
   if (view === 'elo_leaderboard') {
@@ -165,6 +170,22 @@ function setRecordsView(next) {
     renderBody();
   }
   loadRecords(++requestToken);
+}
+
+function syncFilterAvailability(forceNoFilters = view === 'elo_leaderboard') {
+  // Elo Leaderboard is a standalone spreadsheet ranking, like Arena Top 100;
+  // its inherited sidebar must remain inaccessible and visually absent.
+  const noFilters = forceNoFilters === true || (forceNoFilters !== false && view === 'elo_leaderboard');
+  setFilterButtonDisabled(noFilters);
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  sidebar.hidden = noFilters;
+  sidebar.setAttribute('aria-hidden', String(noFilters));
+}
+
+function syncCompletedControl() {
+  const hardCompleted = view === 'highest_scores' || view === 'most_icons';
+  window.setCompletedFilterMode?.(hardCompleted ? 'locked' : 'hidden');
 }
 
 function renderMapFilter() {

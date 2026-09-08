@@ -8,6 +8,7 @@ import {
 } from '../color-scales.js?v=20260812-9';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260819-3';
+import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
 
 export const title = 'Combos';
 export const navLabel = 'Combos';
@@ -1026,8 +1027,8 @@ function rowHtml(row, rank) {
   if (activeView === 'card_action_card') {
     return `<tr>
       <td class="rank-cell">${rank}</td>
-      ${combinedCardTd(row.card_name, row.delta_card, deltaRanges.delta_1, row, 'component_1', true,
-        'Population: telemetry-complete MW player-games in which this card was played.')}
+       ${combinedCardTd(row.card_name, row.delta_card, deltaRanges.delta_1, row, 'component_1', true,
+         'Population: telemetry-complete MW player-games in which this card was played.', true)}
       ${combinedCardTd(row.action_card_name, row.delta_action, deltaRanges.delta_2, row, 'component_2', false,
         'Population: telemetry-complete MW player-games in which this action card was selected.')}
       ${deltaTd(row.delta_combined, null, '', deltaRanges.delta_combined)}
@@ -1041,7 +1042,7 @@ function rowHtml(row, rank) {
   if (activeView === 'card_endgame') {
     return `<tr>
       <td class="rank-cell">${rank}</td>
-       ${combinedCardTd(row.card_name, row.delta_card, deltaRanges.delta_1, row, 'component_1')}
+        ${combinedCardTd(row.card_name, row.delta_card, deltaRanges.delta_1, row, 'component_1', true, '', true)}
        ${combinedCardTd(row.endgame_name, row.delta_endgame, deltaRanges.delta_2, row, 'component_2')}
       ${deltaTd(row.delta_combined, null, '', deltaRanges.delta_combined)}
       ${deltaTd(row.delta_actual, row, 'delta_actual', deltaRanges.delta_actual)}
@@ -1055,7 +1056,7 @@ function rowHtml(row, rank) {
     const isMap = activeView === 'card_map';
     return `<tr>
       <td class="rank-cell">${rank}</td>
-       ${combinedCardTd(row.card_name, row.delta_general, deltaRanges.delta_general, row, 'component_1')}
+       ${combinedCardTd(row.card_name, row.delta_general, deltaRanges.delta_general, row, 'component_1', true, '', true)}
       <td>${escapeHtml(isMap ? formatMapName(row.map_name) : row.round_name)}</td>
       ${deltaTd(
         isMap ? row.delta_map : row.delta_round,
@@ -1072,8 +1073,8 @@ function rowHtml(row, rank) {
   const projected = projectPairRow(row);
   return `<tr>
     <td class="rank-cell">${rank}</td>
-     ${combinedCardTd(projected.cardOne, projected.deltaOne, deltaRanges.delta_1, row, projected.componentOne)}
-     ${combinedCardTd(projected.cardTwo, projected.deltaTwo, deltaRanges.delta_2, row, projected.componentTwo)}
+      ${combinedCardTd(projected.cardOne, projected.deltaOne, deltaRanges.delta_1, row, projected.componentOne, true, '', true)}
+      ${combinedCardTd(projected.cardTwo, projected.deltaTwo, deltaRanges.delta_2, row, projected.componentTwo, true, '', true)}
     ${deltaTd(row.delta_combined, null, '', deltaRanges.delta_combined)}${deltaTd(
       row.delta_actual, row, 'delta_actual', deltaRanges.delta_actual,
     )}
@@ -1084,14 +1085,18 @@ function rowHtml(row, rank) {
   </tr>`;
 }
 
-function combinedCardTd(cardName, delta, range, row = null, ciPrefix = '', applyTitleCase = true, population = '') {
+function combinedCardTd(cardName, delta, range, row = null, ciPrefix = '', applyTitleCase = true, population = '', linkCard = false) {
   const value = Number(delta);
   const hasCi = row && ciPrefix && Object.prototype.hasOwnProperty.call(row, `${ciPrefix}_ci95_n`);
   const attrs = hasCi
     ? ` data-ci-low="${escapeAttr(row[`${ciPrefix}_ci95_low`] ?? '')}" data-ci-high="${escapeAttr(row[`${ciPrefix}_ci95_high`] ?? '')}" data-ci-n="${escapeAttr(row[`${ciPrefix}_ci95_n`] ?? '')}" data-ci-color-min="${escapeAttr(range?.min ?? '')}" data-ci-color-max="${escapeAttr(range?.max ?? '')}"${population ? ` data-ci-population="${escapeAttr(population)}"` : ''}`
     : '';
+  const displayName = applyTitleCase ? titleCase(cardName) : cardName;
+  const nameMarkup = linkCard
+    ? `<a class="card-details-link" href="${escapeAttr(cardDetailsHref(cardName))}">${escapeHtml(displayName)}</a>`
+    : escapeHtml(displayName);
   return `<td class="combination-card-cell combination-card-with-delta">
-    <span class="combination-card-name">${escapeHtml(applyTitleCase ? titleCase(cardName) : cardName)}</span>
+    <span class="combination-card-name">${nameMarkup}</span>
     <span class="combination-card-delta${hasCi ? ' delta-ci-cell' : ''}"${attrs} style="color:${deltaRangeColor(value, range?.min, range?.max)}">(${formatSigned(value)})</span>
   </td>`;
 }

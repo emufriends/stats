@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260824-parity1';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260908-s14';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor, synergyRangeColor } from './color-scales.js?v=20260812-9';
 import { getRoutePageId, isRefreshPath, onRouteChange } from './router.js?v=20260819-1';
 import {
@@ -6,7 +6,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260824-parity1';
+} from './snapshot-cache.js?v=20260907-corrupt1';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -75,6 +75,25 @@ const GLOBAL_FPA_FILTER_PAGES = new Set([
   ...GLOBAL_MODE_FILTER_PAGES,
   'records',
 ]);
+const INITIAL_COMPLETED_FILTER_MODES = {
+  home: 'optional',
+  cards: 'optional',
+  'opening-hand': 'optional',
+  combos: 'optional',
+  'mw-action-cards': 'optional',
+  endgames: 'locked',
+  'sponsor-endgames': 'locked',
+  maps: 'locked',
+  actions: 'locked',
+  icons: 'locked',
+  predictors: 'locked',
+  build: 'optional',
+  conservation: 'locked',
+  scoring: 'locked',
+  workers: 'locked',
+  players: 'locked',
+  records: 'hidden',
+};
 
 function globalModeToggle(id, label, kind) {
   return `<div class="toggle-row global-mode-toggle-row"><span class="toggle-label">${label}</span><label class="toggle"><input type="checkbox" id="${id}" data-mode-kind="${kind}" /><span class="toggle-track"></span></label></div>`;
@@ -267,10 +286,18 @@ function installGlobalFpaFilter(pageId) {
   const actions = sidebar?.querySelector('.filter-action-stack');
   if (!sidebar || !actions || sidebar.querySelector('.global-fpa-filter-shell')) return;
 
+  // The public filter label is "Starting position"; FPA remains the internal
+  // shorthand/API concept. Players places this section after Last X games so
+  // the sidebar follows the same population-then-window order as the query.
   const dateLabel = [...sidebar.querySelectorAll('.filter-label')].find(label => (
     label.textContent.trim().toLowerCase() === 'date range'
   ));
   const dateGroup = dateLabel?.closest('.filter-group') || null;
+  const lastXLabel = [...sidebar.querySelectorAll('.filter-label')].find(label => (
+    label.textContent.trim().toLowerCase() === 'last x games'
+  ));
+  const lastXGroup = lastXLabel?.closest('.filter-group') || null;
+  const orderAnchorGroup = lastXGroup || dateGroup;
   const fallbackAnchor = sidebar.querySelector('.global-mode-filter-shell')
     || sidebar.querySelector('.records-mode-filters')
     || actions;
@@ -278,20 +305,24 @@ function installGlobalFpaFilter(pageId) {
   const shell = document.createElement('div');
   shell.className = 'global-fpa-filter-shell';
   shell.innerHTML = `<div class="filter-group global-fpa-filter-group">
-    <span class="filter-label">First-player advantage (FPA)</span>
-    <div class="global-fpa-buttons" role="group" aria-label="First-player advantage">
+    <span class="filter-label">Starting position</span>
+    <div class="global-fpa-buttons" role="group" aria-label="Starting position">
       <button type="button" class="chip global-fpa-button active" data-starting-position="First player" aria-pressed="true">First player</button>
       <button type="button" class="chip global-fpa-button active" data-starting-position="Second player" aria-pressed="true">Second player</button>
     </div>
   </div>`;
 
-  let leadingDivider = dateGroup?.nextElementSibling?.matches('hr.divider')
-    ? dateGroup.nextElementSibling
+  let leadingDivider = orderAnchorGroup?.nextElementSibling?.matches('hr.divider')
+    ? orderAnchorGroup.nextElementSibling
     : null;
   if (!leadingDivider) {
     leadingDivider = document.createElement('hr');
     leadingDivider.className = 'divider global-fpa-leading-divider';
-    fallbackAnchor.parentNode.insertBefore(leadingDivider, fallbackAnchor);
+    // Some pages own a Completed group immediately after Date Range rather
+    // than an explicit divider. Insert Starting position before that group so
+    // it cannot split the Completed/Arena/Tournament block.
+    const insertionTarget = orderAnchorGroup?.nextElementSibling || fallbackAnchor;
+    insertionTarget.parentNode.insertBefore(leadingDivider, insertionTarget);
   } else {
     leadingDivider.classList.add('global-fpa-leading-divider');
   }
@@ -311,6 +342,98 @@ function installGlobalFpaFilter(pageId) {
     button.setAttribute('aria-pressed', button.classList.contains('active') ? 'true' : 'false');
   });
 }
+
+function completedFilterGroup() {
+  const label = [...document.querySelectorAll('#sidebar .toggle-label')].find(item => (
+    item.textContent.trim() === 'Completed games only'
+  ));
+  return label?.closest('.filter-group') || null;
+}
+
+// Keep the compact table-header label consistent with the dashboard's
+// user-facing EV terminology while leaving the underlying elo_delta field and
+// explanatory tooltip attributes unchanged. Elo-delta headers are presented as
+// bare "EV" (so source labels such as "Elo Δ" become "EV"). Headers are
+// rendered by both the static card tables and many async page modules, so
+// observe the shared canvas instead of duplicating replacements in each module.
+let eloHeaderObserver = null;
+
+function normalizeEloDeltaHeaders(root = document) {
+  root.querySelectorAll?.('#pageMain th').forEach(header => {
+    const walker = document.createTreeWalker(header, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      if (node.nodeValue.includes('Δ')) node.nodeValue = node.nodeValue.replaceAll('Δ', 'EV');
+      if (/\bElo\s+EV\b/i.test(node.nodeValue)) {
+        node.nodeValue = node.nodeValue.replace(/\bElo\s+EV\b/gi, 'EV');
+      }
+      node = walker.nextNode();
+    }
+  });
+}
+
+function installEloDeltaHeaderNormalization() {
+  eloHeaderObserver?.disconnect();
+  const main = document.getElementById('pageMain');
+  if (!main) return;
+  normalizeEloDeltaHeaders(main);
+  eloHeaderObserver = new MutationObserver(() => normalizeEloDeltaHeaders(main));
+  eloHeaderObserver.observe(main, { subtree: true, childList: true, characterData: true });
+}
+
+function createCompletedFilterGroup() {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return null;
+  const modeAnchor = sidebar.querySelector('.global-mode-filter-shell')
+    || sidebar.querySelector('.records-mode-filters')
+    || sidebar.querySelector('.filter-action-stack');
+  if (!modeAnchor?.parentNode) return null;
+  const group = document.createElement('div');
+  group.className = 'filter-group global-completed-filter-group';
+  group.dataset.completedInjected = 'true';
+  group.innerHTML = `<div class="toggle-row"><span class="toggle-label">Completed games only</span>
+    <label class="toggle"><input type="checkbox" id="globalCompletedOnly" /><span class="toggle-track"></span></label></div>`;
+  modeAnchor.parentNode.insertBefore(group, modeAnchor);
+  return group;
+}
+
+function setCompletedLock(group, locked) {
+  const row = group?.querySelector('.toggle-row');
+  const input = group?.querySelector('input[type="checkbox"]');
+  const toggle = group?.querySelector('.toggle');
+  if (!row || !input || !toggle) return;
+  let lock = row.querySelector('.completed-lock-indicator');
+  if (locked && !lock) {
+    lock = document.createElement('span');
+    lock.className = 'completed-lock-indicator';
+    lock.setAttribute('role', 'img');
+    lock.setAttribute('aria-label', 'This view always uses completed games.');
+    lock.title = 'This view always uses completed games.';
+    lock.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3m-11 0h12v10H6V10Zm3 0h6V7a3 3 0 0 0-6 0v3Z" fill="currentColor"/></svg>';
+    toggle.before(lock);
+  } else if (!locked) {
+    lock?.remove();
+  }
+  if (locked && !input.disabled) input.dataset.optionalChecked = input.checked ? 'true' : 'false';
+  if (!locked && input.disabled && input.dataset.optionalChecked) {
+    input.checked = input.dataset.optionalChecked === 'true';
+  }
+  input.checked = locked ? true : input.checked;
+  input.disabled = locked;
+  toggle.classList.toggle('is-locked', locked);
+}
+
+window.setCompletedFilterMode = mode => {
+  const normalized = ['optional', 'locked', 'hidden'].includes(mode) ? mode : 'optional';
+  let group = completedFilterGroup();
+  if (!group && normalized !== 'hidden') group = createCompletedFilterGroup();
+  if (!group) return;
+  const hidden = normalized === 'hidden';
+  group.hidden = hidden;
+  group.classList.toggle('is-hidden', hidden);
+  if (!hidden) setCompletedLock(group, normalized === 'locked');
+  window.syncGlobalModeFilterGrouping?.();
+};
 
 window.getGlobalStartingPositions = () => [...document.querySelectorAll('.global-fpa-button.active')]
   .map(button => button.dataset.startingPosition)
@@ -344,7 +467,10 @@ window.syncGlobalModeFilterGrouping = () => {
     && window.getComputedStyle(completedGroup.previousElementSibling).display !== 'none';
   completedGroup?.classList.toggle('global-mode-completed-host', completedVisible);
   wrapper.classList.toggle('is-joined', completedVisible);
-  leadingDivider.hidden = wrapper.hidden || completedVisible || Boolean(existingSectionDivider);
+  const injectedCompleted = completedGroup?.dataset.completedInjected === 'true';
+  leadingDivider.hidden = injectedCompleted && completedVisible
+    ? false
+    : wrapper.hidden || completedVisible || Boolean(existingSectionDivider);
 };
 
 window.setGlobalModeFilterVisibility = ({ arena = true, tournament = true } = {}) => {
@@ -411,10 +537,13 @@ async function renderCurrentRoute() {
     installGlobalModeFilters(activePageId);
     installGlobalFpaFilter(activePageId);
     installEloRangeLinking();
+    const initialCompletedMode = INITIAL_COMPLETED_FILTER_MODES[activePageId];
+    if (initialCompletedMode) window.setCompletedFilterMode(initialCompletedMode);
     setTopbarDataset(currentDataset);
   }
 
   if (page.mount) page.mount({ dataset: currentDataset, pageId: activePageId });
+  installEloDeltaHeaderNormalization();
   window.requestAnimationFrame(() => activeEloRangeLinkController?.synchronize());
   // Let the active page claim the network first; background warmup begins from
   // an idle callback after its foreground request has been started.
