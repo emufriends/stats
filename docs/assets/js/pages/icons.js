@@ -10,7 +10,8 @@ import {
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'icons';
 export const title = 'Icons';
@@ -138,7 +139,7 @@ let mode = 'delta';
 let graphView = false;
 let rows = [];
 let selectedIcons = new Set(ICONS);
-let selectedMaps = VALID_MAPS.map(([, full]) => full);
+let selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
 let sort = { col: 'amount', dir: 'desc' };
 const snapshotCache = { 0: null, 1: null };
 
@@ -149,7 +150,7 @@ export function mount({ dataset = 1 } = {}) {
   mode = 'delta';
   graphView = false;
   selectedIcons = new Set(availableIconNames());
-  selectedMaps = VALID_MAPS.map(([, full]) => full);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
   sort = { col: 'amount', dir: 'desc' };
   bindHandlers();
   renderIconChips();
@@ -715,12 +716,7 @@ function selectNoneIcons() {
   renderCurrentView();
 }
 
-function renderMapChips() {
-  const container = document.getElementById('mapChips');
-  if (!container) return;
-  container.innerHTML = VALID_MAPS.map(([short, full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}"
-    data-map="${escapeAttr(full)}" title="${escapeAttr(full)}" onclick="toggleMapChip(this.dataset.map)">${short}</button>`).join('');
-}
+function renderMapChips() { renderMapFilterChips('mapChips', selectedMaps, 'toggleMapChip'); }
 
 function toggleMapChip(map) {
   if (selectedMaps.includes(map)) selectedMaps = selectedMaps.filter(value => value !== map);
@@ -728,13 +724,15 @@ function toggleMapChip(map) {
   renderMapChips();
 }
 
-function selectAllMaps() {
-  selectedMaps = VALID_MAPS.map(([, full]) => full);
+function selectAllMaps(group = 'all') {
+  const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group);
+  selectedMaps = [...new Set([...selectedMaps, ...names])];
   renderMapChips();
 }
 
-function selectNoneMaps() {
-  selectedMaps = [];
+function selectNoneMaps(group = 'all') {
+  const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group);
+  selectedMaps = selectedMaps.filter(map => !names.includes(map));
   renderMapChips();
 }
 
@@ -743,7 +741,7 @@ function resetFilters() {
   set('playerEloMin', '300'); set('playerEloMax', '');
   set('opponentEloMin', '300'); set('opponentEloMax', '');
   set('dateFrom', '2025-01-01'); set('dateTo', '');
-  selectedMaps = VALID_MAPS.map(([, full]) => full);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
   renderMapChips();
 }
 

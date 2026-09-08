@@ -10,7 +10,8 @@ import {
 } from '../color-scales.js?v=20260812-9';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260812-9';
-import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260824-parity1';
+import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'mw-action-cards';
 export const title = 'MW Action Cards';
@@ -101,7 +102,7 @@ let requestToken = 0;
 const viewDataVersions = { general: '', by_map: '', synergies: '' };
 let activeView = 'general';
 let viewRows = { general: null, by_map: null, synergies: null };
-let selectedMaps = MAPS.map(([, full]) => full);
+let selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
 let selectedTypes = new Set(TYPES);
 let pairTypeSelections = { synergies: null };
 let sortStates = {
@@ -122,7 +123,7 @@ let synergyCiPendingKey = '';
 export function mount({ dataset = 1 } = {}) {
   mounted = true; requestToken += 1; activeView = 'general';
   viewRows = { general: null, by_map: null, synergies: null };
-  selectedMaps = MAPS.map(([, full]) => full); selectedTypes = new Set(TYPES);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full); selectedTypes = new Set(TYPES);
   pairTypeSelections = { synergies: null };
   byMapMode = 'raw'; byMapGraph = false;
   pairSearches = { synergies: ['', ''] };
@@ -259,7 +260,7 @@ function renderGeneralDraftHead() {
   setTableClasses(activeView === 'draft' ? 'mw-action-cards-draft-table' : 'mw-action-cards-general-table');
   const head = document.getElementById('tableHead');
   if (activeView === 'draft') head.innerHTML = `<tr><th style="width:5%">#</th>${typeHeader('15%')}<th style="width:15%">Card</th>${sortableHeader('picked_pct', 'Picked%', 'tables where the card was picked / tables where it was available', '16.25%')}${sortableHeader('drafted_first_pct', 'Drafted% (1st)', 'tables where the card appeared in either first draft slot / available tables', '16.25%')}${sortableHeader('drafted_second_pct', 'Drafted% (2nd)', 'tables where the card appeared in either second draft slot / available tables', '16.25%')}${sortableHeader('undrafted_pct', 'Undrafted%', 'tables where the card appeared in either returned third slot / available tables', '16.25%')}</tr>`;
-  else head.innerHTML = `<tr><th style="width:5%">#</th>${typeHeader('15%')}<th style="width:15%">Card</th>${sortableHeader('delta_picked', '&Delta; Elo', 'average Elo delta when picked', '12%')}${sortableHeader('delta_picked_upgraded', '&Delta; Elo (Upg)', 'average Elo delta when picked and upgraded', '12%')}${sortableHeader('delta_picked_basic', '&Delta; Elo (Basic)', 'average Elo delta when picked and not upgraded', '12%')}${sortableHeader('elo_picked', 'Elo', 'average pre-match Elo of players who picked this card', '10%')}${sortableHeader('picked_pct', 'Picked%', 'tables where the card was picked / tables where it was available', '19%')}</tr>`;
+  else head.innerHTML = `<tr><th style="width:5%">#</th>${typeHeader('15%')}<th style="width:15%">Card</th>${sortableHeader('delta_picked', 'EV', 'average Elo delta when picked', '12%')}${sortableHeader('delta_picked_upgraded', 'EV (Upg)', 'average Elo delta when picked and upgraded', '12%')}${sortableHeader('delta_picked_basic', 'EV (Basic)', 'average Elo delta when picked and not upgraded', '12%')}${sortableHeader('elo_picked', 'Elo', 'average pre-match Elo of players who picked this card', '10%')}${sortableHeader('picked_pct', 'Picked%', 'tables where the card was picked / tables where it was available', '19%')}</tr>`;
 }
 
 function renderByMap() {
@@ -690,11 +691,11 @@ function renderError(error) { setMeta(''); hidePagination(); document.getElement
 function emptyRow(columns) { return `<tr><td colspan="${columns}"><div class="state-overlay"><div class="state-title">No action cards match the current filters.</div></div></td></tr>`; }
 function setMeta(html) { const meta = document.getElementById('tableMeta'); if (meta) meta.innerHTML = html; }
 
-function renderMapChips() { const host = document.getElementById('mapChips'); if (host) host.innerHTML = MAPS.map(([short, full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="toggleMwActionCardMap(this.dataset.map)">${short}</button>`).join(''); }
+function renderMapChips() { renderMapFilterChips('mapChips', selectedMaps, 'toggleMwActionCardMap'); }
 function toggleMwActionCardMap(map) { selectedMaps = selectedMaps.includes(map) ? selectedMaps.filter(item => item !== map) : [...selectedMaps, map]; renderMapChips(); }
-function selectAllMaps() { selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); }
-function selectNoneMaps() { selectedMaps = []; renderMapChips(); }
-function resetFilters() { const set = (id, value) => { const element = document.getElementById(id); if (element) element.value = value; }; set('playerEloMin', '300'); set('playerEloMax', ''); set('opponentEloMin', '300'); set('opponentEloMax', ''); set('dateFrom', '2025-01-01'); set('dateTo', ''); ['completedToggle', 'globalArenaOnly', 'globalTournamentOnly'].forEach(id => { const element = document.getElementById(id); if (element) element.checked = false; }); selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); reloadAllActive(); }
+function selectAllMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = [...new Set([...selectedMaps, ...names])]; renderMapChips(); }
+function selectNoneMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = selectedMaps.filter(map => !names.includes(map)); renderMapChips(); }
+function resetFilters() { const set = (id, value) => { const element = document.getElementById(id); if (element) element.value = value; }; set('playerEloMin', '300'); set('playerEloMax', ''); set('opponentEloMin', '300'); set('opponentEloMax', ''); set('dateFrom', '2025-01-01'); set('dateTo', ''); ['completedToggle', 'globalArenaOnly', 'globalTournamentOnly'].forEach(id => { const element = document.getElementById(id); if (element) element.checked = false; }); selectedMaps = DEFAULT_MAPS.map(([, , full]) => full); renderMapChips(); reloadAllActive(); }
 function applyFiltersFromSidebar() { reloadAllActive(); document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('active'); }
 function reloadAllActive() { const view = canonicalView(); viewRows = { general: null, by_map: null, synergies: null }; void loadView(view, ++requestToken); }
 

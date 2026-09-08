@@ -1,4 +1,4 @@
-import { fetchStats, loadSnapshot } from '../snapshot-cache.js?v=20260801-4';
+import { fetchStats, loadSnapshot } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
 import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260801-2';
 
 export const id = 'arena';
@@ -6,12 +6,13 @@ export const title = 'Arena';
 export const navLabel = 'Arena';
 
 const API_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players';
-const ARENA_MANIFEST_URL = `${API_ROOT}/arena/manifest.json`;
+const ARENA_LATEST_URL = `${API_ROOT}/arena/latest.json`;
 const ARENA_BUNDLE_URL = `${API_ROOT}/arena-top-100/all-seasons.json`;
 const LINE_COLORS = ['#42d392', '#60a5fa', '#f59e0b', '#c084fc', '#fb7185'];
 
 export const mainHtml = `
   <div class="main-header players-main-header arena-main-header">
+    <div class="table-meta" id="arenaTableMeta"></div>
     <div class="players-arena-day-control is-hidden" id="arenaDayControl" aria-label="Arena graph day range">
       <span>Day</span><input id="arenaDayStart" type="text" inputmode="numeric" pattern="[0-9]*" oninput="onArenaDayInput(event, 'start')" aria-label="Arena graph start day">
       <span>to Day</span><input id="arenaDayEnd" type="text" inputmode="numeric" pattern="[0-9]*" oninput="onArenaDayInput(event, 'end')" aria-label="Arena graph end day">
@@ -20,18 +21,29 @@ export const mainHtml = `
       <label for="arenaSeasonSelect">Season</label>
       <select id="arenaSeasonSelect" onchange="setArenaSeason(this.value)"></select>
     </div>
+    <div class="main-controls arena-main-controls" id="arenaTableControls">
+      <div class="rpp-wrap">
+        <span>Rows</span>
+        <select class="rpp-select" id="arenaRppSelect" onchange="onArenaRppChange()" aria-label="Rows per page">
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100" selected>100</option>
+          <option value="9999">All</option>
+        </select>
+      </div>
+    </div>
   </div>
   <div class="attributes-bar endgames-tabs-bar players-tabs-bar arena-tabs-bar">
     <div class="attributes-bar-header endgames-tabs-header">
       <div class="endgames-tabs players-tabs arena-tabs" role="tablist" aria-label="Arena views">
         <button class="endgames-tab players-arena-tab active" type="button">
-          <span>Top 100</span>
+          <span>Elite League</span>
           <span class="endgames-graph-toggle" id="arenaGraphToggle" role="button" tabindex="0" title="Show graph" aria-label="Show Arena rating graph" onclick="toggleArenaGraph(event)" onkeydown="onArenaGraphKey(event)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16"/><path d="M4 5v14"/><path d="M6.5 15.5 10 11l3.5 2.5L18 7"/></svg></span>
         </button>
       </div>
     </div>
   </div>
-  <div id="arenaContent"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Loading Arena Top 100...</div></div></div>`;
+  <div id="arenaContent"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Loading Arena Elite League...</div></div></div>`;
 
 export const sidebarHtml = '';
 
@@ -48,11 +60,16 @@ let graphSelected = new Set();
 // order would recolor existing lines whenever another player is selected.
 let graphColorByPlayer = new Map();
 let graphSearch = '';
+let arenaPlayerSearch = '';
+let arenaPlayerSuggestionsOpen = false;
 let graphDayStart = 1;
 let graphDayEnd = null;
 let graphHover = null;
 let graphRenderState = null;
 let tableSort = { field: 'end', direction: 'desc' };
+let arenaRowsPerPage = 100;
+let arenaCurrentPage = 1;
+let fullBundleLoading = false;
 let assetRequest = 0;
 
 export function mount({ dataset = 1 } = {}) {
@@ -62,11 +79,16 @@ export function mount({ dataset = 1 } = {}) {
   graphSelected = new Set();
   graphColorByPlayer = new Map();
   graphSearch = '';
+  arenaPlayerSearch = '';
+  arenaPlayerSuggestionsOpen = false;
   graphDayStart = 1;
   graphDayEnd = null;
   graphHover = null;
   graphRenderState = null;
   tableSort = { field: 'end', direction: 'desc' };
+  arenaRowsPerPage = 100;
+  arenaCurrentPage = 1;
+  fullBundleLoading = false;
   Object.assign(window, {
     setArenaSeason,
     toggleArenaGraph,
@@ -80,6 +102,11 @@ export function mount({ dataset = 1 } = {}) {
     clearArenaGraphSelection,
     selectArenaRandom,
     sortArenaTable,
+    onArenaRppChange,
+    goArenaPage,
+    onArenaPlayerSearchInput,
+    clearArenaPlayerSearch,
+    selectArenaPlayerSuggestion,
   });
   setFilterButtonDisabled(true);
   loadArenaAssets();
@@ -103,30 +130,58 @@ async function loadArenaAssets() {
   const requestId = ++assetRequest;
   loadState = 'loading';
   loadError = '';
+  fullBundleLoading = true;
   render();
-  const manifestPromise = loadSnapshot(ARENA_MANIFEST_URL).catch(() => null);
+  const latestPromise = loadSnapshot(ARENA_LATEST_URL).catch(() => null);
   const bundlePromise = loadSnapshot(ARENA_BUNDLE_URL).catch(() => fetchStats({
     stats_page: 'arena', arena_view: 'top_100', is_mw: isMW,
   }));
   try {
-    const [, payload] = await Promise.all([manifestPromise, bundlePromise]);
+    const latest = await latestPromise;
     if (!mounted || requestId !== assetRequest) return;
-    if (!payload || !Array.isArray(payload.seasons) || !payload.data) {
-      throw new Error('Arena Top 100 bundle has an invalid response shape.');
+    if (isArenaPayload(latest)) {
+      installArenaPayload(latest);
+      void bundlePromise.then(payload => {
+        if (!mounted || requestId !== assetRequest) return;
+        if (!isArenaPayload(payload)) {
+          fullBundleLoading = false;
+          render();
+          return;
+        }
+        fullBundleLoading = false;
+        installArenaPayload(payload);
+      }).catch(() => {
+        if (mounted && requestId === assetRequest) fullBundleLoading = false;
+      });
+      return;
     }
-    bundle = payload;
-    loadState = 'ready';
-    selectedSeason ||= payload.latest_season || payload.seasons[0]?.season || null;
-    syncSeasonSelect();
-    syncDatasetLock();
-    resetGraphSelection();
-    render();
+    const payload = await bundlePromise;
+    if (!mounted || requestId !== assetRequest) return;
+    if (!isArenaPayload(payload)) throw new Error('Arena Elite League bundle has an invalid response shape.');
+    fullBundleLoading = false;
+    installArenaPayload(payload);
   } catch (error) {
     if (!mounted || requestId !== assetRequest) return;
+    fullBundleLoading = false;
     loadState = 'error';
     loadError = error?.message || String(error);
     render();
   }
+}
+
+function isArenaPayload(payload) {
+  return Boolean(payload && Array.isArray(payload.seasons) && payload.data && typeof payload.data === 'object');
+}
+
+function installArenaPayload(payload) {
+  bundle = payload;
+  loadState = 'ready';
+  loadError = '';
+  selectedSeason ||= payload.latest_season || payload.seasons[0]?.season || null;
+  syncSeasonSelect();
+  syncDatasetLock();
+  resetGraphSelection();
+  render();
 }
 
 function seasons() {
@@ -211,6 +266,7 @@ function setArenaSeason(season) {
   graphDayEnd = null;
   graphHover = null;
   tableSort = { field: 'end', direction: 'desc' };
+  arenaCurrentPage = 1;
   resetGraphSelection();
   syncSeasonSelect();
   syncDatasetLock();
@@ -237,7 +293,8 @@ function setArenaGraphSearch(value) {
 function toggleArenaGraphPlayer(player) {
   const series = currentData()?.series?.find(item => item.player === player);
   if (!series || !(series.ratings || []).length) return;
-  if (graphSelected.has(player)) graphSelected.delete(player);
+  const wasSelected = graphSelected.has(player);
+  if (wasSelected) graphSelected.delete(player);
   else {
     if (graphSelected.size >= 5) {
       document.getElementById('arenaGraphLimit')?.classList.add('limit-pulse');
@@ -248,6 +305,10 @@ function toggleArenaGraphPlayer(player) {
   }
   renderGraphCanvas();
   renderGraphLegend();
+  if (!wasSelected) {
+    const legendList = document.getElementById('arenaLegendList');
+    if (legendList) legendList.scrollTop = 0;
+  }
 }
 
 function selectArenaTopFive() { resetGraphSelection(); renderGraphCanvas(); renderGraphLegend(); }
@@ -270,23 +331,27 @@ function render() {
   if (!host) return;
   syncSeasonSelect();
   syncDayControl();
+  const tableMeta = document.getElementById('arenaTableMeta');
+  const tableControls = document.getElementById('arenaTableControls');
+  if (tableMeta && graphView) tableMeta.innerHTML = '';
+  tableControls?.toggleAttribute('hidden', graphView);
   const toggle = document.getElementById('arenaGraphToggle');
   toggle?.classList.toggle('active', graphView);
   if (toggle) {
     toggle.title = graphView ? 'Show table' : 'Show graph';
-    toggle.setAttribute('aria-label', graphView ? 'Show Arena Top 100 table' : 'Show Arena rating graph');
+    toggle.setAttribute('aria-label', graphView ? 'Show Arena Elite League table' : 'Show Arena rating graph');
   }
   if (loadState === 'loading') {
-    host.innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Loading Arena Top 100...</div></div>';
+    host.innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Loading Arena Elite League...</div></div>';
     return;
   }
   if (loadState === 'error' || !bundle) {
-    host.innerHTML = `<div class="state-overlay"><div class="state-title">Could not load Arena Top 100</div><div class="state-sub">${escapeHtml(loadError || 'Static bundle unavailable')}</div><button type="button" class="reset-btn" onclick="location.reload()">Retry</button></div>`;
+    host.innerHTML = `<div class="state-overlay"><div class="state-title">Could not load Arena Elite League</div><div class="state-sub">${escapeHtml(loadError || 'Static bundle unavailable')}</div><button type="button" class="reset-btn" onclick="location.reload()">Retry</button></div>`;
     return;
   }
   const data = currentData();
   if (!data) {
-    host.innerHTML = '<div class="state-overlay"><div class="state-title">No ranking snapshot is available for this season.</div></div>';
+    host.innerHTML = `<div class="state-overlay"><div class="${fullBundleLoading ? 'spinner' : 'error-icon'}">${fullBundleLoading ? '' : '&#128269;'}</div><div class="state-title">${fullBundleLoading ? 'Loading this season...' : 'No ranking snapshot is available for this season.'}</div></div>`;
     return;
   }
   if (graphView) renderGraph(host, data);
@@ -309,6 +374,13 @@ function twoOrDash(raw, suffix = '') {
   return Number.isFinite(value) ? `${value.toFixed(2)}${suffix}` : '-';
 }
 
+function arenaPlayerNameMarkup(row) {
+  const name = escapeHtml(row.player);
+  const playerId = Number(row.player_id);
+  if (!Number.isInteger(playerId) || playerId <= 0) return name;
+  return `<a class="card-details-link" href="https://boardgamearena.com/player?id=${playerId}" target="_blank" rel="noopener noreferrer">${name}</a>`;
+}
+
 const SORT_FIELDS = ['end', 'peak', 'games', 'winrate', 'opponent_elo', 'pr', 'turns', 'ppt'];
 
 function compareRows(a, b) {
@@ -317,8 +389,15 @@ function compareRows(a, b) {
   if (!Number.isFinite(av) && Number.isFinite(bv)) return 1;
   if (Number.isFinite(av) && !Number.isFinite(bv)) return -1;
   let comparison = Number.isFinite(av) && Number.isFinite(bv) ? av - bv : 0;
-  if (comparison === 0) comparison = finiteNumber(a.rank) - finiteNumber(b.rank);
-  return tableSort.direction === 'asc' ? comparison : -comparison;
+  if (comparison !== 0) return tableSort.direction === 'asc' ? comparison : -comparison;
+
+  // Displayed rank (#) is the stable, ascending tie-breaker for every Arena
+  // sort. It must not reverse when the primary metric is sorted descending.
+  const ar = finiteNumber(a.rank);
+  const br = finiteNumber(b.rank);
+  if (!Number.isFinite(ar) && Number.isFinite(br)) return 1;
+  if (Number.isFinite(ar) && !Number.isFinite(br)) return -1;
+  return Number.isFinite(ar) && Number.isFinite(br) ? ar - br : 0;
 }
 
 function sortArenaTable(field) {
@@ -329,15 +408,123 @@ function sortArenaTable(field) {
   render();
 }
 
+function onArenaRppChange() {
+  const select = document.getElementById('arenaRppSelect');
+  const value = Number(select?.value);
+  if (![25, 50, 100, 9999].includes(value)) return;
+  arenaRowsPerPage = value;
+  arenaCurrentPage = 1;
+  render();
+}
+
 function renderTable(host, data) {
   const sortedRows = [...(data.rows || [])].sort(compareRows);
+  const searchTerm = arenaPlayerSearch.trim().toLocaleLowerCase();
+  const filteredRows = searchTerm
+    ? sortedRows.filter(row => String(row.player || '').toLocaleLowerCase().includes(searchTerm))
+    : sortedRows;
+  const totalRows = filteredRows.length;
+  const rowsPerPage = arenaRowsPerPage >= 9999 ? Math.max(1, totalRows) : arenaRowsPerPage;
+  const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
+  if (arenaCurrentPage > totalPages) arenaCurrentPage = totalPages;
+  const start = (arenaCurrentPage - 1) * rowsPerPage;
+  const pageRows = filteredRows.slice(start, start + rowsPerPage);
+  const from = totalRows ? start + 1 : 0;
+  const to = totalRows ? Math.min(start + pageRows.length, totalRows) : 0;
+  const meta = document.getElementById('arenaTableMeta');
+  if (meta) meta.innerHTML = totalRows
+    ? `<span class="meta-prefix">Showing </span><strong>${from}-${to}</strong> of <strong>${totalRows}</strong> players`
+    : 'No players';
   const sortArrow = field => tableSort.field === field ? (tableSort.direction === 'asc' ? '&#8593;' : '&#8595;') : '&#8597;';
-  const sortHeader = (field, label, tip = '') => `<th class="sortable ${tableSort.field === field ? 'sorted' : ''}" onclick="sortArenaTable('${field}')">${label}${tip ? ` <span class="col-tip" data-tip="${escapeAttr(tip)}">?</span>` : ''}<span class="sort-arrow">${sortArrow(field)}</span></th>`;
+  const sortHeader = (field, label, tip = '') => `<th class="sortable ${tableSort.field === field ? 'sorted' : ''}" onclick="sortArenaTable('${field}')"><span class="sortable-header-content"><span class="sortable-header-label">${label}${tip ? ` <span class="col-tip" data-tip="${escapeAttr(tip)}">?</span>` : ''}</span><span class="sort-arrow">${sortArrow(field)}</span></span></th>`;
+  const searchMatches = searchTerm.length >= 3
+    ? [...new Set(sortedRows.filter(row => String(row.player || '').toLocaleLowerCase().includes(searchTerm)).map(row => String(row.player || '')))].slice(0, 50)
+    : [];
+  const searchAction = '<button type="button" class="players-search-clear" onclick="clearArenaPlayerSearch(event)" aria-label="Clear player search">&times;</button>';
+  const suggestionHtml = arenaPlayerSuggestionsOpen && searchMatches.length
+    ? searchMatches.map(player => `<button type="button" role="option" data-player="${escapeAttr(player)}">${escapeHtml(player)}</button>`).join('')
+    : '';
   host.innerHTML = `<div class="table-wrap players-arena-table-wrap"><div class="table-scroll"><table class="players-arena-table">
-    <colgroup><col style="width:5%"><col style="width:20%">${'<col style="width:9.375%">'.repeat(8)}</colgroup>
-    <thead><tr><th>#</th><th>Player</th>${sortHeader('end', 'End')}${sortHeader('peak', 'Peak')}${sortHeader('games', 'Games')}${sortHeader('winrate', 'Winrate')}${sortHeader('opponent_elo', 'Opp. Elo')}${sortHeader('pr', 'PR', 'performance rating')}${sortHeader('turns', 'Turns')}${sortHeader('ppt', 'PPT', 'points per turn')}</tr></thead>
-    <tbody>${sortedRows.map(row => `<tr><td class="rank-cell">${wholeOrDash(row.rank)}</td><td class="players-arena-name">${escapeHtml(row.player)}</td><td>${wholeOrDash(row.end)}</td><td>${wholeOrDash(row.peak)}</td><td>${wholeOrDash(row.games)}</td><td>${twoOrDash(row.winrate, '%')}</td><td>${wholeOrDash(row.opponent_elo)}</td><td>${wholeOrDash(row.pr)}</td><td>${twoOrDash(row.turns)}</td><td>${twoOrDash(row.ppt)}</td></tr>`).join('')}</tbody>
-  </table></div></div>`;
+     <colgroup><col style="width:5%"><col style="width:20%">${'<col style="width:9.375%">'.repeat(8)}</colgroup>
+     <thead><tr><th>#</th><th class="players-player-header"><div class="players-search-wrap"><span class="players-search-icon" aria-hidden="true">&#128269;</span><input id="arenaPlayerSearch" type="search" value="${escapeAttr(arenaPlayerSearch)}" placeholder="Search player" oninput="onArenaPlayerSearchInput(event)" autocomplete="off" aria-label="Search Arena players">${searchAction}</div></th>${sortHeader('end', 'End')}${sortHeader('peak', 'Peak')}${sortHeader('games', 'Games')}${sortHeader('winrate', 'Winrate')}${sortHeader('opponent_elo', 'Opp. Elo')}${sortHeader('pr', 'PR', 'performance rating')}${sortHeader('turns', 'Turns')}${sortHeader('ppt', 'PPT', 'points per turn')}</tr></thead>
+     <tbody>${pageRows.map(row => `<tr><td class="rank-cell">${wholeOrDash(row.rank)}</td><td class="players-arena-name">${arenaPlayerNameMarkup(row)}</td><td>${wholeOrDash(row.end)}</td><td>${wholeOrDash(row.peak)}</td><td>${wholeOrDash(row.games)}</td><td>${twoOrDash(row.winrate, '%')}</td><td>${wholeOrDash(row.opponent_elo)}</td><td>${wholeOrDash(row.pr)}</td><td>${twoOrDash(row.turns)}</td><td>${twoOrDash(row.ppt)}</td></tr>`).join('') || '<tr><td colspan="10"><div class="state-overlay"><div class="state-title">No matching players</div></div></td></tr>'}</tbody>
+   </table></div><div class="pagination" id="arenaPagination"${totalPages <= 1 ? ' hidden' : ''}>${totalPages > 1 ? buildArenaPagination(totalPages) : ''}</div></div><div id="arenaPlayerSuggestions" class="players-suggestions${arenaPlayerSuggestionsOpen && searchMatches.length ? ' open' : ''}" role="listbox" aria-label="Matching Arena players">${suggestionHtml}</div>`;
+  if (arenaPlayerSuggestionsOpen && searchMatches.length) requestAnimationFrame(positionArenaPlayerSuggestions);
+}
+
+function onArenaPlayerSearchInput(event) {
+  const input = event.target;
+  arenaPlayerSearch = String(input?.value || '');
+  arenaPlayerSuggestionsOpen = arenaPlayerSearch.trim().length >= 3;
+  const wasFocused = document.activeElement === input;
+  const cursor = input?.selectionStart ?? arenaPlayerSearch.length;
+  render();
+  if (wasFocused) {
+    requestAnimationFrame(() => {
+      const next = document.getElementById('arenaPlayerSearch');
+      next?.focus();
+      try { next?.setSelectionRange(cursor, cursor); } catch (_) { /* input may have been replaced during navigation */ }
+    });
+  }
+}
+
+function clearArenaPlayerSearch(event) {
+  event?.stopPropagation?.();
+  arenaPlayerSearch = '';
+  arenaPlayerSuggestionsOpen = false;
+  render();
+}
+
+function selectArenaPlayerSuggestion(player) {
+  const exact = String(player || '');
+  if (!exact) return;
+  arenaPlayerSearch = exact;
+  arenaPlayerSuggestionsOpen = false;
+  render();
+}
+
+function positionArenaPlayerSuggestions() {
+  const host = document.getElementById('arenaPlayerSuggestions');
+  const input = document.getElementById('arenaPlayerSearch');
+  if (!host?.classList.contains('open') || !input) return;
+  const rect = input.getBoundingClientRect();
+  const width = Math.min(Math.max(180, rect.width), window.innerWidth - 16);
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  host.style.left = `${left}px`;
+  host.style.width = `${width}px`;
+  host.style.top = `${rect.bottom + 4}px`;
+  const listRect = host.getBoundingClientRect();
+  if (listRect.bottom > window.innerHeight - 8 && rect.top > listRect.height + 12) host.style.top = `${rect.top - listRect.height - 4}px`;
+}
+
+function buildArenaPagination(totalPages) {
+  let html = `<button class="page-btn" onclick="goArenaPage(${arenaCurrentPage - 1})" ${arenaCurrentPage === 1 ? 'disabled' : ''}>&lsaquo;</button>`;
+  const pages = arenaPaginationRange(arenaCurrentPage, totalPages);
+  let previous = null;
+  for (const page of pages) {
+    if (previous !== null && page - previous > 1) html += '<span class="page-info">...</span>';
+    html += `<button class="page-btn ${page === arenaCurrentPage ? 'active' : ''}" onclick="goArenaPage(${page})">${page}</button>`;
+    previous = page;
+  }
+  return `${html}<button class="page-btn" onclick="goArenaPage(${arenaCurrentPage + 1})" ${arenaCurrentPage === totalPages ? 'disabled' : ''}>&rsaquo;</button>`;
+}
+
+function arenaPaginationRange(current, total) {
+  const range = [];
+  for (let page = Math.max(1, current - 2); page <= Math.min(total, current + 2); page += 1) range.push(page);
+  if (!range.includes(1)) range.unshift(1);
+  if (!range.includes(total)) range.push(total);
+  return range;
+}
+
+function goArenaPage(page) {
+  const totalRows = currentData()?.rows?.length || 0;
+  const rowsPerPage = arenaRowsPerPage >= 9999 ? Math.max(1, totalRows) : arenaRowsPerPage;
+  const totalPages = Math.max(1, Math.ceil(totalRows / rowsPerPage));
+  if (page < 1 || page > totalPages) return;
+  arenaCurrentPage = page;
+  render();
+  document.querySelector('.players-arena-table-wrap')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderGraph(host, data) {
@@ -390,7 +577,11 @@ function renderGraphCanvas() {
   const yTicks = Array.from({ length: 6 }, (_, index) => yMin + (yMax - yMin) * index / 5);
   const xTicks = Array.from({ length: 5 }, (_, index) => start + (end - start) * index / 4);
   const grid = yTicks.map(value => `<g><line x1="${margin.left}" y1="${y(value)}" x2="${width - margin.right}" y2="${y(value)}"/><text x="${margin.left - 10}" y="${y(value) + 4}" text-anchor="end">${Math.round(value)}</text></g>`).join('');
-  const dates = xTicks.map(value => `<g><line x1="${x(value)}" y1="${margin.top}" x2="${x(value)}" y2="${height - margin.bottom}"/><text x="${x(value)}" y="${height - 18}" text-anchor="middle">${new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</text></g>`).join('');
+  const dates = xTicks.map((value, index) => {
+    const tickX = x(value);
+    const labelX = index === 0 ? tickX + 12 : tickX;
+    return `<g><line x1="${tickX}" y1="${margin.top}" x2="${tickX}" y2="${height - margin.bottom}"/><text x="${labelX}" y="${height - 18}" text-anchor="middle">${new Date(value).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</text></g>`;
+  }).join('');
   const plotted = selectedPoints.map(({ item, points }) => ({ item, points: points.map(point => ({ ...point, x: x(point.time), y: y(point.rating) })) }));
   const lines = plotted.map(({ item, points }) => {
     const path = points.map((point, pointIndex) => `${pointIndex ? 'L' : 'M'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
@@ -475,7 +666,9 @@ function renderGraphLegend() {
   if (!host || !data) return;
   const term = graphSearch.trim().toLocaleLowerCase();
   syncGraphColorAssignments([...graphSelected].filter(player => data.series?.some(item => item.player === player && (item.ratings || []).length)));
-  host.innerHTML = (data.series || []).filter(item => !term || item.player.toLocaleLowerCase().includes(term)).map(item => {
+  const visibleSeries = (data.series || []).filter(item => !term || item.player.toLocaleLowerCase().includes(term));
+  visibleSeries.sort((a, b) => Number(graphSelected.has(b.player)) - Number(graphSelected.has(a.player)));
+  host.innerHTML = visibleSeries.map(item => {
     const selected = graphSelected.has(item.player);
     const disabled = !(item.ratings || []).length;
     const color = selected ? graphColorForPlayer(item.player) : 'transparent';
@@ -497,6 +690,20 @@ document.addEventListener('mouseover', event => {
 document.addEventListener('mouseout', event => {
   if (mounted && tooltip && event.target.closest?.('.col-tip')) tooltip.style.display = 'none';
 });
+document.addEventListener('click', event => {
+  if (!mounted) return;
+  const option = event.target.closest?.('#arenaPlayerSuggestions button[data-player]');
+  if (option) {
+    selectArenaPlayerSuggestion(option.dataset.player);
+    return;
+  }
+  if (!event.target.closest?.('.players-search-wrap, #arenaPlayerSuggestions')) {
+    arenaPlayerSuggestionsOpen = false;
+    document.getElementById('arenaPlayerSuggestions')?.classList.remove('open');
+  }
+});
+document.addEventListener('scroll', () => { if (mounted) positionArenaPlayerSuggestions(); }, true);
+window.addEventListener('resize', () => { if (mounted) positionArenaPlayerSuggestions(); });
 
 function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
 const escapeAttr = escapeHtml;

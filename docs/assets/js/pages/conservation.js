@@ -13,7 +13,8 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'conservation';
 export const title = 'Conservation';
@@ -106,14 +107,14 @@ let scope = 'combined';
 let compare = 'raw';
 let subject = 'projects';
 let rows = [];
-let selectedMaps = MAPS.map(([, , full]) => full);
+let selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
 let rewardSort = { field: 'delta_overall', direction: 'desc' };
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true; token += 1; isMW = Number(dataset) === 0 ? 0 : 1;
   view = 'projects'; mode = 'delta'; scope = 'combined'; compare = 'raw'; subject = 'projects'; rows = [];
   rewardSort = { field: 'delta_overall', direction: 'desc' };
-  selectedMaps = MAPS.map(([, , full]) => full);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
   Object.assign(window, {
     setConservationView, setConservationMode, setConservationScope, setConservationCompare, setConservationSubject,
     sortConservationRewards, resetConservationFilters, applyConservationFilters,
@@ -390,15 +391,15 @@ function ordinal(value) { return value === 1 ? '1st' : value === 2 ? '2nd' : val
 
 function renderLoading() { document.getElementById('conservationContent').innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching conservation statistics...</div></div>'; }
 function renderError(error) { document.getElementById('conservationContent').innerHTML = `<div class="state-overlay"><div class="state-title">Could not load conservation statistics</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div>`; }
-function renderMapChips() { const host = document.getElementById('conservationMapChips'); if (host) host.innerHTML = MAPS.map(([short,,full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="toggleConservationMap(this.dataset.map)">${short}</button>`).join(''); }
+function renderMapChips() { renderMapFilterChips('conservationMapChips', selectedMaps, 'toggleConservationMap', 'selectAllConservationMaps', 'selectNoneConservationMaps'); }
 function toggleConservationMap(map) { selectedMaps = selectedMaps.includes(map) ? selectedMaps.filter(item => item !== map) : [...selectedMaps, map]; renderMapChips(); }
-function selectAllConservationMaps() { selectedMaps = MAPS.map(([, , full]) => full); renderMapChips(); }
-function selectNoneConservationMaps() { selectedMaps = []; renderMapChips(); }
+function selectAllConservationMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = [...new Set([...selectedMaps, ...names])]; renderMapChips(); }
+function selectNoneConservationMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = selectedMaps.filter(map => !names.includes(map)); renderMapChips(); }
 function resetConservationFilters() {
   const set = (id, value) => { const element = document.getElementById(id); if (element) element.value = value; };
   set('playerEloMin', '300'); set('playerEloMax', ''); set('opponentEloMin', '300'); set('opponentEloMax', ''); set('dateFrom', '2025-01-01'); set('dateTo', '');
   const completed = document.getElementById('conservationCompletedToggle'); if (completed) completed.checked = false;
-  selectedMaps = MAPS.map(([, , full]) => full); renderMapChips(); loadData(++token);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full); renderMapChips(); loadData(++token);
 }
 function applyConservationFilters() { loadData(++token); document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('active'); }
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char])); }

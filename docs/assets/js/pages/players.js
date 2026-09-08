@@ -1,7 +1,8 @@
 import { deltaRangeColor, divergingRangeColor } from '../color-scales.js?v=20260711-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-5';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260819-3';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
 import { setFilterButtonDisabled } from '../layout.js?v=20260801-2';
+import { renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'players';
 export const title = 'Players';
@@ -25,10 +26,8 @@ const HISTORY_LINE_COLORS = [
   '#e879f9', '#facc15', '#38bdf8', '#fb923c',
   '#a78bfa', '#2dd4bf', '#f43f5e', '#84cc16',
 ];
-// Comparison uses the history palette for player lines. Keep the selected
-// metric marker outside that palette so it can never imply that the metric
-// belongs to one particular player.
-const HISTORY_COMPARISON_METRIC_COLOR = '#d9f99d';
+// Comparison uses the history palette for player lines. Its selected metric
+// has no colored marker, so the legend cannot imply a player-line identity.
 const PLAYER_GRAPH_MIN_GAMES = 250;
 // The aggregate table intentionally keeps its compact display shape. This map
 // connects those existing labels to the prepared-table keys used by history.
@@ -188,7 +187,7 @@ let comparisonSearchTimer = null;
 let comparisonSearchController = null;
 let comparisonSearchRequest = 0;
 let comparisonMatches = [];
-let selectedMaps = MAPS.map(([, full]) => full);
+let selectedMaps = STANDARD_MAPS.map(([, full]) => full);
 let performanceMapModes = { mapPack1: 'include', mapPack2: 'include', legacy: 'exclude', beginner: 'exclude' };
 let rows = [];
 let playerGameCount = 0;
@@ -261,7 +260,7 @@ export function mount({ dataset = 1 } = {}) {
   playerAssociatedGameCount = 0;
   playerIsMerged = false;
   comparisonCounts = [];
-  selectedMaps = MAPS.map(([, full]) => full);
+  selectedMaps = STANDARD_MAPS.map(([, full]) => full);
   rows = [];
   selectedArenaSeasons = [];
   performancePlayers = [];
@@ -291,7 +290,7 @@ export function mount({ dataset = 1 } = {}) {
     selectAllPlayersArenaSeasons, selectNonePlayersArenaSeasons,
     setPlayersPerformanceMapMode, resetPlayersPerformanceMapModes,
     togglePlayersHistoryGraph, onPlayersHistoryGraphKey,
-    togglePlayersHistoryMetric, clearPlayersHistoryMetrics,
+    togglePlayersHistoryMetric,
     retryPlayersHistory,
     setPlayersHistoryAxis, onPlayersHistoryGraphMove,
     clearPlayersHistoryGraphHover, closePlayersHistoryModal,
@@ -904,14 +903,7 @@ function rangeForValues(values) {
 function renderMapChips() {
   const host = document.getElementById('playersMapFilter');
   if (!host) return;
-  host.innerHTML = MAP_GROUPS.map(([id, label, maps]) => `
-    <div class="records-map-group" data-map-group="${id}">
-      <div class="records-filter-heading">
-        <span class="filter-label">${label}</span>
-        <span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllPlayersMaps('${id}')">all</span> / <span class="map-toggle-link" onclick="selectNonePlayersMaps('${id}')">none</span>)</span>
-      </div>
-      <div class="records-map-chips">${maps.map(([short, full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="togglePlayersMap(this.dataset.map)">${short}</button>`).join('')}</div>
-    </div>`).join('');
+  renderMapFilterChips(host, selectedMaps, 'togglePlayersMap', 'selectAllPlayersMaps', 'selectNonePlayersMaps');
 }
 
 function togglePlayersMap(map) { selectedMaps = selectedMaps.includes(map) ? selectedMaps.filter(item => item !== map) : [...selectedMaps, map]; renderMapChips(); }
@@ -931,7 +923,7 @@ function resetPlayersFilters() {
   set('playersOpponentEloMin', ''); set('playersOpponentEloMax', '');
   set('playersDateFrom', ''); set('playersDateTo', ''); set('playersLastX', '');
   selectedArenaSeasons = [];
-  selectedMaps = MAPS.map(([, full]) => full);
+  selectedMaps = STANDARD_MAPS.map(([, full]) => full);
   window.setGlobalTournamentOnly?.(false);
   const completed = document.getElementById('playersCompletedOnly');
   if (completed) completed.checked = false;
@@ -1295,13 +1287,6 @@ function onPlayersHistoryGraphKey(event, targetView) {
   togglePlayersHistoryGraph(event, targetView);
 }
 
-function clearPlayersHistoryMetrics() {
-  if (!['general', 'comparison'].includes(view)) return;
-  historySelectedMetrics[view] = new Set();
-  invalidateHistory(view);
-  renderPlayersHistoryGraph();
-}
-
 function togglePlayersHistoryMetric(metricKey) {
   if (!historyGraphView[view]) return;
   const catalog = historyMetricCatalog();
@@ -1474,7 +1459,6 @@ function renderPlayersHistoryGraph() {
       <div class="players-history-chart-status" id="playersHistoryChartStatus"></div>
     </div>
     <aside class="players-history-legend">
-      <button type="button" class="players-history-deselect" onclick="clearPlayersHistoryMetrics()">Deselect all</button>
       <div class="players-history-legend-list" id="playersHistoryLegendList"></div>
     </aside>
   </div>`;
@@ -1511,9 +1495,9 @@ function renderPlayersHistoryLegend() {
     const muted = view === 'comparison'
       ? selected.size > 0 && !active
       : Boolean(activeGroup) && !compatible;
-    const dotColor = active
-      ? view === 'comparison' ? HISTORY_COMPARISON_METRIC_COLOR : historyMetricColor(metric.key, catalog)
-      : compatible ? '#ffffff' : 'transparent';
+    const dotColor = view === 'comparison'
+      ? 'transparent'
+      : active ? historyMetricColor(metric.key, catalog) : compatible ? '#ffffff' : 'transparent';
     return `<button type="button" class="players-history-legend-item ${active ? 'active' : ''} ${muted ? 'incompatible' : ''}" data-metric="${escapeAttr(metric.key)}" onpointerdown="prepareHistoryLegendSelection()" onmousedown="event.preventDefault()" onclick="togglePlayersHistoryMetric(this.dataset.metric)"><span class="players-history-metric-dot" style="background:${dotColor}"></span><span>${escapeHtml(metric.label)}</span></button>`;
   }).join('');
   restoreHistoryLegendState(view);
@@ -1931,14 +1915,21 @@ function twoOrDash(raw, suffix = '') {
   return Number.isFinite(value) ? `${value.toFixed(2)}${suffix}` : '-';
 }
 
+function arenaPlayerNameMarkup(row) {
+  const name = escapeHtml(row.player);
+  const playerId = Number(row.player_id);
+  if (!Number.isInteger(playerId) || playerId <= 0) return name;
+  return `<a class="card-details-link" href="https://boardgamearena.com/player?id=${playerId}" target="_blank" rel="noopener noreferrer">${name}</a>`;
+}
+
 function renderArenaTable(host, data) {
   const sortedRows = [...(data.rows || [])].sort(compareArenaTableRows);
   const sortArrow = field => arenaTableSort.field === field ? (arenaTableSort.direction === 'asc' ? '↑' : '↓') : '↕';
-  const sortHeader = (field, label, tip = '') => `<th class="sortable ${arenaTableSort.field === field ? 'sorted' : ''}" onclick="sortArenaTable('${field}')">${label}${tip ? ` <span class="col-tip" data-tip="${escapeAttr(tip)}">?</span>` : ''}<span class="sort-arrow">${sortArrow(field)}</span></th>`;
+  const sortHeader = (field, label, tip = '') => `<th class="sortable ${arenaTableSort.field === field ? 'sorted' : ''}" onclick="sortArenaTable('${field}')"><span class="sortable-header-content"><span class="sortable-header-label">${label}${tip ? ` <span class="col-tip" data-tip="${escapeAttr(tip)}">?</span>` : ''}</span><span class="sort-arrow">${sortArrow(field)}</span></span></th>`;
   host.innerHTML = `<div class="table-wrap players-arena-table-wrap"><div class="table-scroll"><table class="players-arena-table">
     <colgroup><col style="width:5%"><col style="width:20%">${'<col style="width:9.375%">'.repeat(8)}</colgroup>
     <thead><tr><th>#</th><th>Player</th>${sortHeader('end', 'End')}${sortHeader('peak', 'Peak')}${sortHeader('games', 'Games')}${sortHeader('winrate', 'Winrate')}${sortHeader('opponent_elo', 'Opp. Elo')}${sortHeader('pr', 'PR', 'performance rating')}${sortHeader('turns', 'Turns')}${sortHeader('ppt', 'PPT', 'points per turn')}</tr></thead>
-    <tbody>${sortedRows.map(row => `<tr><td class="rank-cell">${wholeOrDash(row.rank)}</td><td class="players-arena-name">${escapeHtml(row.player)}</td><td>${wholeOrDash(row.end)}</td><td>${wholeOrDash(row.peak)}</td><td>${wholeOrDash(row.games)}</td><td>${twoOrDash(row.winrate, '%')}</td><td>${wholeOrDash(row.opponent_elo)}</td><td>${wholeOrDash(row.pr)}</td><td>${twoOrDash(row.turns)}</td><td>${twoOrDash(row.ppt)}</td></tr>`).join('')}</tbody>
+    <tbody>${sortedRows.map(row => `<tr><td class="rank-cell">${wholeOrDash(row.rank)}</td><td class="players-arena-name">${arenaPlayerNameMarkup(row)}</td><td>${wholeOrDash(row.end)}</td><td>${wholeOrDash(row.peak)}</td><td>${wholeOrDash(row.games)}</td><td>${twoOrDash(row.winrate, '%')}</td><td>${wholeOrDash(row.opponent_elo)}</td><td>${wholeOrDash(row.pr)}</td><td>${twoOrDash(row.turns)}</td><td>${twoOrDash(row.ppt)}</td></tr>`).join('')}</tbody>
   </table></div></div>`;
 }
 

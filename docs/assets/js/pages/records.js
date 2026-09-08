@@ -1,6 +1,7 @@
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
 import { mapTooltipLabel } from '../table-cells.js?v=20260712-4';
 import { setFilterButtonDisabled, setTopbarDatasetCombined } from '../layout.js?v=20260819-4';
+import { renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'records';
 export const title = 'Records';
@@ -30,7 +31,7 @@ const LEGACY_MAPS = [
   ['7', 'Map 7: Ice Cream Parlors'], ['8', 'Map 8: Hollywood Hills'],
 ];
 const BEGINNER_MAPS = [['A', 'Map A'], ['0', 'Map 0']];
-const DEFAULT_MAPS = [...STANDARD_MAPS, ...LEGACY_MAPS];
+const DEFAULT_MAPS = STANDARD_MAPS;
 const MAP_GROUPS = [
   ['standard', 'Standard Maps', STANDARD_MAPS],
   ['legacy', 'Legacy Maps', LEGACY_MAPS],
@@ -191,7 +192,7 @@ function syncCompletedControl() {
 function renderMapFilter() {
   const host = document.getElementById('recordsMapFilter');
   if (!host) return;
-  host.innerHTML = MAP_GROUPS.map(([id, label, maps]) => `<div class="filter-group records-map-group"><div class="records-filter-heading"><span class="filter-label">${label}</span><span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllRecordsMaps('${id}')">all</span> / <span class="map-toggle-link" onclick="selectNoneRecordsMaps('${id}')">none</span>)</span></div><div class="chip-grid records-map-chips">${maps.map(([code, full]) => `<button type="button" class="chip records-map-chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" data-group="${id}" onclick="toggleRecordsMap(this.dataset.map)">${code}</button>`).join('')}</div></div>`).join('');
+  renderMapFilterChips(host, selectedMaps, 'toggleRecordsMap', 'selectAllRecordsMaps', 'selectNoneRecordsMaps');
 }
 
 function toggleRecordsMap(map) {

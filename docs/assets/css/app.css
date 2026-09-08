@@ -10,6 +10,7 @@
        the Project type badge in the table). The table's own value-driven
        colours (delta/elo/playrate gradients, type badges) are NOT touched. */
     :root {
+      --topbar-height: 56px;
       --bg:          #0a1614;   /* deep marine-black, cool undertone */
       --bg-panel:    #0e1f1c;   /* sidebar / card panel */
       --bg-surface:  #152c28;   /* table rows, inputs */
@@ -117,7 +118,7 @@
       display: flex;
       align-items: center;
       gap: 20px;
-      height: 56px;
+      height: var(--topbar-height);
       position: sticky;
       top: 0;
       z-index: 100;
@@ -295,6 +296,75 @@
       margin-left: calc(var(--side-nav-width) + var(--side-nav-gap));
       min-height: calc(100vh - 56px);
       transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Statistics tables use the viewport as their outer boundary: controls and
+       pagination remain fixed in the page canvas, while .table-scroll owns both
+       axes and the shared sticky thead. The runtime adds these classes only
+       while a visible table is mounted, so Home, card details, Refresh, and
+       graph-only views retain their normal document layout. */
+    html.dashboard-table-viewport,
+    body.dashboard-table-viewport {
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+      scrollbar-gutter: auto;
+    }
+
+    body.dashboard-table-viewport .layout {
+      height: calc(100dvh - var(--topbar-height));
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    body.dashboard-table-viewport .main {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    body.dashboard-table-viewport .dashboard-table-host {
+      min-height: 0;
+      max-height: 100%;
+    }
+
+    body.dashboard-table-viewport .dashboard-table-column {
+      display: flex;
+      flex-direction: column;
+    }
+
+    body.dashboard-table-viewport #pageMain > .dashboard-table-host {
+      flex: 1 1 auto;
+      overflow: hidden;
+    }
+
+    /* Headers, tab bars, attribute controls, and other route chrome must keep
+       their intrinsic height. Only the marked table-host chain is allowed to
+       shrink into the viewport's remaining space. */
+    body.dashboard-table-viewport #pageMain > :not(.dashboard-table-host) {
+      flex: 0 0 auto;
+    }
+
+    body.dashboard-table-viewport .table-wrap.dashboard-table-host,
+    body.dashboard-table-viewport .build-table-panel.dashboard-table-host {
+      flex: 0 1 auto;
+      overflow: hidden;
+    }
+
+    body.dashboard-table-viewport .dashboard-table-scroll {
+      flex: 0 1 auto;
+      min-height: 0;
+      max-height: 100% !important;
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+
+    body.dashboard-table-viewport .dashboard-table-scroll > table > thead {
+      position: sticky;
+      top: 0;
+      z-index: 12;
     }
 
     /* Redesigned Navigation Sidebar: Minimalist Indicator Rail
@@ -941,10 +1011,21 @@
       margin: 16px 0;
     }
 
+    /* Filter actions behave as the drawer footer: the button remains available
+       while the sidebar contents scroll, with a double rule separating it from
+       the filter controls above. The negative bottom margin accounts for the
+       sidebar's outer padding so the footer reaches the drawer edge. */
     .filter-action-stack {
       display: flex;
       flex-direction: column;
       gap: 8px;
+      position: sticky;
+      bottom: -20px;
+      z-index: 8;
+      margin: 0 -16px -20px;
+      padding: 12px 16px 20px;
+      background: var(--bg-panel);
+      border-top: 3px double var(--border-light);
     }
 
     .global-mode-filter-group {
@@ -1372,6 +1453,104 @@
       font-size: 11px;
       color: var(--text-dim);
     }
+
+    /* Every sidebar map selector uses the same three-family structure. Standard
+       maps stay visible; optional map families open independently from compact
+       rows that also expose their selected/total count. */
+    .map-filter-groups { display: flex; flex-direction: column; gap: 0; }
+    .map-filter-host { display: block !important; }
+    .map-filter-subgroup .chip-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 5px;
+    }
+    .map-filter-group-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto 16px;
+      align-items: center;
+      gap: 7px;
+      width: 100%;
+      min-height: 34px;
+      margin-top: 16px;
+      padding: 0 9px;
+      border: 1px solid var(--border-light);
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font: 600 11px/1 Inter, sans-serif;
+      text-align: left;
+      transition: border-color .18s ease, background .18s ease, color .18s ease;
+    }
+    .map-filter-group-row:hover,
+    .map-filter-group-row:focus-visible {
+      border-color: var(--accent);
+      background: var(--bg-hover);
+      color: var(--accent);
+      outline: none;
+    }
+    .map-filter-group-label-wrap {
+      display: inline-flex;
+      align-items: center;
+      min-width: 0;
+      gap: 6px;
+    }
+    .map-filter-group-label { min-width: 0; }
+    .map-filter-group-actions {
+      display: inline-flex;
+      align-items: center;
+      color: var(--text-dim);
+      font-size: 10px;
+      font-weight: 400;
+      white-space: nowrap;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .map-filter-group-row[aria-expanded='true'] .map-filter-group-actions {
+      visibility: visible;
+      pointer-events: auto;
+    }
+    .map-filter-group-actions .map-toggle-link { font-weight: 400; }
+    .map-filter-group-count {
+      color: var(--accent);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .map-filter-group-mark {
+      position: relative;
+      width: 16px;
+      height: 16px;
+    }
+    .map-filter-group-mark::before,
+    .map-filter-group-mark::after {
+      content: '';
+      position: absolute;
+      top: 7px;
+      left: 2px;
+      width: 12px;
+      height: 1px;
+      background: currentColor;
+    }
+    .map-filter-group-mark::after {
+      transform: rotate(90deg);
+      transition: transform .18s ease;
+    }
+    .map-filter-group-row[aria-expanded='true'] .map-filter-group-mark::after {
+      transform: rotate(0deg);
+    }
+    .map-filter-group-extra {
+      margin-top: 8px;
+      padding-top: 0;
+    }
+    .map-filter-group-extra[hidden] { display: none; }
+    .map-filter-subgroup-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .filter-group:has(.map-filter-groups) { margin-bottom: 0; }
 
     .map-toggle-link {
       color: var(--accent);
@@ -2208,24 +2387,89 @@
 
     th.sorted { color: var(--accent); }
 
+    /* Sort indicators use an explicit one-line box. Header implementations
+       that need pixel-stable alignment wrap label and icon in
+       .sortable-header-content instead of compensating with offsets. */
     .sort-arrow {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       margin-left: 4px;
       opacity: 0.5;
       font-size: 10px;
+      line-height: 1;
+      vertical-align: middle;
+    }
+
+    .sortable-header-content {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      line-height: 1;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    .sortable-header-label {
+      display: inline-block;
+      line-height: 1;
+    }
+
+    /* Trim the font's unused ascent/descent when supported, so uppercase
+       header ink—not merely its typographic line box—is geometrically centred. */
+    @supports (text-box-trim: trim-both) {
+      .sortable-header-label {
+        text-box-trim: trim-both;
+        text-box-edge: cap alphabetic;
+      }
+    }
+
+    .sortable-header-content .sort-arrow {
+      flex: 0 0 auto;
+      margin-left: 0;
+      transform: none;
+    }
+
+    .vector-sort-arrow {
+      width: 8px;
+      height: 12px;
+    }
+
+    .vector-sort-arrow svg {
+      display: block;
+      width: 8px;
+      height: 12px;
     }
 
     th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
 
-    td {
-      padding: 9px 14px;
-      border-bottom: 1px solid var(--border);
-      border-right: 1px solid var(--border);
-      vertical-align: middle;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: center;
-    }
+     td {
+       padding: 9px 14px;
+       border-bottom: 1px solid var(--border);
+       border-right: 1px solid var(--border);
+       vertical-align: middle;
+       overflow: hidden;
+       text-overflow: ellipsis;
+       text-align: center;
+     }
+
+     /* Experimental standard row geometry: ordinary table body cells use a
+        fixed 37px box. Multi-line combination rows keep their intrinsic
+        height below so their two-line card values remain readable. */
+     tbody td {
+       height: 37px;
+       box-sizing: border-box;
+       padding-top: 7px;
+       padding-bottom: 7px;
+     }
+
+     .combinations-table tbody td,
+     .mw-action-cards-table.combinations-pair-table tbody td {
+       height: 52px;
+       padding-top: 7px;
+       padding-bottom: 7px;
+     }
 
     td:last-child { border-right: none; }
 
@@ -2788,14 +3032,6 @@
 
     .home-map-group {
       display: block;
-    }
-
-    /* Home uses the same grouped map filter, including the lighter subgroup
-       separators rather than the main section divider treatment. */
-    .records-map-filter .home-map-group + .home-map-group {
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px dashed var(--border-light);
     }
 
     .sponsor-endgames-table .sponsor-name-cell {
@@ -4075,6 +4311,42 @@ body.refresh-route-active {
       box-sizing: border-box;
     }
 
+    /* Arena keeps its season selector genuinely centered while the table meta
+       and local rows control occupy the outer columns. The graph day range
+       reuses the left column when table metadata is not shown. */
+    .arena-main-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      align-items: center;
+      gap: 12px;
+    }
+
+    .arena-main-header > .table-meta {
+      grid-column: 1;
+      justify-self: start;
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .arena-main-header > .players-arena-day-control {
+      grid-column: 1;
+      justify-self: start;
+    }
+
+    .arena-main-header > .players-arena-season-control {
+      grid-column: 2;
+      grid-row: 1;
+      justify-self: center;
+      margin-left: 0;
+    }
+
+    .arena-main-header > .arena-main-controls {
+      grid-column: 3;
+      grid-row: 1;
+      justify-self: end;
+      min-width: 0;
+    }
+
     .players-arena-day-control {
       display: flex;
       align-items: center;
@@ -4327,11 +4599,19 @@ body.refresh-route-active {
 
     .players-arena-table-wrap {
       max-height: calc(100vh - 212px);
+      display: flex;
+      flex-direction: column;
     }
 
     .players-arena-table-wrap .table-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
       max-height: calc(100vh - 212px);
       overflow: auto;
+    }
+
+    .players-arena-table-wrap .pagination {
+      flex: 0 0 auto;
     }
 
     /* Records uses the same framed table, header slot, tabs, and pagination
@@ -4368,15 +4648,14 @@ body.refresh-route-active {
     .records-country-cell { text-align: center; }
     .records-flag-img { width: 24px; height: 18px; display: inline-block; vertical-align: middle; border-radius: 2px; object-fit: cover; }
     .records-table .records-icon-cell img { width: 21px; height: 21px; object-fit: contain; vertical-align: middle; }
-    /* Map families are subdivisions of one filter section. Keep the outer
-       section divider strong and use a lighter dashed rule between groups. */
+     /* Map families are subdivisions of one filter section. Keep their internal
+        spacing compact and let the group rows provide the visual separation. */
     .records-map-filter { display: flex; flex-direction: column; gap: 0; }
     .records-map-group { margin: 0; }
-    .records-map-group + .records-map-group {
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px dashed var(--border-light);
-    }
+     .records-map-group + .records-map-group {
+       margin-top: 14px;
+       padding-top: 14px;
+     }
     .records-filter-heading { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
     .records-map-chips { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
     .records-map-chip { min-width: 0; padding: 5px 4px; justify-content: center; text-align: center; font-size: 12px; }
@@ -4448,6 +4727,12 @@ body.refresh-route-active {
       min-height: 39.1667px;
       padding-top: 0;
       padding-bottom: 0;
+    }
+
+    .players-arena-table th.sortable .sortable-header-content {
+      display: flex;
+      width: 100%;
+      height: 100%;
     }
 
     .players-arena-table th.sortable {
@@ -4905,19 +5190,6 @@ body.refresh-route-active {
       background: var(--bg-header);
     }
 
-    .players-history-deselect {
-      flex: 0 0 auto;
-      align-self: flex-start;
-      margin-bottom: 7px;
-      padding: 3px 8px;
-      border: 1px solid var(--border-light);
-      border-radius: 5px;
-      background: transparent;
-      color: var(--accent);
-      cursor: pointer;
-      font: 600 11px Inter, sans-serif;
-    }
-
     .players-history-legend-list {
       display: flex;
       min-height: 0;
@@ -5123,9 +5395,9 @@ body.refresh-route-active {
 
     .players-arena-legend-item {
       display: grid;
-      grid-template-columns: 9px 24px minmax(0, 1fr);
+      grid-template-columns: 9px 30px minmax(0, 1fr);
       align-items: center;
-      gap: 5px;
+      gap: 6px;
       padding: 5px 4px;
       border: 0;
       border-radius: 4px;
@@ -5432,19 +5704,28 @@ body.refresh-route-active {
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 6px;
-      padding: 14px 16px;
-      border-top: 1px solid var(--border);
+      gap: 4px;
+      height: 40px;
+      min-height: 40px;
+      padding: 8px 10px;
+      border-top: 0;
+      box-shadow: inset 0 1px var(--border);
       background: var(--bg-panel);
     }
 
     .page-btn {
-      padding: 5px 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 26px;
+      height: 24px;
+      padding: 0 6px;
       border-radius: var(--radius);
       border: 1px solid var(--border);
       background: var(--bg-surface);
       color: var(--text-muted);
       font-size: 12px;
+      line-height: 1;
       cursor: pointer;
       transition: all 0.15s;
       font-family: 'Inter', sans-serif;
@@ -5466,7 +5747,7 @@ body.refresh-route-active {
     .page-info {
       font-size: 12px;
       color: var(--text-muted);
-      padding: 0 6px;
+      padding: 0 3px;
     }
 
     /* ── Tooltip for map chips ──────────────────────────────────────────────── */
@@ -5983,6 +6264,7 @@ body.refresh-route-active {
        Tablet deliberately keeps desktop-like percentage widths. */
     @media (max-width: 600px) {
       :root {
+        --topbar-height: 52px;
         --side-nav-width: 84px; /* Mobile nav rail width */
         --side-nav-gap: 10px;   /* Phone gap between nav rail and main content */
       }
@@ -6591,6 +6873,24 @@ body.refresh-route-active {
 }
 
 @media (max-width: 760px) {
+  .arena-main-header {
+    gap: 6px;
+  }
+
+  .arena-main-header > .table-meta {
+    font-size: 10px;
+  }
+
+  .arena-main-header .rpp-wrap {
+    gap: 4px;
+    font-size: 10px;
+  }
+
+  .arena-main-header .rpp-select {
+    min-width: 45px;
+    padding-inline: 4px;
+  }
+
   .players-arena-graph-shell {
     grid-template-columns: minmax(680px, 1fr) 220px;
     overflow-x: auto;
@@ -6887,4 +7187,26 @@ body.refresh-route-active {
     letter-spacing: .03em;
     line-height: 1.1;
   }
+}
+
+/* Experiment: normalize every table header to one exact 40px row. This is
+   intentionally last so route-specific header geometry cannot reintroduce
+   fractional heights. */
+thead th {
+  height: 40px !important;
+  min-height: 40px !important;
+  box-sizing: border-box;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  vertical-align: middle;
+}
+
+/* Pair tables retain their two-line content while using the requested compact
+   52px body-row box. */
+.combinations-table tbody td,
+.mw-action-cards-table.combinations-pair-table tbody td {
+  height: 52px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  box-sizing: border-box;
 }

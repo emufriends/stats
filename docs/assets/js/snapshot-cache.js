@@ -6,7 +6,7 @@ const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.ne
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 19;
+const DEFAULT_PACK_SCHEMA_VERSION = 20;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
@@ -88,7 +88,7 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-mw.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/general/default-base.json'],
   ['players', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena/manifest.json'],
-  ['arena', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena-top-100/all-seasons.json'],
+  ['arena', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players/arena/latest.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/elo-leaderboard/default-mw.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/elo-leaderboard/default-base.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/fastest-games/default-mw.json'],
@@ -402,9 +402,9 @@ export function preloadDefaultSnapshots() {
 }
 
 export function prioritizeSnapshotGroup(group) {
-  // Players owns a deliberately separate Arena history bundle, so hovering or
-  // focusing that nav item must still warm its assets after the universal
-  // default pack is ready.
+  // Arena owns a small latest-season bootstrap plus a deliberately separate
+  // all-season history bundle, so hovering or focusing that nav item must
+  // still warm its assets after the universal default pack is ready.
   if (currentPackReady && group !== 'players') return;
   const urls = DEFAULT_SNAPSHOT_MANIFEST.filter(([itemGroup]) => itemGroup === group).map(([, url]) => url);
   urls.forEach(url => { void loadSnapshot(url).catch(() => {}); });

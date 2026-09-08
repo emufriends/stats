@@ -4,7 +4,8 @@ import {
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'predictors';
 export const title = 'Predictors';
@@ -79,12 +80,12 @@ let activeView = 'general';
 let mode = 'delta';
 let rows = [];
 let currentSort = { col: 'condition', dir: 'asc' };
-let selectedMaps = MAPS.map(([, full]) => full);
+let selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true; token += 1; isMW = Number(dataset) === 0 ? 0 : 1;
   activeView = 'general'; mode = 'delta'; rows = []; currentSort = { col: 'condition', dir: 'asc' };
-  selectedMaps = MAPS.map(([, full]) => full);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
   Object.assign(window, { setPredictorsView, setPredictorsMode, sortPredictors, resetFilters, applyFiltersFromSidebar, selectAllMaps, selectNoneMaps, togglePredictorMap });
   renderMapChips(); syncTabs(); loadData(token);
 }
@@ -199,18 +200,15 @@ function headerSortedClass(col) { return currentSort.col === col ? 'sorted' : ''
 function arrowClass(col) { return currentSort.col === col ? 'sort-arrow active' : 'sort-arrow'; }
 function renderLoading() { renderHead(); document.getElementById('tableBody').innerHTML = '<tr><td colspan="2"><div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching predictors...</div></div></td></tr>'; }
 function renderError(error) { document.getElementById('tableBody').innerHTML = `<tr><td colspan="2"><div class="state-overlay"><div class="state-title">Could not load predictors</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div></td></tr>`; }
-function renderMapChips() {
-  const host = document.getElementById('mapChips'); if (!host) return;
-  host.innerHTML = MAPS.map(([short, full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="togglePredictorMap(this.dataset.map)">${short}</button>`).join('');
-}
+function renderMapChips() { renderMapFilterChips('mapChips', selectedMaps, 'togglePredictorMap'); }
 function togglePredictorMap(map) { selectedMaps = selectedMaps.includes(map) ? selectedMaps.filter(item => item !== map) : [...selectedMaps, map]; renderMapChips(); }
-function selectAllMaps() { selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); }
-function selectNoneMaps() { selectedMaps = []; renderMapChips(); }
+function selectAllMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = [...new Set([...selectedMaps, ...names])]; renderMapChips(); }
+function selectNoneMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = selectedMaps.filter(map => !names.includes(map)); renderMapChips(); }
 function resetFilters() {
   const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
   set('playerEloMin', '300'); set('playerEloMax', ''); set('opponentEloMin', '300'); set('opponentEloMax', '');
   set('dateFrom', '2025-01-01'); set('dateTo', '');
-  selectedMaps = MAPS.map(([, full]) => full); renderMapChips(); loadData(++token);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full); renderMapChips(); loadData(++token);
 }
 function applyFiltersFromSidebar() {
   loadData(++token); document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('active');

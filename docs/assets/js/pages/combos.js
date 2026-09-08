@@ -9,6 +9,7 @@ import {
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260819-3';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
+import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const title = 'Combos';
 export const navLabel = 'Combos';
@@ -133,7 +134,7 @@ export const sidebarHtml = `
 
 const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260824-parity1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
@@ -184,7 +185,7 @@ let filteredData = [];
 let cardCatalogue = [];
 let endgameCatalogue = [];
 let cardAliases = new Map();
-let selectedMaps = MAPS.map(([, full]) => full);
+let selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
 let selectedRounds = new Set(ROUNDS);
 let selectedHeaderMaps = new Set(MAPS.map(([, full]) => full));
 let selectedHeaderRounds = new Set(ROUNDS);
@@ -216,7 +217,7 @@ export function mount({ dataset = 1 } = {}) {
   isMW = Number(dataset) === 0 ? 0 : 1;
   activeView = 'card_card';
   datasetBeforeActionView = null;
-  selectedMaps = MAPS.map(([, full]) => full);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
   selectedRounds = new Set(ROUNDS);
   selectedHeaderMaps = new Set(MAPS.map(([, full]) => full));
   selectedHeaderRounds = new Set(ROUNDS);
@@ -331,7 +332,7 @@ function setCombinationsView(view) {
   selectedRounds = new Set(ROUNDS);
   renderRoundChips();
   if (activeView === 'card_map') {
-    selectedMaps = MAPS.map(([, full]) => full);
+    selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
     renderMapChips();
   }
   selectedTypes = new Set(activePairTypes());
@@ -1717,13 +1718,7 @@ function repositionOpenCombinationPopups() {
 }
 
 function renderMapChips() {
-  const host = document.getElementById('mapChips');
-  if (!host) return;
-  host.innerHTML = MAPS.map(([short, full]) =>
-    `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" type="button"
-      data-map="${escapeAttr(full)}" title="${escapeAttr(full)}"
-      onclick="toggleMapChip(this.dataset.map)">${short}</button>`
-  ).join('');
+  renderMapFilterChips('mapChips', selectedMaps, 'toggleMapChip');
 }
 
 function toggleMapChip(map) {
@@ -1732,13 +1727,15 @@ function toggleMapChip(map) {
   renderMapChips();
 }
 
-function selectAllMaps() {
-  selectedMaps = MAPS.map(([, full]) => full);
+function selectAllMaps(group = 'all') {
+  const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group);
+  selectedMaps = [...new Set([...selectedMaps, ...names])];
   renderMapChips();
 }
 
-function selectNoneMaps() {
-  selectedMaps = [];
+function selectNoneMaps(group = 'all') {
+  const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group);
+  selectedMaps = selectedMaps.filter(map => !names.includes(map));
   renderMapChips();
 }
 
@@ -1780,7 +1777,8 @@ function resetFilters() {
   set('dateFrom', '2025-01-01'); set('dateTo', '');
   const completed = document.getElementById('endGameToggle');
   if (completed) completed.checked = false;
-  selectAllMaps();
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
+  renderMapChips();
   selectAllRounds();
   selectedCardTypes = new Set(CARD_TYPES);
   applyFilters(++mountToken);

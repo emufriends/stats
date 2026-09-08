@@ -1,5 +1,6 @@
 export const id = 'home';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { mapTooltipLabel } from '../table-cells.js?v=20260712-4';
 export const title = 'Home';
 export const navLabel = 'Home';
 
@@ -115,7 +116,7 @@ const MAP_GROUPS = [
 ];
 // Home intentionally starts with every configured map active, including the
 // legacy 1-8 and beginner A/0 groups. Analytical pages own their individual
-// defaults; Players now deliberately uses this same all-map population.
+// defaults; their filter UI starts with only Standard Maps visible.
 const ALL_MAPS = MAP_GROUPS.flatMap(group => group.maps);
 // Population groups:
 // INDEXED: games_indexed + animals_played, sponsors_played, projects_supported,
@@ -320,18 +321,44 @@ function renderError(error) {
 function renderMapChips() {
   const container = document.getElementById('mapChips');
   if (!container) return;
-  container.innerHTML = MAP_GROUPS.map(group => `
-    <div class="records-map-group home-map-group home-map-group-${group.id}">
-      <div class="records-filter-heading">
-        <span class="filter-label">${group.label}</span>
+  // Home keeps all map families selected by default, but uses the same
+  // independent optional-group rows as analytical sidebar filters.
+  const isExpanded = groupId => container.dataset[`mapExpanded${groupId[0].toUpperCase()}${groupId.slice(1)}`] === 'true';
+  const renderGroup = (group, showLabel = true, showHeading = true) => `
+    <div class="records-map-group home-map-group map-filter-subgroup home-map-group-${group.id}" data-map-group="${group.id}">
+      ${showHeading ? `<div class="records-filter-heading map-filter-subgroup-heading">
+        ${showLabel ? `<span class="filter-label">${group.label}</span>` : ''}
         <span class="map-select-all-none">(<span class="map-toggle-link" onclick="selectAllMaps('${group.id}')">all</span> / <span class="map-toggle-link" onclick="selectNoneMaps('${group.id}')">none</span>)</span>
-      </div>
+      </div>` : ''}
       <div class="records-map-chips">${group.maps.map(map => `
-        <button class="chip ${selectedMaps.includes(map.full) ? 'active' : ''}" type="button"
-                title="${escapeHtml(map.full)}" onclick="toggleMapChip('${escapeAttr(map.full)}')">
+      <button class="chip maps-custom-tip ${selectedMaps.includes(map.full) ? 'active' : ''}" type="button"
+                data-tip="${escapeAttr(mapTooltipLabel(map.full))}" onclick="toggleMapChip('${escapeAttr(map.full)}')">
           ${escapeHtml(map.short)}
         </button>`).join('')}</div>
-    </div>`).join('');
+    </div>`;
+  const renderExpandableGroup = group => `<button type="button" class="map-filter-group-row" data-map-group-toggle="${group.id}" aria-expanded="${isExpanded(group.id)}" aria-controls="home-map-filter-extra-${group.id}">
+      <span class="map-filter-group-label-wrap"><span class="map-filter-group-label">${group.label}</span>
+        <span class="map-filter-group-actions" aria-hidden="${isExpanded(group.id) ? 'false' : 'true'}">(<span class="map-toggle-link" onclick="event.stopPropagation(); selectAllMaps('${group.id}')">all</span> / <span class="map-toggle-link" onclick="event.stopPropagation(); selectNoneMaps('${group.id}')">none</span>)</span>
+      </span>
+      <span class="map-filter-group-count" data-map-group-count="${group.id}">${group.maps.filter(map => selectedMaps.includes(map.full)).length} / ${group.maps.length}</span>
+      <span class="map-filter-group-mark" aria-hidden="true"></span>
+    </button>
+    <div class="map-filter-group-extra${isExpanded(group.id) ? ' is-open' : ''}" id="home-map-filter-extra-${group.id}" data-map-group-extra="${group.id}"${isExpanded(group.id) ? '' : ' hidden'}>${renderGroup(group, false, false)}</div>`;
+  container.innerHTML = `<div class="map-filter-groups home-map-filter-groups">
+    ${renderGroup(MAP_GROUPS[0])}
+    ${MAP_GROUPS.slice(1).map(renderExpandableGroup).join('')}
+  </div>`;
+  const groups = container.querySelector('.map-filter-groups');
+  groups?.querySelectorAll('[data-map-group-toggle]').forEach(toggle => {
+    const groupId = toggle.dataset.mapGroupToggle;
+    const extra = groups.querySelector(`[data-map-group-extra="${groupId}"]`);
+    if (!extra) return;
+    toggle.addEventListener('click', () => {
+      const key = `mapExpanded${groupId[0].toUpperCase()}${groupId.slice(1)}`;
+      container.dataset[key] = String(toggle.getAttribute('aria-expanded') !== 'true');
+      renderMapChips();
+    });
+  });
 }
 
 function toggleMapChip(mapName) {

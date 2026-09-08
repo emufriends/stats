@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260908-s14';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260908-map-option-b6';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor, synergyRangeColor } from './color-scales.js?v=20260812-9';
 import { getRoutePageId, isRefreshPath, onRouteChange } from './router.js?v=20260819-1';
 import {
@@ -6,7 +6,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260907-corrupt1';
+} from './snapshot-cache.js?v=20260908-arena-bootstrap1';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -343,6 +343,21 @@ function installGlobalFpaFilter(pageId) {
   });
 }
 
+function collapseAdjacentSidebarDividers() {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  const dividers = [...sidebar.querySelectorAll('hr.divider')];
+  dividers.forEach(divider => {
+    const previous = divider.previousElementSibling;
+    if (!previous?.matches('hr.divider')) return;
+    const previousVisible = !previous.hidden && window.getComputedStyle(previous).display !== 'none';
+    const currentVisible = !divider.hidden && window.getComputedStyle(divider).display !== 'none';
+    if (previousVisible && currentVisible) divider.remove();
+  });
+}
+
+window.collapseAdjacentSidebarDividers = collapseAdjacentSidebarDividers;
+
 function completedFilterGroup() {
   const label = [...document.querySelectorAll('#sidebar .toggle-label')].find(item => (
     item.textContent.trim() === 'Completed games only'
@@ -357,6 +372,85 @@ function completedFilterGroup() {
 // rendered by both the static card tables and many async page modules, so
 // observe the shared canvas instead of duplicating replacements in each module.
 let eloHeaderObserver = null;
+let tableViewportObserver = null;
+let tableViewportFrame = 0;
+
+function isVisibleTableScroll(scroll) {
+  if (!scroll?.querySelector(':scope > table')) return false;
+  if (scroll.closest('[hidden]')) return false;
+  return scroll.getClientRects().length > 0
+    && window.getComputedStyle(scroll).display !== 'none';
+}
+
+function syncTableViewportLayout() {
+  const main = document.getElementById('pageMain');
+  if (!main) return;
+
+  const scrolls = [...main.querySelectorAll('.table-scroll')].filter(isVisibleTableScroll);
+  const desiredScrolls = new Set(scrolls);
+  const desiredHosts = new Set();
+  const desiredColumns = new Set();
+
+  scrolls.forEach(scroll => {
+    let node = scroll.parentElement;
+    while (node && node !== main) {
+      desiredHosts.add(node);
+      const display = window.getComputedStyle(node).display;
+      if (node.classList.contains('dashboard-table-column') || display === 'block' || display === 'flow-root') {
+        desiredColumns.add(node);
+      }
+      node = node.parentElement;
+    }
+  });
+
+  main.querySelectorAll('.dashboard-table-scroll').forEach(scroll => {
+    if (!desiredScrolls.has(scroll)) scroll.classList.remove('dashboard-table-scroll');
+  });
+  main.querySelectorAll('.dashboard-table-host').forEach(host => {
+    if (!desiredHosts.has(host)) {
+      host.classList.remove('dashboard-table-host', 'dashboard-table-column');
+    }
+  });
+  scrolls.forEach(scroll => scroll.classList.add('dashboard-table-scroll'));
+  desiredHosts.forEach(host => host.classList.add('dashboard-table-host'));
+  desiredColumns.forEach(host => host.classList.add('dashboard-table-column'));
+
+  const active = scrolls.length > 0;
+  document.documentElement.classList.toggle('dashboard-table-viewport', active);
+  document.body.classList.toggle('dashboard-table-viewport', active);
+}
+
+function scheduleTableViewportLayout() {
+  window.cancelAnimationFrame(tableViewportFrame);
+  tableViewportFrame = window.requestAnimationFrame(syncTableViewportLayout);
+}
+
+function resetTableViewportLayout() {
+  tableViewportObserver?.disconnect();
+  tableViewportObserver = null;
+  window.cancelAnimationFrame(tableViewportFrame);
+  tableViewportFrame = 0;
+  document.documentElement.classList.remove('dashboard-table-viewport');
+  document.body.classList.remove('dashboard-table-viewport');
+  document.querySelectorAll('.dashboard-table-scroll').forEach(scroll => scroll.classList.remove('dashboard-table-scroll'));
+  document.querySelectorAll('.dashboard-table-host').forEach(host => {
+    host.classList.remove('dashboard-table-host', 'dashboard-table-column');
+  });
+}
+
+function installTableViewportLayout() {
+  tableViewportObserver?.disconnect();
+  const main = document.getElementById('pageMain');
+  if (!main) return;
+  scheduleTableViewportLayout();
+  tableViewportObserver = new MutationObserver(scheduleTableViewportLayout);
+  tableViewportObserver.observe(main, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class', 'hidden', 'style'],
+  });
+}
 
 function normalizeEloDeltaHeaders(root = document) {
   root.querySelectorAll?.('#pageMain th').forEach(header => {
@@ -367,17 +461,67 @@ function normalizeEloDeltaHeaders(root = document) {
       if (/\bElo\s+EV\b/i.test(node.nodeValue)) {
         node.nodeValue = node.nodeValue.replace(/\bElo\s+EV\b/gi, 'EV');
       }
+      if (/\bEV\s+Elo\b/i.test(node.nodeValue)) {
+        node.nodeValue = node.nodeValue.replace(/\bEV\s+Elo\b/gi, 'EV');
+      }
       node = walker.nextNode();
     }
   });
+}
+
+const SORT_ARROW_PATHS = {
+  asc: 'M4 11V1M1.5 3.5 4 1l2.5 2.5',
+  desc: 'M4 1v10M1.5 8.5 4 11l2.5-2.5',
+  none: 'M4 1v10M1.5 3.5 4 1l2.5 2.5M1.5 8.5 4 11l2.5-2.5',
+};
+
+function sortArrowDirection(glyph) {
+  if (/[↑▲]/u.test(glyph)) return 'asc';
+  if (/[↓▼]/u.test(glyph)) return 'desc';
+  return 'none';
+}
+
+function normalizeSortableHeaders(root = document) {
+  root.querySelectorAll?.('#pageMain th .sort-arrow').forEach(arrow => {
+    const header = arrow.closest('th');
+    if (!header) return;
+
+    // Older tables render the label as a text node followed by a direct arrow.
+    // Wrap that pair so both elements are centred by one flex container rather
+    // than independently following font baselines. Any popup after the arrow
+    // remains a direct child of the header and keeps its positioning context.
+    if (arrow.parentElement === header) {
+      const content = document.createElement('span');
+      content.className = 'sortable-header-content';
+      const label = document.createElement('span');
+      label.className = 'sortable-header-label';
+      while (header.firstChild && header.firstChild !== arrow) {
+        label.appendChild(header.firstChild);
+      }
+      header.insertBefore(content, arrow);
+      content.append(label, arrow);
+    }
+
+    const glyph = arrow.textContent.trim();
+    if (!glyph && arrow.querySelector('svg')) return;
+    const direction = sortArrowDirection(glyph);
+    arrow.classList.add('vector-sort-arrow');
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.innerHTML = `<svg viewBox="0 0 8 12" focusable="false"><path d="${SORT_ARROW_PATHS[direction]}" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  });
+}
+
+function normalizeTableHeaders(root = document) {
+  normalizeEloDeltaHeaders(root);
+  normalizeSortableHeaders(root);
 }
 
 function installEloDeltaHeaderNormalization() {
   eloHeaderObserver?.disconnect();
   const main = document.getElementById('pageMain');
   if (!main) return;
-  normalizeEloDeltaHeaders(main);
-  eloHeaderObserver = new MutationObserver(() => normalizeEloDeltaHeaders(main));
+  normalizeTableHeaders(main);
+  eloHeaderObserver = new MutationObserver(() => normalizeTableHeaders(main));
   eloHeaderObserver.observe(main, { subtree: true, childList: true, characterData: true });
 }
 
@@ -520,6 +664,7 @@ async function renderCurrentRoute() {
   // Always let the outgoing page detach listeners / invalidate async work before
   // the new page's DOM is injected. This is what prevents cross-page state bleed.
   if (activePage && activePage.unmount) activePage.unmount();
+  resetTableViewportLayout();
   activeEloRangeLinkController?.destroy();
   activeEloRangeLinkController = null;
   activePageId = pageDef.id;
@@ -539,11 +684,13 @@ async function renderCurrentRoute() {
     installEloRangeLinking();
     const initialCompletedMode = INITIAL_COMPLETED_FILTER_MODES[activePageId];
     if (initialCompletedMode) window.setCompletedFilterMode(initialCompletedMode);
+    collapseAdjacentSidebarDividers();
     setTopbarDataset(currentDataset);
   }
 
   if (page.mount) page.mount({ dataset: currentDataset, pageId: activePageId });
   installEloDeltaHeaderNormalization();
+  installTableViewportLayout();
   window.requestAnimationFrame(() => activeEloRangeLinkController?.synchronize());
   // Let the active page claim the network first; background warmup begins from
   // an idle callback after its foreground request has been started.
@@ -756,6 +903,32 @@ document.addEventListener('mousemove', event => {
 document.addEventListener('mouseout', event => {
   const cell = event.target.closest?.('#pageMain .delta-ci-cell');
   if (!cell || cell.contains(event.relatedTarget)) return;
+  const tooltip = document.getElementById('col-tooltip');
+  if (tooltip) tooltip.style.display = 'none';
+});
+
+// Sidebar map chips use the same custom tooltip surface as Maps table headers.
+// Keep this shell-level handler so shared filter markup works on pages whose
+// table module does not otherwise bind a maps-custom-tip listener.
+document.addEventListener('mouseover', event => {
+  const source = event.target.closest?.('.map-filter-host .maps-custom-tip, .records-map-filter .maps-custom-tip');
+  const tooltip = document.getElementById('col-tooltip');
+  if (!source || !tooltip || !source.dataset.tip) return;
+  tooltip.textContent = source.dataset.tip;
+  tooltip.style.display = 'block';
+  positionDeltaCiTooltip(event);
+});
+
+document.addEventListener('mousemove', event => {
+  const source = event.target.closest?.('.map-filter-host .maps-custom-tip, .records-map-filter .maps-custom-tip');
+  const tooltip = document.getElementById('col-tooltip');
+  if (!source || !tooltip || tooltip.style.display === 'none') return;
+  positionDeltaCiTooltip(event);
+});
+
+document.addEventListener('mouseout', event => {
+  const source = event.target.closest?.('.map-filter-host .maps-custom-tip, .records-map-filter .maps-custom-tip');
+  if (!source || source.contains(event.relatedTarget)) return;
   const tooltip = document.getElementById('col-tooltip');
   if (tooltip) tooltip.style.display = 'none';
 });

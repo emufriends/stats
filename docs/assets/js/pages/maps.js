@@ -9,7 +9,7 @@ import {
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260711-1';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
 
 export const title = 'Maps';
 export const navLabel = 'Maps';
@@ -285,6 +285,7 @@ function syncFilterVisibility() {
   });
   const note = document.getElementById('mapsH2hFilterNote');
   if (note) note.style.display = isH2h ? 'block' : 'none';
+  window.collapseAdjacentSidebarDividers?.();
 }
 
 function setDefaultDates() {

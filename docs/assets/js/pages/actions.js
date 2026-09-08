@@ -13,7 +13,8 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'actions';
 export const title = 'Actions';
@@ -102,12 +103,12 @@ let mode = 'delta';
 let compareMode = 'raw';
 let orderTransposed = false;
 let rows = [];
-let selectedMaps = MAPS.map(([, , full]) => full);
+let selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true; token += 1; isMW = Number(dataset) === 0 ? 0 : 1;
   view = 'starting_position'; mode = 'delta'; compareMode = 'raw'; orderTransposed = false; rows = [];
-  selectedMaps = MAPS.map(([, , full]) => full);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
   Object.assign(window, { setActionsView, setActionsMode, setActionsCompareMode, toggleActionsOrderTranspose, resetFilters, applyFiltersFromSidebar, selectAllMaps, selectNoneMaps, toggleActionsMap });
   renderMapChips(); syncControls(); loadData(token);
 }
@@ -350,11 +351,11 @@ function mapAvgCell(row, range) {
 }
 function renderLoading() { document.getElementById('actionsContent').innerHTML = '<div class="state-overlay"><div class="spinner"></div><div class="state-title">Fetching action statistics...</div></div>'; }
 function renderError(error) { document.getElementById('actionsContent').innerHTML = `<div class="state-overlay"><div class="state-title">Could not load action statistics</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div>`; }
-function renderMapChips() { const host = document.getElementById('mapChips'); if (host) host.innerHTML = MAPS.map(([short,,full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="toggleActionsMap(this.dataset.map)">${short}</button>`).join(''); }
+function renderMapChips() { renderMapFilterChips('mapChips', selectedMaps, 'toggleActionsMap'); }
 function toggleActionsMap(map) { selectedMaps = selectedMaps.includes(map) ? selectedMaps.filter(item => item !== map) : [...selectedMaps, map]; renderMapChips(); }
-function selectAllMaps() { selectedMaps = MAPS.map(([, , full]) => full); renderMapChips(); }
-function selectNoneMaps() { selectedMaps = []; renderMapChips(); }
-function resetFilters() { const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; }; set('playerEloMin','300'); set('playerEloMax',''); set('opponentEloMin','300'); set('opponentEloMax',''); set('dateFrom','2025-01-01'); set('dateTo',''); selectedMaps = MAPS.map(([, , full]) => full); renderMapChips(); loadData(++token); }
+function selectAllMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = [...new Set([...selectedMaps, ...names])]; renderMapChips(); }
+function selectNoneMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = selectedMaps.filter(map => !names.includes(map)); renderMapChips(); }
+function resetFilters() { const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; }; set('playerEloMin','300'); set('playerEloMax',''); set('opponentEloMin','300'); set('opponentEloMax',''); set('dateFrom','2025-01-01'); set('dateTo',''); selectedMaps = DEFAULT_MAPS.map(([, , full]) => full); renderMapChips(); loadData(++token); }
 function applyFiltersFromSidebar() { loadData(++token); document.getElementById('sidebar')?.classList.remove('open'); document.getElementById('sidebarOverlay')?.classList.remove('active'); }
 function comparisonLabel(label) {
   const text = String(label ?? '');

@@ -13,7 +13,8 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'build';
 export const title = 'Build';
@@ -98,7 +99,7 @@ let view = 'enclosures';
 let compareMode = 'raw';
 let rows = [];
 let expandedRows = [];
-let selectedMaps = MAPS.map(([, , full]) => full);
+let selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
 let completedByMode = { delta: false, frequency: true };
 let expanded = false;
 
@@ -111,7 +112,7 @@ export function mount({ dataset = 1 } = {}) {
   compareMode = 'raw';
   rows = [];
   expandedRows = [];
-  selectedMaps = MAPS.map(([, , full]) => full);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
   completedByMode = { delta: false, frequency: true };
   expanded = false;
   bindHandlers();
@@ -397,23 +398,19 @@ function renderError(error) {
   document.getElementById('buildContent').innerHTML = `<div class="state-overlay"><div class="state-title">Could not load build statistics</div><div class="state-sub">${escapeHtml(error.message || error)}</div></div>`;
 }
 
-function renderMapChips() {
-  const host = document.getElementById('mapChips');
-  if (!host) return;
-  host.innerHTML = MAPS.map(([short, , full]) => `<button class="chip ${selectedMaps.includes(full) ? 'active' : ''}" data-map="${escapeAttr(full)}" onclick="toggleBuildMap(this.dataset.map)">${short}</button>`).join('');
-}
+function renderMapChips() { renderMapFilterChips('mapChips', selectedMaps, 'toggleBuildMap'); }
 function toggleBuildMap(map) {
   selectedMaps = selectedMaps.includes(map) ? selectedMaps.filter(item => item !== map) : [...selectedMaps, map];
   renderMapChips();
 }
-function selectAllMaps() { selectedMaps = MAPS.map(([, , full]) => full); renderMapChips(); }
-function selectNoneMaps() { selectedMaps = []; renderMapChips(); }
+function selectAllMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = [...new Set([...selectedMaps, ...names])]; renderMapChips(); }
+function selectNoneMaps(group = 'all') { const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group); selectedMaps = selectedMaps.filter(map => !names.includes(map)); renderMapChips(); }
 
 function resetFilters() {
   const set = (id, value) => { const element = document.getElementById(id); if (element) element.value = value; };
   set('playerEloMin', '300'); set('playerEloMax', ''); set('opponentEloMin', '300'); set('opponentEloMax', '');
   set('dateFrom', '2025-01-01'); set('dateTo', '');
-  selectedMaps = MAPS.map(([, , full]) => full);
+  selectedMaps = DEFAULT_MAPS.map(([, , full]) => full);
   completedByMode = { delta: false, frequency: true };
   expanded = false;
   expandedRows = [];

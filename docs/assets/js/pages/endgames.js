@@ -10,7 +10,8 @@ import {
   relativeEloColor,
 } from '../color-scales.js?v=20260710-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { ALL_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const title = 'Endgames';
 export const navLabel = 'Endgames';
@@ -222,18 +223,12 @@ function apiViewForCurrentView() {
 }
 
 function buildMapChips() {
-  const container = document.getElementById('mapChips');
-  if (!container) return;
-  container.innerHTML = '';
-  VALID_MAPS.forEach(map => {
-    const btn = document.createElement('button');
-    btn.className = 'chip active';
-    btn.textContent = map.short;
-    btn.dataset.value = map.full;
-    btn.title = map.full;
-    btn.addEventListener('click', () => toggleChip(btn, 'map'));
-    container.appendChild(btn);
-  });
+  renderMapFilterChips('mapChips', VALID_MAPS.map(map => map.full), 'toggleEndgamesMap');
+}
+
+function toggleEndgamesMap(map) {
+  const chip = [...document.querySelectorAll('#mapChips .chip')].find(item => item.dataset.map === map);
+  chip?.classList.toggle('active');
 }
 
 function toggleChip(btn, group) {
@@ -1451,12 +1446,14 @@ function positionColTip(e) {
   _colTip.style.top = `${y}px`;
 }
 
-function selectAllMaps() {
-  document.querySelectorAll('#mapChips .chip').forEach(c => c.classList.add('active'));
+function selectAllMaps(group = 'all') {
+  const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group);
+  document.querySelectorAll('#mapChips .chip').forEach(c => { if (names.includes(c.dataset.map)) c.classList.add('active'); });
 }
 
-function selectNoneMaps() {
-  document.querySelectorAll('#mapChips .chip').forEach(c => c.classList.remove('active'));
+function selectNoneMaps(group = 'all') {
+  const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group);
+  document.querySelectorAll('#mapChips .chip').forEach(c => { if (names.includes(c.dataset.map)) c.classList.remove('active'); });
 }
 
 export function setDataset(value) {
@@ -1481,6 +1478,7 @@ const PAGE_WINDOW_HANDLERS = {
   resetFilters,
   selectAllMaps,
   selectNoneMaps,
+  toggleEndgamesMap,
   applyFiltersFromSidebar,
   goPage,
   setEndgamesView,

@@ -6,9 +6,10 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
-import { loadStats } from '../snapshot-cache.js?v=20260819-3';
+import { loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
+import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const title = 'Cards';
 export const navLabel = 'Cards';
@@ -226,15 +227,7 @@ function resetCardsPageState(dataset) {
 // Map chips
 function buildMapChips() {
   const container = document.getElementById('mapChips');
-  VALID_MAPS.forEach(map => {
-    const btn = document.createElement('button');
-    btn.className = 'chip active';
-    btn.dataset.value = map.full;
-    btn.dataset.tooltip = map.full;
-    btn.textContent = map.code;
-    btn.onclick = () => toggleChip(btn, 'map');
-    container.appendChild(btn);
-  });
+  if (container) renderMapFilterChips(container, DEFAULT_MAPS.map(([, , full]) => full), 'toggleCardMap');
 }
 
 // Round chips
@@ -318,12 +311,19 @@ function positionTooltip(e) {
   _tooltip.style.top = y + 'px';
 }
 
-function selectAllMaps() {
-  document.querySelectorAll('#mapChips .chip').forEach(c => c.classList.add('active'));
+function selectAllMaps(group = 'all') {
+  const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group);
+  document.querySelectorAll('#mapChips .chip').forEach(c => { if (names.includes(c.dataset.map)) c.classList.add('active'); });
 }
 
-function selectNoneMaps() {
-  document.querySelectorAll('#mapChips .chip').forEach(c => c.classList.remove('active'));
+function selectNoneMaps(group = 'all') {
+  const names = group === 'all' ? ALL_MAPS.map(([, , full]) => full) : mapGroupNames(group);
+  document.querySelectorAll('#mapChips .chip').forEach(c => { if (names.includes(c.dataset.map)) c.classList.remove('active'); });
+}
+
+function toggleCardMap(map) {
+  const chip = [...document.querySelectorAll('#mapChips .chip')].find(item => item.dataset.map === map);
+  chip?.classList.toggle('active');
 }
 
 // Toggle chip
@@ -2061,6 +2061,7 @@ const PAGE_WINDOW_HANDLERS = {
   resetFilters,
   selectAllMaps,
   selectNoneMaps,
+  toggleCardMap,
   selectAllRounds,
   selectNoneRounds,
   onEndGameChange,

@@ -47,7 +47,7 @@ Hard-completed views apply the predicate regardless of request input. These
 include Players General/Comparison, Maps/Metrics, Endgames, Sponsor Endgames,
 Icons, Build/Hexes, the completed Actions views, Workers/General, Conservation
 Projects/Releases, Project Rewards Frequency, all Predictors views, Scoring,
-and the completed subsets used by Arena Top 100. Automatic Records use the same
+and the completed subsets used by Arena. Automatic Records use the same
 predicate. Manual Fastest Games remain an explicit spreadsheet exception;
 Biggest Turns and Elo Leaderboard remain spreadsheet-only.
 
@@ -105,7 +105,7 @@ data versions or old Synergy CIs attached to new point estimates.
 | MW Action Cards | player-game-action-card or table-card | strict telemetry-complete MW tables only; By map additionally requires both players on the same map |
 | Players General / Comparison | completed player-game | merged analytical identity |
 | Players Performance by map | player-game-map | merged identity; completion optional; Last X is per map |
-| Arena Top 100 | exact-alias Arena game | Games and most metrics use all matched Arena games; only Turns/PPT use completed games |
+| Arena Elite League | exact-alias Arena game | Games and most metrics use all matched Arena games; only Turns/PPT use completed games |
 | Records | ranked or record row | combined MW/Base; spreadsheet populations remain view-specific; Elo Leaderboard has no filter sidebar |
 
 Intentional differences are reported rather than failed: Home's all-map scope,
@@ -234,6 +234,7 @@ assets/
       opening-hand.js
       sponsor-endgames.js
       combos.js
+    map-catalog.js
     card-catalog.js
 ```
 
@@ -398,11 +399,17 @@ Central stylesheet for all pages. Important conventions:
 - Main content gap was adjusted down during layout tuning.
 - Filter button was aligned with the main content right edge.
 - Filter sidebar remains a right-side overlay.
+- Every applicable Filter sidebar ends with a sticky Apply filters footer. The
+  footer has an opaque panel background, reaches the drawer's bottom edge, and
+  uses a 3px double top rule so it remains visually distinct while the filter
+  controls scroll behind it.
 - Expanded Cards and Opening Hand Attributes bars use intrinsic-width desktop flex groups with 22px gaps, explicit separators, and 20px horizontal edge padding. Strength and Size remain on one row. On mobile the same intrinsic groups retain the compact one-row layout and scroll horizontally.
 - Attribute chevron is deliberately large and uses down/up direction:
   - collapsed = down
   - expanded = up
-- Phone tables: outer `.table-wrap` is the framed table container, inner `.table-scroll` owns horizontal scrolling, and pagination sits outside `.table-scroll` so page buttons stay visible while columns scroll.
+- Every statistics-table route is viewport-bound: the document itself does not scroll vertically while a table is visible. The shared `.table-scroll` region owns vertical and horizontal scrolling, and the table header remains sticky at its top. Headers, tab bars, other controls above the table, and pagination below it retain their intrinsic height and remain visible; only the marked table-host chain may shrink.
+- `app.js` discovers visible `.table-scroll > table` regions after each route/render and marks their ancestor chain with `dashboard-table-*` layout classes. Keep new table views inside `.table-scroll`; do not add page-specific viewport-height offsets. Graph-only, Home, card-details, and Refresh layouts are intentionally unaffected.
+- The outer `.table-wrap` is the framed table container. Pagination sits outside `.table-scroll`, so page buttons stay fixed while rows or columns scroll. The shared pagination footer is a compact 40px single-row strip with 24px buttons and 8px vertical breathing room; avoid restoring oversized controls or container padding. The same runtime contract also supports compact side-by-side table panels that do not use `.table-wrap`.
 - At the 600px phone breakpoint, the nine-column fixed-width/sticky schema is scoped strictly to `.cards-stats-table` and `.opening-hand-table`. Never attach those `nth-child` rules to bare `#statsTable`: many unrelated routes reuse that ID.
 - Wide map matrices retain the 900px canvas, use 11px numerical body text with compact horizontal padding, and keep only the descriptive row-label column frozen. Rank-bearing CP/Action-Card map tables hide the rank and freeze their second column. Combo columns intentionally all scroll.
 - Two-column Predictors tables are the exception to the 900px canvas on phones: Condition and Value fit the viewport and use `min-width: 0`.
@@ -494,6 +501,16 @@ Opening Hand, Sponsor Endgames, and the card columns in Combos link their card
 names to this route. The selector changes the URL, so a selected card survives reloads
 and can be bookmarked. Type-specific sections and optional per-card widgets
 will be added inside the shared module later.
+
+Map filter structure is centralized in `assets/js/map-catalog.js`. Every
+sidebar that offers map filtering renders the three groups Standard Maps,
+Legacy Maps, and Beginner Maps. Standard chips are visible initially; Legacy
+and Beginner each use an independent expandable row with a selected/total
+count, and their own all/none controls appear when opened. Standard maps are
+the default selection for analytical pages; Home deliberately starts with all
+25 maps selected. The shared catalog stores both display codes and the full
+backend map names, so new map-filtering pages should reuse it rather than
+define another local map list.
 
 ### MW Action Cards Page
 
@@ -763,13 +780,18 @@ Endgames filters:
 
 ### Home Page
 
-`assets/js/pages/home.js` is the default route and renders 12 aggregate fact tiles. It uses MW/Base plus Elo, map, date, and Completed-only filters. Its defaults are intentionally unrestricted Elo, unrestricted dates, incomplete games included, and all 25 known maps. Map chips are grouped into Standard Maps (1a-14 and T1), Legacy Maps (1-8), and Beginner Maps (A and 0); every group has independent all/none controls and starts fully active. Home passes `exclude_invalid_maps=False`, so the Full Sample and Log Sample aggregates include every configured Home map. Players General/Comparison deliberately share this all-map default; other analytical pages retain their own map populations. Home counts distinct `table_id` values after row-level map/dataset filtering; it does not add per-map counts. A Full Sample table can contain different Map or `is_mw` values for its player rows, so grouped `(Map, is_mw)` counts overlap and are not expected to sum to the Home total. Backend `stats_page` is `home`, with public snapshots under `card-stats/home/`.
+`assets/js/pages/home.js` is the default route and renders 12 aggregate fact tiles. It uses MW/Base plus Elo, map, date, and Completed-only filters. Its defaults are intentionally unrestricted Elo, unrestricted dates, incomplete games included, and all 25 known maps. Map chips are grouped into Standard Maps (1a-14 and T1), Legacy Maps (1-8), and Beginner Maps (A and 0); every group has independent all/none controls and starts fully active. Home passes `exclude_invalid_maps=False`, so the Full Sample and Log Sample aggregates include every configured Home map. Other map-filtered analytical pages use the same three groups but start with Standard Maps active and Legacy/Beginner Maps inactive. Home counts distinct `table_id` values after row-level map/dataset filtering; it does not add per-map counts. A Full Sample table can contain different Map or `is_mw` values for its player rows, so grouped `(Map, is_mw)` counts overlap and are not expected to sum to the Home total. Backend `stats_page` is `home`, with public snapshots under `card-stats/home/`.
 
 The daily refresh also publishes `card-stats/home/defaults.js`, containing both MW and Base payloads in `window.__ARK_NOVA_HOME_DEFAULTS__`. `index.html` loads this small asset before the app so default Home and MW/Base switching render immediately. Filtered requests still use the API, while the JSON snapshots remain the fallback.
 
 Home's backend-owned observation table is partitioned by game date and clustered
 by dataset, map, Arena season, and Tournament state. Canonical Elo values remain
 `FLOAT64`; they are never rounded merely to make them clustering dimensions.
+
+The Home map selector uses the same grouped map UI: Standard Maps are visible
+initially, while Legacy Maps and Beginner Maps each appear as a compact expandable
+row with its selected/total count. Opening either row reveals its own chips; all 25
+map values remain selected by default.
 
 Every active dashboard Filter bar also exposes a separate `Starting position`
 section immediately below Date Range, or immediately below `Last X games` on
@@ -1196,7 +1218,7 @@ Definitions:
 - Backend returns standard maps plus hidden legacy maps `1`-`8`, `A`, and `0`.
 - Frontend defaults are Legacy Maps excluded, Beginner Maps excluded, and Map Pack 2 included. Each category uses `-` Exclude, `O` Include, and `+` Only; Only forces the other categories to Exclude and requires no new API request.
 - Extra maps retain the standard map-column width, so the table scrolls horizontally when either group is enabled.
-- In filter sidebars that show grouped map chips, Standard, Legacy, and Beginner Maps use balanced internal spacing with a thin dashed subgroup separator; the outer Maps section keeps the normal 2px stronger divider.
+- In filter sidebars that show grouped map chips, Standard Maps remain visible while Legacy and Beginner use compact expandable rows with selected/total counts. The outer Maps section keeps the normal 2px divider; no dotted subgroup lines are used.
 - When horizontal scrolling is active, the sticky `Games` footer has a bottom
   border so it remains visually separated from the scrollbar.
 - Natural order is `1a`-`8a`, `9`-`14`, `T1`, `1`-`8`, `A`, `0`.
@@ -1523,16 +1545,17 @@ and Performance by map. General and Comparison use `stats_page: "players"` with
 `players_view: "general" | "comparison"`; General sends one exact
 `players_player`, while Comparison sends up to five exact names in
 `players_players`. The selected names remain the visible column labels even when
-the backend resolves them to a merged analytical identity. Arena Top 100 is a
+the backend resolves them to a merged analytical identity. Arena Elite League is a
 standalone static page and never participates in account merging.
 
 General and Comparison always use the canonical completed-game population.
-Their map filter defaults to all 25 configured maps and is grouped into
-Standard Maps (1a-14 and T1), Legacy Maps (1-8), and Beginner Maps (A and 0).
-Each group has independent all/none controls. Reset selects every group, and an
-explicit empty selection remains empty rather than silently restoring Standard
-Maps. The Players request parser and prepared/default aggregates accept the same
-25-map catalog. The standalone Arena page is unaffected by these controls.
+Their map filter is grouped into Standard Maps (1a-14 and T1), Legacy Maps
+(1-8), and Beginner Maps (A and 0). Each group has independent all/none
+controls. The default and Reset state selects every Standard Map and no Legacy
+or Beginner Map; an explicit empty selection remains empty rather than silently
+restoring Standard Maps. The Players request parser and prepared/default
+aggregates accept the same 25-map catalog. The standalone Arena page is
+unaffected by these controls.
 
 Performance by map uses `players_view: "performance_by_map"` and sends zero to
 eight exact aliases in `players_players`. Eight persistent search rows remain
@@ -1681,7 +1704,8 @@ General opens an empty graph after one selected identity has at least 250
 filtered games. Its metric legend has no visible group headings: the first
 metric activates its compatibility group, compatible unselected metrics gain a
 white dot, and other groups stay muted but selectable. Clicking a different
-group replaces the current General selection; `Deselect all` clears it. The
+group replaces the current General selection; clicking the active metric
+clears the current General selection. The
 groups are action-upgrade percentages; action counts;
 Universities/Partner zoos; X-token gained/spent; Kiosks/Pavilions; all icon
 metrics; and singleton groups for every other metric. The first selection asks
@@ -1695,8 +1719,8 @@ Comparison requires two to five identities, each with at least 250 filtered
 games, permits exactly one metric, and draws one color-coded line per player.
 Player colors are retained by identity during the mounted comparison graph,
 so removing or adding another selected identity does not shift existing colors.
-Its unselected metrics remain muted but selectable, and its selected-metric dot
-uses a dedicated color outside the player-line palette.
+Its unselected metrics remain muted but selectable, and its selected metric has
+no colored marker, so it cannot be mistaken for a player-line color.
 Both graphs default to game-count x coordinates, can switch locally to UTC date
 coordinates, and show only the hovered line's formatted rolling value. In
 game-count mode the final filtered game is `0`, earlier games are negative, and
@@ -1728,16 +1752,24 @@ replace graph data atomically. The graph shell is viewport-bound and only its
 metric legend scrolls vertically.
 
 The standalone Arena route is `#/arena`, uses `stats_page: "arena"` with
-`arena_view: "top_100"`, and currently has one full-width `Top 100` tab. It owns
-the season selector, table/graph toggle, day controls, static-bundle preload,
-dataset locking, sorting, rating graph, and five-player legend. The old
+`arena_view: "top_100"` for API compatibility, and has one full-width
+`Elite League` tab. It owns the season selector, table/graph toggle, day
+controls, static-bundle preload, dataset locking, sorting, rating graph, and
+controls, static-bundle preload, dataset locking, sorting, rating graph, Arena
+Player-header search/autocomplete, and five-player legend. The Player search is
+local to the loaded season, uses the shared Players `.players-search-wrap` and
+`.players-suggestions` styling, and filters the paginated table without a new
+request. The old
 `players_view: "arena_top_100"` backend alias remains only for cached-client
 compatibility. The Filter button is disabled on Arena, and every season/view/
 graph interaction is local after the unchanged bundle has been cached.
 
 Arena metadata is read from `docs/arena/arena_settings.csv` in
 `emufriends/stats`, with the backend-packaged `arena/` folder and validated
-Cloud Storage metadata as fallbacks. Each row provides the official
+Cloud Storage metadata as fallbacks. If the public source is temporarily
+behind the deployed package, a packaged settings file with more seasons or a
+packaged ranking file with the newer ID schema is preferred for that refresh;
+otherwise remote-first loading preserves automatic source updates. Each row provides the official
 `start_utc`, official `end_utc`, and MW/Base mode. The backend derives
 `effective_end_utc = end_utc + 2 hours`: an Arena player-game must have a
 non-null `arena_rating_delta`, match the season mode, and satisfy
@@ -1748,7 +1780,7 @@ prevent overlap.
 
 General and Comparison Arena filters use the prepared row's exact
 `arena_season`, with partition-pruning bounds extended through the effective
-end. Arena Top 100 uses the same effective interval for Games, Winrate, Peak,
+end. The Elite League uses the same effective interval for Games, Winrate, Peak,
 Opp. Elo, PR, Turns, PPT, and rating histories. Peak and graph progression use
 `post_match_arena_rating`; Opp. Elo and the opponent component of PR use the
 opponent player's canonical pre-match Elo. Games, Winrate, Peak, Opp. Elo, PR,
@@ -1757,8 +1789,8 @@ or games without a triggered endgame. Only Turns and PPT use the canonical
 completed-game subset. Public day numbering and
 official season dates remain based on `end_utc`; the final graph day extends
 through `effective_end_utc`. A season is computationally complete after the
-effective end, while Top 100 availability is controlled by the presence of a
-validated `sN.csv` ranking file.
+effective end, while Elite League availability is controlled by the presence
+of a validated `sN.csv` ranking file.
 
 The Arena graph assigns colors by player identity within the mounted season,
 not by the current row order. Adding, removing, or searching for another
@@ -1767,16 +1799,45 @@ Arena graph and Players Comparison history graph use this identity-first rule;
 metric-history graphs use deterministic metric colors, and other charts use
 stable row/card/icon identities.
 
+The Arena graph legend keeps selected players above unselected players while
+preserving the source order within each group. Search filtering preserves this
+selected-first order. Selecting a player directly from the legend resets the
+legend scroll position to the top, so the newly selected player remains visible
+after the selected group is moved above the remaining players.
+
+Arena ranking files are CSVs with exactly these columns: `#`, `BGA Name`, `ID`,
+and `Rating`. The parser accepts the complete contiguous rank list, not just
+the first 100 rows. Nonblank IDs must be positive integers; a blank ID keeps
+the spreadsheet row visible but receives no database-derived statistics, and
+duplicate source rows are preserved because rank, displayed BGA name, player
+ID, and ending rating come directly from the CSV. All other Arena columns are
+database aggregates. The prepared Players table retains the source
+`player_id`; the Arena bundle queries by that numeric ID rather than by the
+display name, which prevents a name change or duplicate name from joining the
+wrong account. The payload retains the ID in table rows and graph-series
+metadata for internal joins and graph identity, but the Arena table does not
+display this implementation detail. Valid player names are rendered as links to
+the corresponding Board Game Arena profile; rows with blank or invalid IDs stay
+plain text.
+
 S14 is the newest configured and currently ongoing MW Arena season. The Players
 Arena Seasons filter exposes every started configured season from the manifest,
-even when no ranking sheet exists. The Arena Top 100 bundle includes only
-seasons with a validated `sN.csv` ranking file, so S13 is the newest available
-Top 100 season while S14 has no ranking sheet. The daily refresh validates all
-available ranks, rebuilds prepared Arena assignments, recalculates every
-available season, and atomically publishes
+even when no ranking sheet exists. The Elite League bundle includes every
+player from each season with a validated `sN.csv` ranking file, so S13 is the
+newest available Elite League season while S14 has no ranking sheet. The daily
+refresh validates all available ranks, rebuilds prepared Arena assignments,
+recalculates every available season, and atomically publishes
 `card-stats/players/arena-top-100/all-seasons.json`. Season switching,
-table/graph switching, graph search, and Day X-Y zoom remain client-side after
-that bundle is cached.
+table/graph switching, graph search, Day X-Y zoom, row-count selection, and
+pagination remain client-side after that bundle is cached. The Elite League
+table defaults to 100 rows and shows a centered season selector, a left-side
+`Showing 1-100 of N players` range, and shared bottom pagination controls; the
+row selector also offers 25, 50, and All. All sortable Arena columns use the
+displayed `#` rank as an ascending tie-breaker. The current ranked season is
+also published as `card-stats/players/arena/latest.json` and included in the
+atomic default pack, so the initial table renders from the small bootstrap
+snapshot while the all-season bundle loads in the background for older seasons
+and complete graph histories.
 
 ## Records page (current behavior)
 
@@ -1823,8 +1884,8 @@ extrapolated rows, and Biggest Turns is entirely manual; both use the derived
 read-only. Automatic Fastest, Highest Scores, and Most Icons rows use the
 shared completed-game predicate. The visible default opponent-Elo minimum is
 300. Records labels its map groups Standard Maps, Legacy Maps, and Beginner
-Maps, with independent all/none controls. Standard and Legacy start active;
-Beginner starts inactive. These are browser defaults only:
+Maps, with independent all/none controls. Standard starts active; Legacy and
+Beginner start inactive. These are browser defaults only:
 every functional Records snapshot contains the complete eligible population
 for all 25 known maps, with no player, opponent-Elo, date, Arena, or Tournament
 restriction.
@@ -1914,7 +1975,7 @@ and All. It defaults to 50 and controls client-side pagination. The result
 count uses the noun `games` and retains the existing displayed-row semantics,
 including the one-row-per-icon behavior of Most Icons.
 
-Records and Arena Top 100 body rows use the shared table line-height and
+Records and Arena Elite League body rows use the shared table line-height and
 vertical padding; neither has a fixed 43px row height. Their compact
 player-search controls must not increase header geometry or move the table when
 switching pages.
@@ -1942,8 +2003,12 @@ documented above.
 
 Records player search inputs use a dashboard-owned clear button. Browser-native
 search cancel controls are disabled so that a second, browser-colored X is not
-shown beside the dashboard control. In Arena Top 100, the active sortable header
+shown beside the dashboard control. In Arena Elite League, the active sortable header
 uses the accent color for both the complete header text and its sort arrow.
+All sortable headers are normalized by the shared shell into a centred flex
+pair consisting of a trimmed label box and a fixed 8x12 vector arrow. The arrow
+path is geometrically centred for neutral, ascending, and descending states;
+header alignment must not be implemented with padding or translate offsets.
 
 Complete Records payloads are written daily under:
 
@@ -2006,7 +2071,7 @@ filter is an immediate in-memory operation.
   Scoring, Workers, Maps/Metrics, and Records. Maps/Tournament H2H has neither.
   Players General/Comparison has Tournament only because Arena is selected by
   season chips; choosing Tournament clears Arena seasons, and choosing a season
-  clears Tournament. Arena Top 100 remains static and unfiltered. Reset turns
+  clears Tournament. Arena Elite League remains static and unfiltered. Reset turns
   both generic switches off. Default snapshots are eligible only while both are
   off.
 - Completion controls remain visible on every applicable Filter sidebar.
@@ -2018,7 +2083,7 @@ filter is an immediate in-memory operation.
   `First player` or `Second player`; both selected is represented by omitting
   the field. Every prepared analytical derivative and cache key carries this
   dimension. Frontend Reset restores both chips, and switching tabs within a
-  page preserves the current choice. Arena Top 100 and Refresh have no Filter
+  page preserves the current choice. Arena and Refresh have no Filter
   bar and therefore no FPA control. Records applies FPA entirely in memory to
   its combined snapshots.
 - Main-header metric/comparison segmented controls use one `24.6667px` slot
@@ -2027,15 +2092,22 @@ filter is an immediate in-memory operation.
   offset within one pixel.
 - Map tooltips use `Map name (code)`, for example `Observation Tower (1a)`;
   backend filter values retain the full `Map 1a: Observation Tower` string.
-- Build/Hexes and Conservation/Projects do not expose a Maps filter because
-  their tables already contain the relevant map breakdown; Project Rewards and
-  other applicable views retain their map controls.
+ - Every applicable sidebar map filter uses three grouped sections in this order:
+   Standard Maps, Legacy Maps, Beginner Maps. Standard Maps are visible initially.
+   Legacy Maps and Beginner Maps each use an independent compact expandable row
+   showing selected/total count; opening a row reveals that group’s chips and its
+   own all/none controls. Analytical page defaults and Reset select all Standard
+   Maps while leaving Legacy and Beginner inactive; Home is the sole exception and
+   starts with all 25 maps active. Build/Hexes and Conservation/Projects have
+  no map control because their tables already contain the relevant map
+  breakdown. Every map chip exposes its full map name through the shared
+  dashboard tooltip (`maps-custom-tip`/`data-tip`) without a visible marker.
 - Records/Elo Leaderboard is a filter-free static leaderboard; the shared Filters
   button and drawer are disabled and hidden only for that Records tab.
 - Records, Players, Conservation, and Cards map chips use the same five-column
   chip geometry and padding so changing pages does not change their visual
   scale.
-- Arena Top 100 graph lines retain a player-specific palette assignment for the
+- Arena Elite League graph lines retain a player-specific palette assignment for the
   mounted season, so adding or removing selected players does not recolor
   existing lines. Graph hover is line-specific. Pointer coordinates are
   transformed through the SVG screen matrix, then matched against the exact
