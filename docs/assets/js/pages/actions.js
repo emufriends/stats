@@ -13,14 +13,14 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
+import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
 import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'actions';
 export const title = 'Actions';
 export const navLabel = 'Actions';
 
-const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/actions';
 const MAPS = [
   ['1a', 'map_1a', 'Map 1a: Observation Tower'], ['2a', 'map_2a', 'Map 2a: Outdoor Areas'],

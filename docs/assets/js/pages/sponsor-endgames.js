@@ -6,7 +6,7 @@ import {
   numericRange,
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260710-2';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
   formatSignedDeltaAdaptive,
@@ -106,7 +106,7 @@ export const sidebarHtml = `
     <button class="apply-btn" id="applyBtn" onclick="applyFiltersFromSidebar()">Apply filters</button>
   </div>`;
 
-const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const DEFAULT_SNAPSHOT_URLS = {
   cp: {
     1: 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/cp/default-mw.json?v=20260628-1',

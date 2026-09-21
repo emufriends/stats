@@ -10,7 +10,7 @@ import {
 } from '../color-scales.js?v=20260812-9';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260812-9';
-import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
+import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
 import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'mw-action-cards';

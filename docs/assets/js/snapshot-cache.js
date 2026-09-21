@@ -2,7 +2,7 @@
 // Snapshot bodies are persisted in Cache Storage without parsing during the
 // background warmup. This keeps large assets off the main thread until needed.
 
-const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';

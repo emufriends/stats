@@ -13,7 +13,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
+import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
 import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'build';
@@ -33,7 +33,7 @@ const MAPS = [
 const STANDARD_BUCKETS = [['delta_0', '0'], ['delta_1', '1'], ['delta_2', '2'],
   ['delta_3', '3'], ['delta_4', '4'], ['delta_5_plus', '5+']];
 const UNIQUE_BUCKETS = [['delta_0', 'No'], ['delta_1', 'Yes'], ['delta_empty', 'Empty']];
-const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/build';
 
 export const mainHtml = `

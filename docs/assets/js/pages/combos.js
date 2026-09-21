@@ -132,9 +132,9 @@ export const sidebarHtml = `
     <button class="apply-btn" onclick="applyFiltersFromSidebar()">Apply filters</button>
   </div>`;
 
-const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',

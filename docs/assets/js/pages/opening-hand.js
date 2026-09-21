@@ -6,7 +6,7 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
-import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
+import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
 import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
@@ -17,9 +17,9 @@ export const mainHtml = "<!--\n      Main table controls.\n      Desktop/tablet:
 export const sidebarHtml = "<div class=\"sidebar-header\">\n      <span class=\"sidebar-title\">Filters</span>\n      <div style=\"display:flex;align-items:center;gap:6px;\">\n        <button class=\"reset-btn\" onclick=\"resetFilters()\">Reset</button>\n        <button class=\"sidebar-close-btn\" onclick=\"toggleSidebar()\" title=\"Close filters\">x</button>\n      </div>\n    </div>\n\n    <hr class=\"divider\" />\n\n    <!-- Player ELO -->\n    <div class=\"filter-group\">\n      <span class=\"filter-label\">Player ELO</span>\n      <div class=\"range-row\">\n        <input class=\"range-input\" type=\"number\" id=\"playerEloMin\" placeholder=\"Min\" value=\"300\" min=\"0\" />\n        <input class=\"range-input\" type=\"number\" id=\"playerEloMax\" placeholder=\"Max\" min=\"0\" />\n      </div>\n    </div>\n\n    <!-- Opponent ELO -->\n    <div class=\"filter-group\">\n      <span class=\"filter-label\">Opponent ELO</span>\n      <div class=\"range-row\">\n        <input class=\"range-input\" type=\"number\" id=\"opponentEloMin\" placeholder=\"Min\" value=\"300\" min=\"0\" />\n        <input class=\"range-input\" type=\"number\" id=\"opponentEloMax\" placeholder=\"Max\" min=\"0\" />\n      </div>\n    </div>\n\n    <hr class=\"divider\" />\n\n    <!-- Maps -->\n    <div class=\"filter-group\">\n      <div style=\"display:flex;align-items:baseline;gap:6px;margin-bottom:8px;\">\n        <span class=\"filter-label\" style=\"margin-bottom:0\">Maps</span>\n        <span class=\"map-select-all-none\">\n          (<span class=\"map-toggle-link\" onclick=\"selectAllMaps()\">all</span> / <span class=\"map-toggle-link\" onclick=\"selectNoneMaps()\">none</span>)\n        </span>\n      </div>\n      <div class=\"chip-grid\" id=\"mapChips\"></div>\n    </div>\n\n    <hr class=\"divider\" />\n\n    <!-- Date range -->\n    <div class=\"filter-group\">\n      <span class=\"filter-label\">Date Range</span>\n      <input class=\"date-input\" type=\"text\" inputmode=\"numeric\" pattern=\"\\d{4}-\\d{2}-\\d{2}\" placeholder=\"yyyy-mm-dd\" id=\"dateFrom\" value=\"2025-01-01\" />\n      <input class=\"date-input\" type=\"text\" inputmode=\"numeric\" pattern=\"\\d{4}-\\d{2}-\\d{2}\" placeholder=\"yyyy-mm-dd\" id=\"dateTo\" />\n    </div>\n\n    <hr class=\"divider\" />\n\n    <!-- Completed games only: true means no table concession -->\n    <div class=\"filter-group\">\n      <div class=\"toggle-row\">\n        <span class=\"toggle-label\">Completed games only</span>\n        <label class=\"toggle\">\n          <input type=\"checkbox\" id=\"endGameToggle\" onchange=\"onEndGameChange()\" />\n          <span class=\"toggle-track\"></span>\n        </label>\n      </div>\n    </div>\n\n    <hr class=\"divider\" />\n\n    <div class=\"filter-action-stack\">\n      <button class=\"apply-btn\" id=\"applyBtn\" onclick=\"applyFiltersFromSidebar()\">Apply filters</button>\n    </div>";
 
 // Config
-// API_URL points to the deployed Google Cloud Function. The frontend sends POST JSON
+// API_URL points to the deployed DuckDB gateway query endpoint. The frontend sends POST JSON
 // with filters; the backend queries BigQuery and returns already-aggregated card stats.
-const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const STATS_PAGE = 'opening_hand';
 // Daily default snapshots are static Cloud Storage JSON files, refreshed by
 // Cloud Scheduler. Default MW/Base loads use these directly; advanced Filter

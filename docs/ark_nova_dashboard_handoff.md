@@ -12,7 +12,7 @@ This handoff is for a future Codex/AI session continuing the Ark Nova statistics
 The project is a static GitHub Pages frontend backed by a public read-only DuckDB gateway, with the Cloud Function retained for maintenance and refresh control. The frontend uses a reusable shell plus lazy page modules for Home, Cards, the unlinked Card Details route, Opening Hand, Endgames, Maps, Sponsor Endgames, Combos, Actions, Predictors, Icons, MW Action Cards, Build, Conservation, Scoring, Workers, Players, Arena, Records, and the hidden Refresh page. Shared controls, snapshot loading, filters, and table behavior live in the shell; every page's population exceptions are documented below and in the executable parity contract.
 
 The current public version is served from GitHub Pages and sends filtered reads
-to `https://duckdb-gateway-ioetmehoha-ew.a.run.app`; default views continue to
+to `https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query`; default views continue to
 use the immutable Cloud Storage snapshot pack. The Cloud Function remains the
 maintenance boundary for refresh status, manual refresh authentication, and
 controlled source operations; it is no longer the public analytical read path.

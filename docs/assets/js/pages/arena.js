@@ -1,4 +1,4 @@
-import { fetchStats, loadSnapshot } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
+import { fetchStats, loadSnapshot } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
 import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260801-2';
 
 export const id = 'arena';

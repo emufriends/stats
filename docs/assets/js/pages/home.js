@@ -1,5 +1,5 @@
 export const id = 'home';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
 import { mapTooltipLabel } from '../table-cells.js?v=20260712-4';
 export const title = 'Home';
 export const navLabel = 'Home';
@@ -64,7 +64,7 @@ export const sidebarHtml = `
     <button class="apply-btn" id="applyBtn" onclick="applyFiltersFromSidebar()">Apply filters</button>
   </div>`;
 
-const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const DEFAULT_SNAPSHOT_URLS = {
   1: 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/home/default-mw.json',
   0: 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/home/default-base.json',
