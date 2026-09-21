@@ -91,8 +91,8 @@ concurrent readers; see `analysis/phase2-local-benchmark-report.json` and the
 focused Card + Card report. The Phase 2 representative prototype is complete:
 the same benchmark passes on the private VM with consistent concurrent readers,
 and the local Cards producer emits all 267 rows with zero card-group or
-`n_played` mismatches against its local query contract. No production route has
-been switched. The first Phase 5 builder optimization now completes the full
+`n_played` mismatches against its local query contract. At that prototype
+checkpoint no production route had been switched. The first Phase 5 builder optimization now completes the full
 vertical slice on the 4-GiB `ark-nova-duckdb-test` VM using two threads, a
 2.8-GB DuckDB memory ceiling, and disk spilling; it completed in 344.421
 seconds without OOM. Its build and post-build read reports are
