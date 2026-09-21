@@ -10,7 +10,7 @@ import {
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
 import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'icons';
@@ -60,7 +60,7 @@ const VALID_MAPS = [
   ['13', 'Map 13: Drawing Board'], ['14', 'Map 14: Lagoon'],
   ['T1', 'Map T1: Tournament 1'],
 ];
-const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
 const SNAPSHOTS = {
   1: 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/icons/default-mw.json?v=20260704-1',
   0: 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/icons/default-base.json?v=20260704-1',

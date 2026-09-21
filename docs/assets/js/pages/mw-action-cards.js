@@ -10,7 +10,7 @@ import {
 } from '../color-scales.js?v=20260812-9';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260812-9';
-import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
 import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
 export const id = 'mw-action-cards';
@@ -115,10 +115,10 @@ let pairSearches = { synergies: ['', ''] };
 let minimumPicks = 1000;
 let rowsPerPage = 50;
 let currentPage = 1;
-let synergyCiTimer = 0;
-let synergyCiToken = 0;
-let synergyCiController = null;
-let synergyCiPendingKey = '';
+let componentCiTimer = 0;
+let componentCiToken = 0;
+let componentCiController = null;
+let componentCiPendingKey = '';
 
 export function mount({ dataset = 1 } = {}) {
   mounted = true; requestToken += 1; activeView = 'general';
@@ -147,7 +147,7 @@ export function mount({ dataset = 1 } = {}) {
 
 export function unmount() {
   mounted = false; requestToken += 1;
-  clearSynergyCiRequest();
+  clearComponentCiRequest();
   document.removeEventListener('click', closePopupsOnOutsideClick);
   document.removeEventListener('mouseover', showTooltip); document.removeEventListener('mousemove', moveTooltip); document.removeEventListener('mouseout', hideTooltip);
   window.removeEventListener('resize', repositionMwActionPopups);
@@ -164,7 +164,7 @@ function canonicalView(view = activeView) { return view === 'draft' ? 'general' 
 function rowsForView(view = activeView) { return viewRows[canonicalView(view)] || []; }
 
 function setMwActionCardsView(view) {
-  clearSynergyCiRequest();
+  clearComponentCiRequest();
   activeView = VIEWS.includes(view) ? view : 'general'; currentPage = 1;
   syncViewChrome();
   const canonical = canonicalView();
@@ -211,7 +211,7 @@ function isDefault(request, view) {
 }
 
 async function loadView(view, token) {
-  clearSynergyCiRequest();
+  clearComponentCiRequest();
   if (view !== 'by_map' && !selectedMaps.length) { viewRows[view] = []; render(); return; }
   const wrap = document.querySelector('.mw-action-cards-table-wrap');
   const preserve = rowsForView().length > 0;
@@ -306,7 +306,7 @@ function renderPairs() {
   };
   document.getElementById('tableBody').innerHTML = page.map(row => `<tr><td class="rank-cell">${row.global_rank}</td>${pairCardCell(row.display_card_1, row.display_delta_1, ranges.delta_1, row, row.display_component_1)}${pairCardCell(row.display_card_2, row.display_delta_2, ranges.delta_2, row, row.display_component_2)}${simpleDeltaCell(row[expectedField], ranges.expected)}${deltaActualCell(row, ranges.actual)}${residualCell(row, ranges.residual)}${eloCell(row.avg_elo, ranges.elo)}<td class="n-cell">${formatInteger(row.n_picked)}</td>${pairTypeCell(row)}</tr>`).join('') || emptyRow(9);
   renderPagination(totalPages);
-  scheduleSynergyConfidenceIntervals(page);
+  scheduleComponentConfidenceIntervals(page);
 }
 
 function renderPairHead() {
@@ -566,31 +566,26 @@ function deltaActualCell(row, range) { const value = finiteOrNull(row.delta_actu
 function residualCell(row, range) {
   const value = finiteOrNull(row?.interaction);
   if (value === null) return '<td class="unavailable-cell">-</td>';
-  const hasCi = Object.prototype.hasOwnProperty.call(row, 'interaction_ci95_method');
-  const attrs = hasCi
-    ? ` data-ci-low="${escapeAttr(row.interaction_ci95_low ?? '')}" data-ci-high="${escapeAttr(row.interaction_ci95_high ?? '')}" data-ci-n="${escapeAttr(row.interaction_ci95_cluster_n ?? 0)}" data-ci-color-scale="synergy" data-ci-color-min="${escapeAttr(range?.min ?? '')}" data-ci-color-max="${escapeAttr(range?.max ?? '')}"`
-    : '';
-  return `<td class="combination-interaction${hasCi ? ' delta-ci-cell' : ''}"${attrs} style="color:${synergyRangeColor(value, range.min, range.max)}">${formatSignedDeltaAdaptive(value, true)}</td>`;
+  return `<td class="combination-interaction" style="color:${synergyRangeColor(value, range.min, range.max)}">${formatSignedDeltaAdaptive(value, true)}</td>`;
 }
 
-function mwSynergyCiKey(row) {
+function mwComponentCiKey(row) {
   return JSON.stringify([row.card_1_key, row.card_2_key]);
 }
 
-function clearSynergyCiRequest() {
-  window.clearTimeout(synergyCiTimer);
-  synergyCiTimer = 0;
-  synergyCiToken += 1;
-  synergyCiController?.abort();
-  synergyCiController = null;
-  synergyCiPendingKey = '';
+function clearComponentCiRequest() {
+  window.clearTimeout(componentCiTimer);
+  componentCiTimer = 0;
+  componentCiToken += 1;
+  componentCiController?.abort();
+  componentCiController = null;
+  componentCiPendingKey = '';
 }
 
-function scheduleSynergyConfidenceIntervals(pageRows) {
-  window.clearTimeout(synergyCiTimer);
+function scheduleComponentConfidenceIntervals(pageRows) {
+  window.clearTimeout(componentCiTimer);
   const missing = (pageRows || []).filter(row =>
-    !Object.prototype.hasOwnProperty.call(row, 'interaction_ci95_method')
-    || !Object.prototype.hasOwnProperty.call(row, 'component_1_ci95_n')
+    !Object.prototype.hasOwnProperty.call(row, 'component_1_ci95_n')
     || !Object.prototype.hasOwnProperty.call(row, 'component_2_ci95_n')
   );
   if (!mounted || activeView !== 'synergies' || !missing.length) return;
@@ -600,30 +595,30 @@ function scheduleSynergyConfidenceIntervals(pageRows) {
     card_2_key: row.card_2_key,
   }));
   const requestKey = JSON.stringify([viewDataVersions.synergies, scope, descriptors]);
-  if (synergyCiController && synergyCiPendingKey === requestKey) return;
-  synergyCiTimer = window.setTimeout(() => {
-    void loadSynergyConfidenceIntervals(scope, descriptors, requestKey);
+  if (componentCiController && componentCiPendingKey === requestKey) return;
+  componentCiTimer = window.setTimeout(() => {
+    void loadComponentConfidenceIntervals(scope, descriptors, requestKey);
   }, 0);
 }
 
-async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
+async function loadComponentConfidenceIntervals(scope, descriptors, requestKey) {
   if (!mounted || activeView !== 'synergies' || !descriptors.length) return;
-  if (synergyCiController && synergyCiPendingKey !== requestKey) synergyCiController.abort();
-  if (synergyCiController && synergyCiPendingKey === requestKey) return;
+  if (componentCiController && componentCiPendingKey !== requestKey) componentCiController.abort();
+  if (componentCiController && componentCiPendingKey === requestKey) return;
   const controller = new AbortController();
-  const token = ++synergyCiToken;
-  synergyCiController = controller;
-  synergyCiPendingKey = requestKey;
+  const token = ++componentCiToken;
+  componentCiController = controller;
+  componentCiPendingKey = requestKey;
   try {
     const payload = await fetchStats({
       ...scope,
-      synergy_ci: true,
-      synergy_ci_rows: descriptors,
+      component_ci: true,
+      component_ci_rows: descriptors,
     }, { signal: controller.signal, shareInFlight: false });
-    if (!mounted || activeView !== 'synergies' || controller.signal.aborted || token !== synergyCiToken) return;
+    if (!mounted || activeView !== 'synergies' || controller.signal.aborted || token !== componentCiToken) return;
     if (!viewDataVersions.synergies
         || String(payload.data_version || '') !== viewDataVersions.synergies) {
-      console.warn('Ignored stale MW Action Cards Synergy confidence intervals', {
+      console.warn('Ignored stale MW Action Cards component confidence intervals', {
         displayed: viewDataVersions.synergies,
         received: payload.data_version || null,
       });
@@ -631,22 +626,18 @@ async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
     }
     const ciByKey = new Map((payload.data || []).map(item => [item.row_key, item]));
     (viewRows.synergies || []).forEach(row => {
-      const ci = ciByKey.get(mwSynergyCiKey(row));
+      const ci = ciByKey.get(mwComponentCiKey(row));
       if (ci) Object.assign(row, ci);
     });
     renderPairs();
   } catch (error) {
-    if (error?.name === 'AbortError' || !mounted || token !== synergyCiToken) return;
-    console.warn('Could not load MW Action Cards Synergy confidence intervals', error);
+    if (error?.name === 'AbortError' || !mounted || token !== componentCiToken) return;
+    console.warn('Could not load MW Action Cards component confidence intervals', error);
     const requested = new Set(descriptors.map(item => JSON.stringify([
       item.card_1_key, item.card_2_key,
     ])));
     (viewRows.synergies || []).forEach(row => {
-      if (!requested.has(mwSynergyCiKey(row))) return;
-      row.interaction_ci95_low = null;
-      row.interaction_ci95_high = null;
-      row.interaction_ci95_cluster_n = 0;
-      row.interaction_ci95_method = 'unavailable';
+      if (!requested.has(mwComponentCiKey(row))) return;
       row.component_1_ci95_low = null;
       row.component_1_ci95_high = null;
       row.component_1_ci95_n = 0;
@@ -656,9 +647,9 @@ async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
     });
     renderPairs();
   } finally {
-    if (token === synergyCiToken) {
-      synergyCiController = null;
-      synergyCiPendingKey = '';
+    if (token === componentCiToken) {
+      componentCiController = null;
+      componentCiPendingKey = '';
     }
   }
 }

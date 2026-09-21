@@ -310,8 +310,11 @@ to both dataset snapshot paths, and links users to:
 https://emufriends.github.io/leaderboard/
 ```
 
-It currently consumes country B, player C, Peak Elo F, and Peak Arena H. It does
-not include Experts and does not use the standalone page's sorting code.
+It currently consumes country B, player C, Peak Elo F, and Peak Arena H. Peak
+Arena may be blank or `n/a` for players without Arena games; the dashboard
+stores either form as missing and renders `n/a`, then replaces it on a later
+refresh once a peak Arena rating exists. It does not include Experts and does
+not use the standalone page's sorting code.
 
 ## Safe next-session procedure
 

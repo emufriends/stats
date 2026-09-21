@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260908-map-option-b6';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20260921-phase5-public-cutover';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor, synergyRangeColor } from './color-scales.js?v=20260812-9';
 import { getRoutePageId, isRefreshPath, onRouteChange } from './router.js?v=20260819-1';
 import {
@@ -6,7 +6,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260908-arena-bootstrap1';
+} from './snapshot-cache.js?v=20260921-phase5-public-cutover';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -356,7 +356,17 @@ function collapseAdjacentSidebarDividers() {
   });
 }
 
+// The Apply control is its own sticky footer and supplies the visual boundary
+// above itself. Remove any page-owned or injected divider immediately before
+// it so the mode-toggle section does not acquire a redundant final separator.
+function removeFilterFooterDivider() {
+  const actions = document.querySelector('#sidebar .filter-action-stack');
+  const divider = actions?.previousElementSibling;
+  if (divider?.matches('hr.divider')) divider.remove();
+}
+
 window.collapseAdjacentSidebarDividers = collapseAdjacentSidebarDividers;
+window.removeFilterFooterDivider = removeFilterFooterDivider;
 
 function completedFilterGroup() {
   const label = [...document.querySelectorAll('#sidebar .toggle-label')].find(item => (
@@ -683,9 +693,10 @@ async function renderCurrentRoute() {
     installGlobalFpaFilter(activePageId);
     installEloRangeLinking();
     const initialCompletedMode = INITIAL_COMPLETED_FILTER_MODES[activePageId];
-    if (initialCompletedMode) window.setCompletedFilterMode(initialCompletedMode);
-    collapseAdjacentSidebarDividers();
-    setTopbarDataset(currentDataset);
+      if (initialCompletedMode) window.setCompletedFilterMode(initialCompletedMode);
+      collapseAdjacentSidebarDividers();
+      removeFilterFooterDivider();
+      setTopbarDataset(currentDataset);
   }
 
   if (page.mount) page.mount({ dataset: currentDataset, pageId: activePageId });

@@ -1,4 +1,4 @@
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
 import { mapTooltipLabel } from '../table-cells.js?v=20260712-4';
 import { setFilterButtonDisabled, setTopbarDatasetCombined } from '../layout.js?v=20260819-4';
 import { renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';

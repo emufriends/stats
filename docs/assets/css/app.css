@@ -1,14 +1,9 @@
 /* ── Design tokens ───────────────────────────────────────────────────────
-       Central colour/spacing variables. Most of the visual theme should be changed here first.
-       Redesigned 2026-06-18: moved the dark base from a yellow-green "forest"
-       cast to a cooler deep-marine teal-black. This gives the emerald accent
-       real contrast to pop against (rather than green-on-khaki-green), while
-       staying on-theme — Ark Nova's own box/board palette is dark teal, not
-       olive. Two secondary accents were added for variety: a marine teal
-       (Marine Worlds tab) and a warm gold (Base tab, "narrowed filter"
-       highlights, echoing the sponsorship/conservation gold already used on
-       the Project type badge in the table). The table's own value-driven
-       colours (delta/elo/playrate gradients, type badges) are NOT touched. */
+       Central colour/spacing variables. The 1.0 visual identity remains the
+       established deep marine-green theme. A fine rainbow line below the
+       topbar and a subtle ambient body gradient are decorative only; they do
+       not encode statistical values. The table's own value-driven colours
+       (delta/elo/playrate gradients, type badges) are NOT touched. */
     :root {
       --topbar-height: 56px;
       --bg:          #0a1614;   /* deep marine-black, cool undertone */
@@ -27,6 +22,17 @@
       --accent-dim:    #1d6b48;
       --accent-bright: #6df5b8;   /* lighter emerald, for links/hover */
       --accent-glow:   rgba(52,211,153,0.18);
+
+      --rainbow-line: linear-gradient(90deg,
+        transparent 0%,
+        #34d399 22%,
+        #4fc7e5 47%,
+        #ed78b5 70%,
+        #e8ad4f 86%,
+        transparent 100%);
+      --ambient-canvas:
+        radial-gradient(circle at 78% -8%, rgba(79,199,229,0.10), transparent 34%),
+        radial-gradient(circle at 14% 108%, rgba(52,211,153,0.045), transparent 30%);
 
       --accent-teal:     #17368f;   /* darker, subtler ultramarine for the Marine Worlds tab */
       --accent-teal-dim: #0d1f5a;
@@ -103,7 +109,9 @@
 
     body {
       font-family: 'Inter', sans-serif;
-      background: var(--bg);
+      background-color: var(--bg);
+      background-image: var(--ambient-canvas);
+      background-attachment: fixed;
       color: var(--text);
       min-height: 100vh;
       font-size: 14px;
@@ -122,6 +130,20 @@
       position: sticky;
       top: 0;
       z-index: 100;
+    }
+
+    /* A fine decorative horizon under the topbar. It is intentionally
+       separate from all metric color scales. */
+    .topbar::after {
+      content: '';
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      bottom: -1px;
+      height: 1px;
+      background: var(--rainbow-line);
+      opacity: 0.95;
+      pointer-events: none;
     }
 
     /* The logo/title is absolutely centred so it stays visually centred even though
@@ -367,25 +389,23 @@
       z-index: 12;
     }
 
-    /* Redesigned Navigation Sidebar: Minimalist Indicator Rail
-       Transforms block-like enclosures into outline SVG glyphs, spacious uppercase 
-       tracking, and a sharp, scaling emerald blade at the left edge.
-       The width is controlled by --side-nav-width, and elements are
-       balanced as horizontal rectangular cards. */
+    /* Compact navigation logo rail. The existing inline SVGs are the canonical
+       page symbols; the small outlined tile makes them read as a consistent
+       logo set without replacing the artwork with text or duplicate assets. */
     .side-nav {
       position: fixed;
       top: 56px;
       left: 0;
       bottom: 0;
       width: var(--side-nav-width);
-      background: #050d0c; /* step darker than main canvas to establish deep visual recession */
-      border-right: 1px solid rgba(52, 211, 153, 0.06); /* razor-thin sub-border outline */
+      background: var(--bg-deep);
+      border-right: 1px solid var(--border);
       z-index: 95;
       display: flex;
       flex-direction: column;
       align-items: stretch;
-      padding: 8px 0px;
-      gap: 6px;
+      padding: 0;
+      gap: 0;
     }
 
     .side-nav-scroll-area {
@@ -394,7 +414,7 @@
       display: flex;
       flex-direction: column;
       align-items: stretch;
-      gap: 10px;
+      gap: 0;
       overflow-y: auto;
       overflow-x: hidden;
       scrollbar-width: none;
@@ -436,17 +456,19 @@
       display: none;
     }
 
-    /* Elegant, solid ("durchgezogen") separator line with high visibility */
+    /* One quiet rule between compact logo tiles. */
     .nav-divider {
-      height: 1.5px;
-      background: rgba(52, 211, 153, 0.35); /* Solid visible emerald color */
-      margin: 0px 14px; /* Inset from the sidebar outer edges */
+      height: 1px;
+      background: color-mix(in srgb, var(--border), transparent 18%);
+      margin: 0;
       flex-shrink: 0;
     }
 
-    /* Formatting: Fixed vertical cells matching 60px on desktop, while retaining 
-       the 112px desktop layout width. Inner content is perfectly aligned. */
+    /* Fixed compact tiles keep the rail scannable while leaving the icon and
+       label enough room to remain legible. */
     .side-nav-link {
+      --nav-accent: var(--accent);
+      --nav-glow: rgba(52, 211, 153, 0.32);
       position: relative;
       display: flex;
       flex-direction: column;
@@ -454,31 +476,38 @@
       justify-content: center;
       text-align: center;
       width: 100%;
-      height: 60px; /* Fixed height for desktop cells */
-      color: #4a5e5a; /* Desaturated teal-grey default state */
+      height: 64px;
+      color: var(--text-dim);
       text-decoration: none;
       font-size: 10px;
       font-weight: 500;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       line-height: 1.4;
-      gap: 4px;
+      gap: 3px;
       user-select: none;
       cursor: pointer;
-      transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: color 0.2s ease, transform 0.2s ease;
       box-sizing: border-box;
       flex-shrink: 0;
     }
 
     .nav-icon {
-      width: 22px;
-      height: 22px;
+      width: 28px;
+      height: 25px;
+      padding: 4px;
+      box-sizing: border-box;
+      border: 1px solid color-mix(in srgb, var(--nav-accent), transparent 12%);
+      border-radius: 7px;
+      color: var(--nav-accent);
       stroke: currentColor;
       stroke-width: 1.8;
       stroke-linecap: round;
       stroke-linejoin: round;
       fill: none;
-      transition: stroke 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+      opacity: 0.82;
+      transition: color 0.2s ease, border-color 0.2s ease, filter 0.2s ease,
+        opacity 0.2s ease, transform 0.2s ease;
     }
 
     .nav-icon-hand,
@@ -506,33 +535,75 @@
     }
 
     .nav-icon-actions {
-      width: 52px;
-      height: 26px;
+      width: 28px;
+      height: 25px;
+      padding: 5px 4px;
       stroke-width: 1.05;
     }
 
     .nav-icon-build {
-      width: 26px;
-      height: 22px;
+      position: relative;
+      width: 28px;
+      height: 25px;
       display: inline-block;
+      background: transparent;
+      border: 1px solid color-mix(in srgb, var(--nav-accent), transparent 12%);
+      border-radius: 7px;
+      box-sizing: border-box;
+      color: var(--nav-accent);
+      opacity: 0.82;
+    }
+
+    .nav-icon-build::after {
+      content: '';
+      position: absolute;
+      inset: 4px;
       background: currentColor;
       -webkit-mask: url('../img/nav-build.png') center / contain no-repeat;
       mask: url('../img/nav-build.png') center / contain no-repeat;
     }
 
-    /* Active vertical green glow strip (Expanding Indicator Blade) */
+    /* Stable route accents keep a selected player's/page's visual identity
+       consistent while the user navigates. */
+    .side-nav-link[data-page-id="opening-hand"],
+    .side-nav-link[data-page-id="maps"],
+    .side-nav-link[data-page-id="mw-action-cards"],
+    .side-nav-link[data-page-id="players"] {
+      --nav-accent: #4fc7e5;
+      --nav-glow: rgba(79, 199, 229, 0.32);
+    }
+
+    .side-nav-link[data-page-id="endgames"],
+    .side-nav-link[data-page-id="predictors"],
+    .side-nav-link[data-page-id="scoring"],
+    .side-nav-link[data-page-id="records"] {
+      --nav-accent: #ed78b5;
+      --nav-glow: rgba(237, 120, 181, 0.3);
+    }
+
+    .side-nav-link[data-page-id="combos"],
+    .side-nav-link[data-page-id="sponsor-endgames"],
+    .side-nav-link[data-page-id="icons"],
+    .side-nav-link[data-page-id="build"],
+    .side-nav-link[data-page-id="arena"] {
+      --nav-accent: #e8ad4f;
+      --nav-glow: rgba(232, 173, 79, 0.3);
+    }
+
+    /* Active vertical accent blade and logo glow. */
     .side-nav-link::before {
       content: '';
       position: absolute;
       left: 0;
       top: 0;
       bottom: 0;
-      width: 3px;
-      background: var(--accent);
+      width: 4px;
+      background: var(--nav-accent);
       border-radius: 0 4px 4px 0;
       opacity: 0;
       transform: scaleY(0.3);
-      transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 0 12px var(--nav-glow);
+      transition: opacity 0.2s ease, transform 0.2s ease;
     }
 
     .side-nav-link.active::before {
@@ -545,8 +616,12 @@
     }
 
     .side-nav-link.active .nav-icon {
-      stroke: var(--accent);
-      filter: drop-shadow(0 0 5px rgba(52, 211, 153, 0.3));
+      color: var(--nav-accent);
+      border-color: var(--nav-accent);
+      opacity: 1;
+      filter: drop-shadow(0 0 7px var(--nav-glow));
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--nav-accent), transparent 55%),
+        0 0 12px var(--nav-glow);
     }
 
     /* Fluid Micro-interactions */
@@ -556,18 +631,24 @@
     }
 
     .side-nav-link:hover .nav-icon {
-      stroke: var(--accent-bright);
-      filter: drop-shadow(0 0 4px rgba(109, 245, 184, 0.2));
+      color: var(--nav-accent);
+      border-color: var(--nav-accent);
+      opacity: 1;
+      filter: drop-shadow(0 0 5px var(--nav-glow));
     }
 
     .side-nav-link.active .nav-icon-build {
-      background-color: var(--accent);
-      filter: drop-shadow(0 0 5px rgba(52, 211, 153, 0.3));
+      color: var(--nav-accent);
+      border-color: var(--nav-accent);
+      filter: drop-shadow(0 0 7px var(--nav-glow));
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--nav-accent), transparent 55%),
+        0 0 12px var(--nav-glow);
     }
 
     .side-nav-link:hover .nav-icon-build {
-      background-color: var(--accent-bright);
-      filter: drop-shadow(0 0 4px rgba(109, 245, 184, 0.2));
+      color: var(--nav-accent);
+      border-color: var(--nav-accent);
+      filter: drop-shadow(0 0 5px var(--nav-glow));
     }
 
     .side-nav.nav-collapsed .side-nav-scroll-btn {
@@ -594,9 +675,9 @@
     .side-nav-link:hover .nav-icon-hand,
     .side-nav-link:hover .nav-icon-emu,
     .side-nav-link:hover .nav-icon-build {
-      color: var(--accent);
-      fill: var(--accent);
-      filter: drop-shadow(0 0 4px rgba(52, 211, 153, 0.22));
+      color: var(--nav-accent);
+      fill: var(--nav-accent);
+      filter: drop-shadow(0 0 5px var(--nav-glow));
     }
 
     .nav-label-coming {
@@ -1022,7 +1103,7 @@
       position: sticky;
       bottom: -20px;
       z-index: 8;
-      margin: 0 -16px -20px;
+      margin: 16px -16px -20px;
       padding: 12px 16px 20px;
       background: var(--bg-panel);
       border-top: 3px double var(--border-light);
@@ -6341,7 +6422,7 @@ body.refresh-route-active {
       }
 
       .nav-divider {
-        margin: 0px 10px; /* Slightly tighter inset margins on mobile */
+        margin: 0;
       }
 
       /* Collapsed nav: fully hidden, only the toggle tab remains */
@@ -6354,29 +6435,32 @@ body.refresh-route-active {
         display: none;
       }
 
-      /* Compact horizontal rectangular element configuration on mobile */
+      /* Keep the logo tile treatment on phones while giving two-line labels
+         enough vertical room to remain readable. */
       .side-nav-link {
-        height: 50px; /* Locked height of rectangular mobile cells */
-        font-size: 8px; /* Micro text scale */
+        height: 58px;
+        font-size: 8px;
         letter-spacing: 0.05em;
-        gap: 4px; /* Reduced layout spacing to maximize vertical breathing room */
+        gap: 3px;
         line-height: 1.25;
       }
 
       .nav-icon {
-        width: 16px; /* Scaled icon optimized for the 50px mobile height boundary */
-        height: 16px;
+        width: 26px;
+        height: 23px;
+        padding: 3px;
       }
 
       .nav-icon-actions {
-        width: 38px;
-        height: 18px;
+        width: 26px;
+        height: 23px;
+        padding: 4px 3px;
         stroke-width: 1;
       }
 
       .nav-icon-build {
-        width: 20px;
-        height: 17px;
+        width: 26px;
+        height: 23px;
       }
 
       .wm-ark, .wm-nova { font-size: 14px; }
@@ -6604,6 +6688,16 @@ body.refresh-route-active {
       /* Keep the slide-in filter panel compact on phones. */
       .sidebar {
         padding-top: 20px;
+        /* Mobile browser chrome changes the visible viewport while scrolling.
+           Dynamic viewport height keeps the sticky Apply footer inside the
+           actually visible drawer without changing the desktop geometry. */
+        height: 100dvh;
+      }
+
+      /* Preserve the temp dashboard's footer geometry while respecting devices
+         with a bottom safe area. With a zero inset this is visually identical. */
+      .filter-action-stack {
+        padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
       }
 
       /* Cards and Opening Hand keep only # and Card fixed. Other tables own

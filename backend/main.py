@@ -27,6 +27,26 @@ from google.api_core.exceptions import PreconditionFailed
 
 # Constants
 
+
+def _environment_bool(name, default=False):
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _environment_nonnegative_int(name, default):
+    raw = os.environ.get(name)
+    if raw is None:
+        return int(default)
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{name} must be a non-negative integer") from exc
+    if value < 0:
+        raise RuntimeError(f"{name} must be a non-negative integer")
+    return value
+
 DEFAULT_DATE_FROM = date(2025, 1, 1)
 MAPS_METRICS_DEFAULT_DATE_FROM = date(2026, 1, 13)
 DEFAULT_CARD_TYPES = ["animal", "sponsor", "project"]
@@ -70,6 +90,33 @@ VALID_ROUNDS = {"1", "2", "3", "4", "5", "6+"}
 
 CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 CACHE_PREFIX = os.environ.get("CACHE_PREFIX", "card-stats")
+PUBLIC_BIGQUERY_QUERIES_ENABLED = _environment_bool(
+    "PUBLIC_BIGQUERY_QUERIES_ENABLED", False
+)
+CARD_CARD_WARMING_ENABLED = _environment_bool(
+    "CARD_CARD_WARMING_ENABLED", False
+)
+PARTIAL_BIGQUERY_REFRESH_ENABLED = _environment_bool(
+    "PARTIAL_BIGQUERY_REFRESH_ENABLED", False
+)
+# Per-job ceilings are a second line of defence. A zero value disables the
+# respective ceiling deliberately; production should retain these defaults
+# until the local analytical serving database replaces BigQuery.
+PUBLIC_BIGQUERY_MAX_BYTES_BILLED = _environment_nonnegative_int(
+    "PUBLIC_BIGQUERY_MAX_BYTES_BILLED", 2 * 1024 ** 3
+)
+MAINTENANCE_BIGQUERY_MAX_BYTES_BILLED = _environment_nonnegative_int(
+    "MAINTENANCE_BIGQUERY_MAX_BYTES_BILLED", 64 * 1024 ** 3
+)
+SOURCE_FULL_VIEW = os.environ.get(
+    "SOURCE_FULL_VIEW", "freestyle-190711.ark_nova.all_games_stat"
+)
+SOURCE_FULL_RAW_TABLE = os.environ.get(
+    "SOURCE_FULL_RAW_TABLE", "freestyle-190711.ark_nova.all_games_stat_raw"
+)
+SOURCE_LOGS_TABLE = os.environ.get(
+    "SOURCE_LOGS_TABLE", "freestyle-190711.ark_nova.game_log_stat_v2"
+)
 CARD_ATTRIBUTES_URL = os.environ.get(
     "CARD_ATTRIBUTES_URL",
     "https://raw.githubusercontent.com/emufriends/stats/main/docs/cards_attributes.csv",
@@ -93,6 +140,7 @@ ARENA_LOCAL_DIR = os.environ.get(
 ARENA_METADATA_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/arena-source.json"
 ARENA_MANIFEST_BLOB = f"{CACHE_PREFIX}/players/arena/manifest.json"
 ARENA_TOP100_BUNDLE_BLOB = f"{CACHE_PREFIX}/players/arena-top-100/all-seasons.json"
+ARENA_LATEST_BUNDLE_BLOB = f"{CACHE_PREFIX}/players/arena/latest.json"
 RECORDS_FASTEST_SHEET_URL = os.environ.get(
     "RECORDS_FASTEST_SHEET_URL",
     "https://docs.google.com/spreadsheets/d/1RSOjQdZcGmOY7PBsDY7erGz--dtPJLc3ydNArr9bV48/export?format=csv&gid=1836311698",
@@ -107,8 +155,8 @@ RECORDS_ELO_LEADERBOARD_SHEET_URL = os.environ.get(
 )
 RECORDS_MANUAL_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-manual-source.json"
 RECORDS_ELO_LEADERBOARD_CACHE_BLOB = f"{CACHE_PREFIX}/metadata/records-elo-leaderboard-source.json"
-FILTER_CACHE_VERSION = "v41-corrupted-games"
-DEFAULT_PACK_SCHEMA_VERSION = 20
+FILTER_CACHE_VERSION = "v43-standalone-component-ci"
+DEFAULT_PACK_SCHEMA_VERSION = 22
 PLAYERS_HISTORY_WINDOW = 100
 PLAYERS_GRAPH_MIN_GAMES = 250
 STATS_PAGE_CARDS = "cards"
@@ -440,7 +488,23 @@ MAINTENANCE_TOKEN = os.environ.get("MAINTENANCE_TOKEN")
 REFRESH_PAGE_PASSWORD = os.environ.get("REFRESH_PAGE_PASSWORD")
 REFRESH_STATUS_BLOB = f"{CACHE_PREFIX}/refresh/status.json"
 REFRESH_LOCK_BLOB = f"{CACHE_PREFIX}/refresh/lock.json"
+REFRESH_SOURCE_STATE_BLOB = f"{CACHE_PREFIX}/refresh/source-state.json"
 REFRESH_LOCK_MAX_AGE = timedelta(minutes=90)
+PRIVATE_REFRESH_REQUEST_BLOB = os.environ.get(
+    "PRIVATE_REFRESH_REQUEST_BLOB", f"{CACHE_PREFIX}/refresh/private-request.json"
+)
+PRIVATE_REFRESH_PROJECT = os.environ.get(
+    "PRIVATE_REFRESH_PROJECT", "ark-nova-stats-dashboard"
+)
+PRIVATE_REFRESH_ZONE = os.environ.get("PRIVATE_REFRESH_ZONE", "europe-west1-c")
+PRIVATE_REFRESH_INSTANCE = os.environ.get(
+    "PRIVATE_REFRESH_INSTANCE", "ark-nova-duckdb-test"
+)
+PRIVATE_SOURCE_BUCKET = os.environ.get(
+    "PRIVATE_SOURCE_BUCKET", "ark-nova-stats-phase2-import-413312054512"
+)
+PRIVATE_SOURCE_PREFIX = os.environ.get("PRIVATE_SOURCE_PREFIX", "phase5/source-sync")
+PRIVATE_SOURCE_MANIFEST_BLOB = f"{PRIVATE_SOURCE_PREFIX}/latest-manifest.json"
 PREPARED_LOGS_TABLE = os.environ.get(
     "PREPARED_LOGS_TABLE",
     "ark-nova-stats-dashboard.dashboard_cache.card_logs_prepared",
@@ -569,6 +633,73 @@ TOURNAMENT_TABLES_CACHE_TABLE = os.environ.get(
     "TOURNAMENT_TABLES_CACHE_TABLE",
     "ark-nova-stats-dashboard.dashboard_cache.tournament_tables",
 )
+
+
+def _bigquery_label(value, fallback):
+    token = "".join(
+        character if character.isalnum() or character in "_-" else "-"
+        for character in str(value or fallback).strip().lower()
+    ).strip("-_")
+    return (token or fallback)[:63]
+
+
+class _CostControlledBigQueryClient(bigquery.Client):
+    """Apply byte ceilings and attribution labels to every SQL query job.
+
+    Load jobs and metadata reads are unaffected. Public analytical requests are
+    disabled independently; this ceiling protects authenticated maintenance,
+    diagnostics, and any deliberately re-enabled public query path.
+    """
+
+    def query(
+        self,
+        query,
+        job_config=None,
+        location=None,
+        ark_workload="maintenance",
+        ark_component=None,
+        **kwargs,
+    ):
+        configured = (
+            copy.deepcopy(job_config)
+            if job_config is not None
+            else bigquery.QueryJobConfig()
+        )
+        workload = _bigquery_label(ark_workload, "maintenance")
+        maximum = (
+            PUBLIC_BIGQUERY_MAX_BYTES_BILLED
+            if workload.startswith("public")
+            else MAINTENANCE_BIGQUERY_MAX_BYTES_BILLED
+        )
+        if maximum and configured.maximum_bytes_billed is None:
+            configured.maximum_bytes_billed = maximum
+        labels = dict(configured.labels or {})
+        labels["ark_workload"] = workload
+        labels["ark_component"] = _bigquery_label(ark_component, "dashboard")
+        active = globals().get("_ACTIVE_REFRESH_PROGRESS")
+        run_id = getattr(active, "run_id", None)
+        if run_id:
+            labels["ark_run"] = _bigquery_label(run_id, "refresh")
+        configured.labels = labels
+        return super().query(
+            query,
+            job_config=configured,
+            location=location or BIGQUERY_LOCATION,
+            **kwargs,
+        )
+
+
+class _PublicBigQueryQueryDisabled(RuntimeError):
+    pass
+
+
+def _require_public_bigquery_query():
+    if not PUBLIC_BIGQUERY_QUERIES_ENABLED:
+        raise _PublicBigQueryQueryDisabled(
+            "This filtered result is not already cached. Live analytical "
+            "queries are temporarily disabled while the dashboard moves to "
+            "its fixed-cost data service. Default views remain available."
+        )
 
 
 # Generic helpers
@@ -713,70 +844,6 @@ def _attach_ci95(item, row, schema_field_names, prefix):
         getattr(row, sd_field, None),
         getattr(row, n_field, None),
     ))
-
-
-def _clustered_linear_ci(component_clusters, coefficients):
-    """Pointwise CR1 interval for a linear combination of ratio means.
-
-    ``component_clusters`` maps each component name to ``table_id -> (n, sum)``.
-    The helper mirrors the production BigQuery calculation and exists as a
-    small, deterministic regression-test surface for the covariance algebra.
-    """
-    means = {}
-    totals = {}
-    all_clusters = set()
-    for component, coefficient in coefficients.items():
-        observations = component_clusters.get(component) or {}
-        total_n = sum(max(0, int(values[0] or 0)) for values in observations.values())
-        total_sum = sum(float(values[1] or 0.0) for values in observations.values())
-        if total_n <= 0:
-            return {
-                "interaction": None,
-                "interaction_ci95_low": None,
-                "interaction_ci95_high": None,
-                "interaction_ci95_se": None,
-                "interaction_ci95_cluster_n": 0,
-                "interaction_ci95_method": "table_cluster_delta",
-            }
-        totals[component] = total_n
-        means[component] = total_sum / total_n
-        all_clusters.update(observations)
-
-    cluster_count = len(all_clusters)
-    point = sum(coefficients[name] * means[name] for name in coefficients)
-    if cluster_count < 2:
-        return {
-            "interaction": point,
-            "interaction_ci95_low": None,
-            "interaction_ci95_high": None,
-            "interaction_ci95_se": None,
-            "interaction_ci95_cluster_n": cluster_count,
-            "interaction_ci95_method": "table_cluster_delta",
-        }
-
-    squared_influence = 0.0
-    for table_id in all_clusters:
-        influence = 0.0
-        for component, coefficient in coefficients.items():
-            count, total = (component_clusters.get(component) or {}).get(
-                table_id, (0, 0.0)
-            )
-            influence += coefficient * (
-                float(total or 0.0) - int(count or 0) * means[component]
-            ) / totals[component]
-        squared_influence += influence * influence
-    standard_error = math.sqrt(
-        cluster_count / (cluster_count - 1) * squared_influence
-    )
-    margin = 1.96 * standard_error
-    return {
-        "interaction": point,
-        "interaction_ci95_low": point - margin,
-        "interaction_ci95_high": point + margin,
-        "interaction_ci95_se": standard_error,
-        "interaction_ci95_cluster_n": cluster_count,
-        "interaction_ci95_method": "table_cluster_delta",
-    }
 
 
 def _sql_string(value):
@@ -1393,6 +1460,173 @@ def _release_refresh_lock(run_id):
         logging.exception("Failed to release refresh lock")
 
 
+def _private_refresh_instance_running():
+    """Return whether the always-on serving VM is already running.
+
+    Always-on mode intentionally never starts the VM from a request. This makes
+    the budget stop rail durable: after a hard stop, scheduler and manual
+    requests fail safely instead of powering the VM back on.
+    """
+    from google.auth import default as google_auth_default
+    from google.auth.transport.requests import AuthorizedSession
+
+    credentials, _ = google_auth_default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    session = AuthorizedSession(credentials)
+    url = (
+        "https://compute.googleapis.com/compute/v1/projects/"
+        f"{PRIVATE_REFRESH_PROJECT}/zones/{PRIVATE_REFRESH_ZONE}/"
+        f"instances/{PRIVATE_REFRESH_INSTANCE}"
+    )
+    try:
+        response = session.get(url, timeout=15)
+        if response.status_code != 200:
+            logging.error("Private refresh VM status read returned %s", response.status_code)
+            return False
+        return response.json().get("status") == "RUNNING"
+    except Exception:
+        logging.exception("Could not read private refresh VM status")
+        return False
+
+
+def _prepare_private_source_export():
+    """Export changed BigQuery source families into the controlled import bucket.
+
+    This runs under the backend function identity, which already has the source
+    project access.  The VM receives only Parquet objects and a small manifest;
+    it never needs BigQuery credentials or a broad project role.
+    """
+    import phase5_source_sync as source_sync
+
+    bucket = storage.Client().bucket(PRIVATE_SOURCE_BUCKET)
+    previous_blob = bucket.blob(PRIVATE_SOURCE_MANIFEST_BLOB)
+    previous = None
+    if previous_blob.exists():
+        try:
+            previous_blob.reload()
+            previous = json.loads(previous_blob.download_as_text(encoding="utf-8"))
+        except Exception:
+            logging.exception("Ignoring invalid private source manifest")
+
+    client = source_sync.cloud_client()
+    metadata = source_sync.read_metadata(client)
+    fingerprints = source_sync.fingerprints(metadata)
+    if previous and previous.get("source_fingerprints") == fingerprints:
+        return {"status": "unchanged", "generation": previous.get("generation")}
+
+    # The source-sync helper deliberately caps a single canonical export at
+    # 8 GiB.  This is independent of the larger account-level daily quota.
+    cap = min(MAINTENANCE_BIGQUERY_MAX_BYTES_BILLED, 8 * 1024 ** 3)
+    plan = source_sync.make_plan(client, metadata, previous, cap)
+    # Include a short attempt suffix so a failed BigQuery EXPORT DATA job never
+    # collides with the next retry's non-overwriting destination prefix.
+    generation = (
+        "sync-" + source_sync.digest(fingerprints)[:20] + "-"
+        + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    )
+    prefix = f"{PRIVATE_SOURCE_PREFIX}/{generation}"
+    full_uri = f"gs://{PRIVATE_SOURCE_BUCKET}/{prefix}/full_sample-*.parquet"
+    logs_uri = f"gs://{PRIVATE_SOURCE_BUCKET}/{prefix}/logs-*.parquet"
+    full_sql = (
+        f"EXPORT DATA OPTIONS(uri='{full_uri}', format='PARQUET', overwrite=false) "
+        f"AS {source_sync.FULL_SQL}"
+    )
+    full_job = client.query(
+        full_sql,
+        location="US",
+        job_id=f"ark_private_source_{generation}_full",
+        job_retry=None,
+        job_config=bigquery.QueryJobConfig(
+            maximum_bytes_billed=cap,
+            use_query_cache=False,
+            labels={"ark_workload": "source_sync", "ark_component": "full_sample"},
+        ),
+    )
+    full_job.result()
+    logs_job = client.extract_table(
+        source_sync.LOGS,
+        logs_uri,
+        location="US",
+        job_id=f"ark_private_source_{generation}_logs",
+        job_config=bigquery.ExtractJobConfig(destination_format="PARQUET"),
+    )
+    logs_job.result()
+    if source_sync.fingerprints(source_sync.read_metadata(client)) != fingerprints:
+        raise RuntimeError("source changed during private export; retrying is required")
+
+    manifest = {
+        "status": "ok",
+        "mode": "controlled_export",
+        "generation": generation,
+        "created_at": _utc_now_iso(),
+        "source_fingerprints": fingerprints,
+        "source_metadata": metadata,
+        "export": {
+            "full_sample_uri": full_uri,
+            "logs_uri": logs_uri,
+        },
+        "estimated_query_bytes": plan.get("estimated_query_bytes", 0),
+    }
+    manifest_blob = bucket.blob(f"{prefix}/manifest.json")
+    manifest_blob.upload_from_string(
+        json.dumps(manifest, separators=(",", ":")),
+        content_type="application/json; charset=utf-8",
+    )
+    previous_blob.upload_from_string(
+        json.dumps(manifest, separators=(",", ":")),
+        content_type="application/json; charset=utf-8",
+        if_generation_match=previous_blob.generation if previous is not None else 0,
+    )
+    return {"status": "ok", "generation": generation, "estimated_query_bytes": plan.get("estimated_query_bytes", 0)}
+
+
+def _queue_private_refresh(mode):
+    """Queue one VM-owned refresh and return a public-safe status payload."""
+    if not _private_refresh_instance_running():
+        return {
+            "status": "error",
+            "message": "Private DuckDB VM is not running; refresh was not started",
+        }, 503
+    run_id = uuid.uuid4().hex
+    if not _acquire_refresh_lock(run_id):
+        current = _read_refresh_status()
+        return {"status": "running", "refresh_status": current}, 409
+
+    previous = _read_refresh_status()
+    now = _utc_now_iso()
+    status = {
+        "state": "running",
+        "run_id": run_id,
+        "progress_percent": 0,
+        "phase": "Starting private refresh",
+        "started_at": now,
+        "updated_at": now,
+        "last_completed_at": previous.get("last_completed_at"),
+        "completed_data_version": previous.get("completed_data_version"),
+    }
+    request_bucket = storage.Client().bucket(CACHE_BUCKET)
+    try:
+        _prepare_private_source_export()
+        _write_refresh_status(status)
+        request_blob = request_bucket.blob(PRIVATE_REFRESH_REQUEST_BLOB)
+        request_blob.upload_from_string(
+            json.dumps({"run_id": run_id, "mode": mode, "requested_at": now}, separators=(",", ":")),
+            content_type="application/json; charset=utf-8",
+            if_generation_match=0,
+        )
+    except Exception:
+        logging.exception("Failed to queue private DuckDB refresh")
+        _write_refresh_status({**status, "state": "failed", "phase": "Could not start refresh"})
+        _release_refresh_lock(run_id)
+        try:
+            request_bucket.blob(PRIVATE_REFRESH_REQUEST_BLOB).delete()
+        except Exception:
+            logging.exception("Failed to remove an unstarted private refresh request")
+        return {"status": "error", "message": "Refresh could not be started"}, 503
+    return {"status": "queued", "run_id": run_id, "refresh_status": _read_refresh_status()}, 202
+
+
 class _RefreshProgress:
     """Persist monotonic, sanitized progress for scheduled and manual refreshes."""
 
@@ -1446,6 +1680,11 @@ class _RefreshProgress:
         with self.lock:
             completed_at = _utc_now_iso()
             self._publish("succeeded", 100, "Refresh complete", completed_at, data_version)
+
+    def unchanged(self, data_version):
+        """Finish successfully without changing atomic-publication time."""
+        with self.lock:
+            self._publish("succeeded", 100, "Already up to date", data_version=data_version)
 
     def fail(self):
         with self.lock:
@@ -1736,7 +1975,27 @@ def _read_arena_source(filename, missing_ok=False):
     )
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
-            return response.read().decode("utf-8-sig")
+            remote_text = response.read().decode("utf-8-sig")
+            # The packaged source is the deployed fallback for a partially
+            # synchronized public repository.  Prefer it when it carries a
+            # newer Arena settings season or the required ID column that the
+            # remote ranking file has not received yet; otherwise retain the
+            # normal remote-first behavior so future sheet updates are picked
+            # up without a function deployment.
+            if os.path.exists(local_path):
+                with open(local_path, "r", encoding="utf-8-sig", newline="") as source:
+                    local_text = source.read()
+                if filename == "arena_settings.csv":
+                    remote_rows = list(csv.DictReader(io.StringIO(remote_text)))
+                    local_rows = list(csv.DictReader(io.StringIO(local_text)))
+                    if len(local_rows) > len(remote_rows):
+                        return local_text
+                elif filename.endswith(".csv"):
+                    remote_header = set((remote_text.splitlines() or [""])[0].split(","))
+                    local_header = set((local_text.splitlines() or [""])[0].split(","))
+                    if "ID" in local_header and "ID" not in remote_header:
+                        return local_text
+            return remote_text
     except urllib.error.HTTPError as exc:
         if exc.code != 404:
             raise
@@ -1801,25 +2060,37 @@ def _parse_arena_settings(source_text):
 
 def _parse_arena_ranking(source_text, season):
     reader = csv.DictReader(io.StringIO(source_text))
-    required = {"#", "BGA Name", "Rating"}
+    required = {"#", "BGA Name", "ID", "Rating"}
     if not required.issubset(set(reader.fieldnames or [])):
-        raise ValueError(f"{season.lower()}.csv is missing #, BGA Name, or Rating")
+        raise ValueError(f"{season.lower()}.csv is missing #, BGA Name, ID, or Rating")
     rows = []
-    names = set()
+    ranks = set()
     for raw in reader:
         try:
             rank = int(str(raw.get("#") or "").strip())
             rating = int(round(float(str(raw.get("Rating") or "").strip())))
         except ValueError as exc:
             raise ValueError(f"{season.lower()}.csv contains a non-numeric rank or rating") from exc
+        raw_id = str(raw.get("ID") or "").strip()
+        if raw_id:
+            try:
+                player_id = int(raw_id)
+            except ValueError as exc:
+                raise ValueError(f"{season.lower()}.csv contains a non-numeric player ID") from exc
+        else:
+            # Keep a ranked spreadsheet row visible when the source has not
+            # supplied an ID yet; it simply cannot receive DB-derived stats.
+            player_id = None
         player = str(raw.get("BGA Name") or "").strip()
-        if not player or player in names:
-            raise ValueError(f"{season.lower()}.csv contains a blank or duplicate player")
-        names.add(player)
-        rows.append({"rank": rank, "player": player, "end": rating})
+        if rank < 1 or (player_id is not None and player_id < 1) or not player:
+            raise ValueError(f"{season.lower()}.csv contains an invalid rank, ID, or player name")
+        if rank in ranks:
+            raise ValueError(f"{season.lower()}.csv contains a duplicate rank: {rank}")
+        ranks.add(rank)
+        rows.append({"rank": rank, "player": player, "player_id": player_id, "end": rating})
     rows.sort(key=lambda item: item["rank"])
-    if len(rows) != 100 or [item["rank"] for item in rows] != list(range(1, 101)):
-        raise ValueError(f"{season.lower()}.csv must contain ranks 1 through 100 exactly once")
+    if not rows or [item["rank"] for item in rows] != list(range(1, len(rows) + 1)):
+        raise ValueError(f"{season.lower()}.csv must contain contiguous ranks starting at 1")
     return rows
 
 
@@ -2046,8 +2317,10 @@ def _parse_records_biggest_turns_sheet(source_text):
     return rows
 
 
-def _records_sheet_float(raw_value, field_name, row_number):
+def _records_sheet_float(raw_value, field_name, row_number, allow_na=False):
     token = str(raw_value or "").strip()
+    if allow_na and token.casefold() in {"n/a", "na"}:
+        return None
     try:
         value = float(token)
     except (TypeError, ValueError) as exc:
@@ -2066,7 +2339,9 @@ def _parse_records_elo_leaderboard_sheet(source_text):
 
     The export has an intentionally blank first column, so DictReader would
     create an unstable empty header. Positional parsing keeps the source
-    contract explicit: B country, C player, F Peak Elo, H Peak Arena.
+    contract explicit: B country, C player, F Peak Elo, H Peak Arena. Peak
+    Arena may be blank or the literal ``n/a`` when the player has no Arena
+    games; that value is stored as null and rendered as ``n/a``.
     """
     reader = csv.reader(io.StringIO(source_text))
     try:
@@ -2112,7 +2387,9 @@ def _parse_records_elo_leaderboard_sheet(source_text):
         peak_elo = _records_sheet_float(raw[5], "Peak Elo", row_number)
         peak_arena = None
         if str(raw[7] or "").strip():
-            peak_arena = _records_sheet_float(raw[7], "Peak Arena", row_number)
+            peak_arena = _records_sheet_float(
+                raw[7], "Peak Arena", row_number, allow_na=True
+            )
         rows.append({
             "source_row": row_number,
             "country": country,
@@ -2166,26 +2443,34 @@ def _cached_records_elo_leaderboard_source():
     return cached
 
 
-def _refresh_records_elo_leaderboard_snapshots():
+def _resolve_records_elo_leaderboard_source():
+    """Return a validated live sheet, or its last-known-good cached payload."""
+    try:
+        return _fetch_records_elo_leaderboard_source(), "live", None
+    except Exception as exc:
+        logging.exception("Failed to refresh Elo Leaderboard source from Google Sheets")
+        cached = _cached_records_elo_leaderboard_source()
+        if not cached:
+            raise RuntimeError(
+                "Elo Leaderboard is unavailable and no validated cache exists"
+            ) from exc
+        return cached, "cached", exc
+
+
+def _refresh_records_elo_leaderboard_snapshots(
+    source=None, source_status=None, live_error=None
+):
     """Refresh the dataset-neutral Masters Top 100 snapshots atomically by view.
 
     The source sheet has no MW/Base dimension. Both dashboard dataset paths
     therefore publish the same validated rows so changing the global dataset
     cannot make the leaderboard disappear.
     """
-    live_error = None
-    try:
-        source = _fetch_records_elo_leaderboard_source()
+    if source is None:
+        source, source_status, live_error = _resolve_records_elo_leaderboard_source()
+    if source_status == "live":
         if not _write_cache_blob(RECORDS_ELO_LEADERBOARD_CACHE_BLOB, source, "refreshed"):
             raise RuntimeError("Could not persist validated Elo Leaderboard source")
-        source_status = "live"
-    except Exception as exc:
-        live_error = exc
-        logging.exception("Failed to refresh Elo Leaderboard source from Google Sheets")
-        source = _cached_records_elo_leaderboard_source()
-        if not source:
-            raise RuntimeError("Elo Leaderboard is unavailable and no validated cache exists") from exc
-        source_status = "cached"
 
     results = []
     for dataset in (1, 0):
@@ -2250,6 +2535,146 @@ def _read_data_version():
     except Exception:
         logging.exception("Failed to read data-version marker")
         return _filter_cache_day()
+
+
+def _bigquery_source_metadata():
+    """Read free table metadata used to decide whether data preparation changed."""
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
+    result = {}
+    for table_id in (SOURCE_FULL_VIEW, SOURCE_FULL_RAW_TABLE, SOURCE_LOGS_TABLE):
+        table = client.get_table(table_id)
+        item = {
+            "etag": table.etag,
+            "modified": _dt_iso(table.modified),
+            "num_rows": table.num_rows,
+            "num_bytes": table.num_bytes,
+            "table_type": table.table_type,
+        }
+        if table.view_query:
+            item["view_query_sha256"] = hashlib.sha256(
+                table.view_query.encode("utf-8")
+            ).hexdigest()
+        result[table_id] = item
+    return result
+
+
+def _refresh_source_state(
+    card_attributes,
+    arena_metadata,
+    merge_metadata,
+    records_source,
+    elo_leaderboard_source,
+):
+    """Build a stable fingerprint of every input to the atomic daily pack."""
+    arena_contract = {
+        "seasons": arena_metadata.get("seasons", []),
+        "rankings": arena_metadata.get("rankings", {}),
+        "latest_by_mode": arena_metadata.get("latest_by_mode", {}),
+        "latest_top_100": arena_metadata.get("latest_top_100"),
+    }
+    prepared_inputs = {
+        "schema": 1,
+        "bigquery": _bigquery_source_metadata(),
+        "card_attributes_sha256": card_attributes.get("source_sha256"),
+        "merge_players_sha256": merge_metadata.get("source_sha256"),
+        "arena_sha256": hashlib.sha256(
+            json.dumps(
+                arena_contract,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=_json_default,
+            ).encode("utf-8")
+        ).hexdigest(),
+        "records_manual_sha256": records_source.get("source_sha256"),
+    }
+    prepared_fingerprint = hashlib.sha256(
+        json.dumps(
+            prepared_inputs,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=_json_default,
+        ).encode("utf-8")
+    ).hexdigest()
+    inputs = {
+        "prepared": prepared_inputs,
+        # The Elo sheet is already a complete result and can be published
+        # independently without rebuilding any analytical derivative.
+        "records_elo_leaderboard_sha256": elo_leaderboard_source.get(
+            "source_sha256"
+        ),
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            inputs, sort_keys=True, separators=(",", ":"), default=_json_default
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "fingerprint": fingerprint,
+        "prepared_fingerprint": prepared_fingerprint,
+        "inputs": inputs,
+    }
+
+
+def _read_refresh_source_state():
+    if not CACHE_BUCKET:
+        return None
+    try:
+        blob = storage.Client().bucket(CACHE_BUCKET).blob(REFRESH_SOURCE_STATE_BLOB)
+        if not blob.exists():
+            return None
+        blob.reload()
+        return json.loads(
+            blob.download_as_bytes(if_generation_match=blob.generation).decode("utf-8")
+        )
+    except Exception:
+        logging.exception("Failed to read the successful refresh source fingerprint")
+        return None
+
+
+def _write_refresh_source_state(source_state, data_version):
+    if not CACHE_BUCKET:
+        return False
+    payload = {
+        **source_state,
+        "data_version": data_version,
+        "published_at": _utc_now_iso(),
+    }
+    try:
+        blob = storage.Client().bucket(CACHE_BUCKET).blob(REFRESH_SOURCE_STATE_BLOB)
+        blob.cache_control = "no-store, max-age=0"
+        blob.upload_from_string(
+            json.dumps(payload, default=_json_default, separators=(",", ":")),
+            content_type="application/json; charset=utf-8",
+        )
+        return True
+    except Exception:
+        logging.exception("Failed to write the successful refresh source fingerprint")
+        return False
+
+
+def _can_skip_daily_refresh(source_state):
+    previous = _read_refresh_source_state()
+    if not previous:
+        return None
+    data_version = previous.get("data_version")
+    if not data_version or not CACHE_BUCKET:
+        return None
+    try:
+        pack = storage.Client().bucket(CACHE_BUCKET).blob(
+            f"{CACHE_PREFIX}/bootstrap/default-pack.json"
+        )
+        if not pack.exists():
+            return None
+        if previous.get("fingerprint") == source_state.get("fingerprint"):
+            return {"mode": "unchanged", "data_version": str(data_version)}
+        if previous.get("prepared_fingerprint") == source_state.get(
+            "prepared_fingerprint"
+        ):
+            return {"mode": "auxiliary_only", "data_version": str(data_version)}
+        return None
+    except Exception:
+        logging.exception("Failed to verify the existing default snapshot pack")
+        return None
 
 
 def _write_data_version(prepared_payload):
@@ -2410,6 +2835,7 @@ def _default_snapshot_pack_blob_names():
         ])
     names.extend([
         f"{CACHE_PREFIX}/combinations/card-action-card/default-mw.json",
+        f"{CACHE_PREFIX}/players/arena/latest.json",
         f"{CACHE_PREFIX}/mw-action-cards/general/default-mw.json",
         f"{CACHE_PREFIX}/mw-action-cards/by-map/default-mw.json",
         f"{CACHE_PREFIX}/mw-action-cards/synergies/default-mw.json",
@@ -2418,7 +2844,7 @@ def _default_snapshot_pack_blob_names():
 
 
 def _validate_snapshot_pack_member(blob_name, snapshot, data_version):
-    """Reject mixed prepared-data or Synergy-CI versions before publication."""
+    """Reject mixed prepared-data versions before publication."""
     version_neutral = "/records/elo-leaderboard/" in blob_name
     snapshot_version = snapshot.get("data_version")
     if not version_neutral and snapshot_version != data_version:
@@ -2426,13 +2852,6 @@ def _validate_snapshot_pack_member(blob_name, snapshot, data_version):
             "Default snapshot data-version mismatch: "
             f"{blob_name} has {snapshot_version!r}, expected {data_version!r}"
         )
-    if snapshot.get("synergy_ci_status") == "complete":
-        ci_version = snapshot.get("synergy_ci_data_version")
-        if ci_version != snapshot_version:
-            raise RuntimeError(
-                "Synergy CI data-version mismatch: "
-                f"{blob_name} has {ci_version!r}, expected {snapshot_version!r}"
-            )
 
 
 def _write_default_snapshot_pack(data_version):
@@ -2761,7 +3180,7 @@ def _refresh_prepared_logs_table(arena_metadata=None):
     """
 
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     # BigQuery cannot replace a partitioned table when its clustering fields
     # change. Prepared Logs is rebuilt from source immediately after this drop.
     client.query(
@@ -2874,7 +3293,7 @@ def _refresh_prepared_full_stats_table(arena_metadata=None):
     """
 
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     # BigQuery cannot change a table's clustering fields through CREATE OR
     # REPLACE. This is a backend-owned derivative, so replace it explicitly;
     # the read-only Full Sample source above is never modified.
@@ -2912,7 +3331,7 @@ def _enrich_and_write_records_manual_table(source_payload):
     if not source_rows:
         raise ValueError("Manual Records source contains no rows")
     table_ids = sorted({item["table_id"] for item in source_rows})
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     metadata_query = f"""
       SELECT
         CAST(table_id AS STRING) AS table_id,
@@ -3127,31 +3546,36 @@ def _enrich_and_write_records_manual_table(source_payload):
     }
 
 
-def _refresh_prepared_records_manual_table():
+def _resolve_records_manual_source():
+    """Return a validated live Records sheet, or its last-known-good copy."""
+    try:
+        return _fetch_records_manual_source(), "live", None
+    except Exception as exc:
+        logging.exception("Failed to refresh manual Records data from Google Sheets")
+        cached = _cached_records_manual_source()
+        if not cached:
+            raise RuntimeError(
+                "Manual Records data is unavailable and no validated cache exists"
+            ) from exc
+        return cached, "cached", exc
+
+
+def _refresh_prepared_records_manual_table(
+    source=None, source_status=None, live_error=None
+):
     """Refresh Google-Sheet Records data, falling back only to fully validated cached rows."""
     global _RECORDS_MANUAL_SOURCE
-    live_error = None
-    try:
-        candidate = _fetch_records_manual_source()
-        result = _enrich_and_write_records_manual_table(candidate)
-        if not _write_cache_blob(RECORDS_MANUAL_CACHE_BLOB, candidate, "refreshed"):
+    if source is None:
+        source, source_status, live_error = _resolve_records_manual_source()
+    result = _enrich_and_write_records_manual_table(source)
+    if source_status == "live":
+        if not _write_cache_blob(RECORDS_MANUAL_CACHE_BLOB, source, "refreshed"):
             raise RuntimeError("Could not persist validated manual Records source")
-        _RECORDS_MANUAL_SOURCE = candidate
-        result["source_status"] = "live"
-        result["source_sha256"] = candidate.get("source_sha256")
-        return result
-    except Exception as exc:
-        live_error = exc
-        logging.exception("Failed to refresh manual Records data from Google Sheets")
-
-    cached = _cached_records_manual_source()
-    if not cached:
-        raise RuntimeError("Manual Records data is unavailable and no validated cache exists") from live_error
-    result = _enrich_and_write_records_manual_table(cached)
-    _RECORDS_MANUAL_SOURCE = cached
-    result["source_status"] = "cached"
-    result["source_sha256"] = cached.get("source_sha256")
-    result["live_error"] = str(live_error)
+    _RECORDS_MANUAL_SOURCE = source
+    result["source_status"] = source_status or "cached"
+    result["source_sha256"] = source.get("source_sha256")
+    if live_error:
+        result["live_error"] = str(live_error)
     return result
 
 
@@ -3221,6 +3645,7 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
     SELECT
       table_id,
       CAST(f.player AS STRING) AS player,
+      SAFE_CAST(f.player_id AS INT64) AS player_id,
       COALESCE(
         m.player_identity,
         CONCAT('player:', CAST(f.player AS STRING))
@@ -3230,6 +3655,7 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
       SAFE_CAST(game_ended_at AS TIMESTAMP) AS game_ended_at,
       game_date,
       SAFE_CAST(pre_match_elo AS FLOAT64) AS pre_match_elo,
+      SAFE_CAST(post_match_elo AS FLOAT64) AS post_match_elo,
       SAFE_CAST(elo_delta AS FLOAT64) AS elo_delta,
       SAFE_CAST(opponent_pre_match_elo AS FLOAT64) AS opponent_pre_match_elo,
       CAST(COALESCE(table_conceded, 0) AS INT64) AS table_conceded,
@@ -3255,7 +3681,7 @@ def _refresh_prepared_players_table(arena_metadata=None, merge_metadata=None):
     """
 
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     # BigQuery cannot change clustering order through CREATE OR REPLACE. This
     # table is a backend-owned derivative, so nightly maintenance replaces it;
     # Full Sample remains untouched.
@@ -3543,7 +3969,7 @@ def _refresh_prepared_card_plays_table():
     """
 
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -3610,7 +4036,7 @@ def _refresh_prepared_card_pairs_table():
     """
 
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -3659,7 +4085,7 @@ def _refresh_prepared_card_play_aggregates_table():
       card_name, played_round
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -3715,7 +4141,7 @@ def _refresh_prepared_card_pair_aggregates_table():
       card_1, card_2, played_rounds_1_json, played_rounds_2_json
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -3757,7 +4183,7 @@ def _refresh_prepared_card_pair_scope_aggregates_table():
       arena_season, is_tournament, starting_position, pre_match_elo, opponent_pre_match_elo, card_1, card_2
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -3842,7 +4268,7 @@ def _refresh_prepared_home_observations_table():
     LEFT JOIN log_ready l USING(table_id, player)
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     # The canonical Elo migration removes FLOAT64 rating fields from the
     # clustering specification. BigQuery cannot alter clustering through
     # CREATE OR REPLACE, so explicitly replace this backend-owned derivative.
@@ -3991,7 +4417,7 @@ def _refresh_prepared_endgame_events_table():
     UNION ALL SELECT * FROM scored_events
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4056,7 +4482,7 @@ def _refresh_prepared_action_starting_table():
     FROM observations
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4094,7 +4520,7 @@ def _refresh_prepared_conservation_counts_table():
       END BETWEEN 0 AND 7
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4119,7 +4545,7 @@ def _refresh_prepared_predictor_specific_table():
     {observations_query}
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4186,7 +4612,7 @@ def _refresh_prepared_card_moments_table():
     FROM all_moments
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4235,7 +4661,7 @@ def _refresh_prepared_sponsor_endgame_table():
     LEFT JOIN rewards r USING(table_id, player, sponsor)
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4285,7 +4711,7 @@ def _refresh_prepared_project_reward_table():
     SELECT * FROM base UNION ALL SELECT * FROM rewards
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4365,7 +4791,7 @@ def _refresh_prepared_cp_reward_table():
     SELECT * FROM chosen_rows UNION ALL SELECT * FROM opportunity_rows
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4393,7 +4819,7 @@ def _refresh_prepared_card_endgame_table():
       AND {_completed_game_sql("p")}
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4431,7 +4857,7 @@ def _refresh_prepared_card_endgame_aggregates_table():
       card_name, played_round, endgame_name
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(query, location=BIGQUERY_LOCATION)
     job.result()
     return {
@@ -4764,7 +5190,7 @@ def _refresh_prepared_mw_action_card_tables():
       action_card_order, action_card_key, action_card_type,
       action_card_number, action_card_name
     """
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     started_at = time.perf_counter()
     player_job = client.query(player_query, location=BIGQUERY_LOCATION)
     draft_job = client.query(draft_query, location=BIGQUERY_LOCATION)
@@ -4798,14 +5224,30 @@ def _refresh_prepared_mw_action_card_tables():
     }
 
 
-def _refresh_prepared_tables(arena_metadata=None, merge_metadata=None, progress_callback=None):
+def _refresh_prepared_tables(
+    arena_metadata=None,
+    merge_metadata=None,
+    progress_callback=None,
+    records_source=None,
+    records_source_status=None,
+    records_live_error=None,
+):
     arena_metadata = arena_metadata or _load_arena_metadata()
     steps = [
         ("full_stats", "Full Sample", lambda: _refresh_prepared_full_stats_table(arena_metadata)),
         ("logs", "Logs", lambda: _refresh_prepared_logs_table(arena_metadata)),
-        ("records_manual", "Records sheets", _refresh_prepared_records_manual_table),
+        (
+            "records_manual",
+            "Records sheets",
+            lambda: _refresh_prepared_records_manual_table(
+                records_source, records_source_status, records_live_error
+            ),
+        ),
         ("players", "Players", lambda: _refresh_prepared_players_table(arena_metadata, merge_metadata)),
         ("card_plays", "Card plays", _refresh_prepared_card_plays_table),
+        # Card aggregates read card moments, so the inference/event source must
+        # belong to the same refresh generation before either aggregate runs.
+        ("card_moments", "Card moments", _refresh_prepared_card_moments_table),
         ("card_pairs", "Card pairs", _refresh_prepared_card_pairs_table),
         ("card_play_aggregates", "Card aggregates", _refresh_prepared_card_play_aggregates_table),
         ("card_pair_aggregates", "Card-pair aggregates", _refresh_prepared_card_pair_aggregates_table),
@@ -4815,7 +5257,6 @@ def _refresh_prepared_tables(arena_metadata=None, merge_metadata=None, progress_
         ("action_starting", "Starting positions", _refresh_prepared_action_starting_table),
         ("conservation_counts", "Conservation", _refresh_prepared_conservation_counts_table),
         ("predictor_specific", "Predictors", _refresh_prepared_predictor_specific_table),
-        ("card_moments", "Card moments", _refresh_prepared_card_moments_table),
         ("sponsor_endgames", "Sponsor endgames", _refresh_prepared_sponsor_endgame_table),
         ("project_rewards", "Project rewards", _refresh_prepared_project_reward_table),
         ("cp_rewards", "CP rewards", _refresh_prepared_cp_reward_table),
@@ -4852,7 +5293,7 @@ def _refresh_player_index_snapshot(is_mw, merge_metadata=None):
       ORDER BY player
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(
         query,
         job_config=bigquery.QueryJobConfig(query_parameters=[
@@ -4927,12 +5368,16 @@ def _fide_performance_rating(score_rate, average_opponent_elo):
 
 
 def _arena_top100_season_payload(season):
-    """Rebuild one closed Arena ranking table and its compact rating history."""
+    """Rebuild one Arena ranking table and its compact rating history."""
     ranking = season.get("ranking") or []
-    players = [item["player"] for item in ranking]
+    player_ids = [
+        int(item["player_id"])
+        for item in ranking
+        if item.get("player_id") is not None
+    ]
     query = f"""
       SELECT
-        player,
+        player_id,
         COUNT(*) AS games,
         MAX(post_match_arena_rating) AS peak,
         AVG(arena_game_score) AS score_rate,
@@ -4958,34 +5403,41 @@ def _arena_top100_season_payload(season):
         AND game_date BETWEEN @start_date AND @end_date
         AND game_ended_at >= @start_utc
         AND game_ended_at < @end_utc
-        AND player IN UNNEST(@players)
-      GROUP BY player
+        AND player_id IN UNNEST(@player_ids)
+      GROUP BY player_id
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     start = datetime.fromisoformat(season["start_utc"].replace("Z", "+00:00"))
     end = datetime.fromisoformat(
         season["effective_end_utc"].replace("Z", "+00:00")
     )
-    job = client.query(
-        query,
-        job_config=bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("arena_season", "STRING", season["season"]),
-            bigquery.ScalarQueryParameter("is_mw", "INT64", int(season["is_mw"])),
-            bigquery.ScalarQueryParameter("start_date", "DATE", start.date()),
-            bigquery.ScalarQueryParameter("end_date", "DATE", end.date()),
-            bigquery.ScalarQueryParameter("start_utc", "TIMESTAMP", start),
-            bigquery.ScalarQueryParameter("end_utc", "TIMESTAMP", end),
-            bigquery.ArrayQueryParameter("players", "STRING", players),
-        ]),
-        location=BIGQUERY_LOCATION,
-    )
-    by_player = {str(row.player): row for row in job.result()}
+    if player_ids:
+        job = client.query(
+            query,
+            job_config=bigquery.QueryJobConfig(query_parameters=[
+                bigquery.ScalarQueryParameter("arena_season", "STRING", season["season"]),
+                bigquery.ScalarQueryParameter("is_mw", "INT64", int(season["is_mw"])),
+                bigquery.ScalarQueryParameter("start_date", "DATE", start.date()),
+                bigquery.ScalarQueryParameter("end_date", "DATE", end.date()),
+                bigquery.ScalarQueryParameter("start_utc", "TIMESTAMP", start),
+                bigquery.ScalarQueryParameter("end_utc", "TIMESTAMP", end),
+                bigquery.ArrayQueryParameter("player_ids", "INT64", player_ids),
+            ]),
+            location=BIGQUERY_LOCATION,
+        )
+        by_player = {int(row.player_id): row for row in job.result()}
+    else:
+        job = None
+        by_player = {}
     rows = []
     series = []
     for ranked in ranking:
         player = ranked["player"]
-        aggregate = by_player.get(player)
+        player_id = ranked.get("player_id")
+        if player_id is not None:
+            player_id = int(player_id)
+        aggregate = by_player.get(player_id) if player_id is not None else None
         games = int(getattr(aggregate, "games", 0) or 0) if aggregate else 0
         score_rate = getattr(aggregate, "score_rate", None) if aggregate else None
         average_opponent = getattr(aggregate, "opponent_pre_match_elo", None) if aggregate else None
@@ -4993,6 +5445,7 @@ def _arena_top100_season_payload(season):
         rows.append({
             "rank": int(ranked["rank"]),
             "player": player,
+            "player_id": player_id,
             "end": int(round(float(ranked["end"]))),
             "peak": getattr(aggregate, "peak", None) if aggregate else None,
             "games": games,
@@ -5010,6 +5463,7 @@ def _arena_top100_season_payload(season):
         series.append({
             "rank": int(ranked["rank"]),
             "player": player,
+            "player_id": player_id,
             # Parallel arrays avoid repeating player names and object keys for
             # every graph point in the static all-season bundle.
             "timestamps": [str(history_value(item, "ended_at")) for item in history],
@@ -5024,14 +5478,14 @@ def _arena_top100_season_payload(season):
         "rows": rows,
         "series": series,
         "total_ms": _ms_since(started_at),
-        "job_id": job.job_id,
-        "job_total_bytes_processed": job.total_bytes_processed,
-        "job_total_slot_ms": job.slot_millis,
+        "job_id": job.job_id if job else None,
+        "job_total_bytes_processed": job.total_bytes_processed if job else 0,
+        "job_total_slot_ms": job.slot_millis if job else 0,
     }
 
 
 def _refresh_arena_top100_bundle(arena_metadata, data_version):
-    """Publish all completed ranking-file seasons as one atomic static bundle."""
+    """Publish all seasons plus a compact latest-season bootstrap snapshot."""
     rankings = arena_metadata.get("rankings") or {}
     available = []
     for season in arena_metadata.get("seasons", []):
@@ -5067,14 +5521,28 @@ def _refresh_arena_top100_bundle(arena_metadata, data_version):
         "data": {item["season"]: results[item["season"]] for item in available},
     }
     cache_ok = _write_cache_blob(ARENA_TOP100_BUNDLE_BLOB, payload, "refreshed")
-    manifest_ok = cache_ok and _write_cache_blob(
+    latest = available[0] if available else None
+    latest_payload = {
+        "status": "ok",
+        "data_version": data_version,
+        "generated_at": payload["generated_at"],
+        "latest_season": payload["latest_season"],
+        "seasons": public_seasons,
+        "data": {latest["season"]: results[latest["season"]]} if latest else {},
+    }
+    latest_ok = cache_ok and _write_cache_blob(
+        ARENA_LATEST_BUNDLE_BLOB,
+        latest_payload,
+        "refreshed",
+    )
+    manifest_ok = latest_ok and _write_cache_blob(
         ARENA_MANIFEST_BLOB,
         _arena_manifest(arena_metadata, data_version),
         "refreshed",
     )
     return {
-        "status": "ok" if cache_ok and manifest_ok else "error",
-        "cache_status": "refreshed" if cache_ok and manifest_ok else "cache_write_failed",
+        "status": "ok" if cache_ok and latest_ok and manifest_ok else "error",
+        "cache_status": "refreshed" if cache_ok and latest_ok and manifest_ok else "cache_write_failed",
         "seasons": len(available),
         "rows": sum(len(item.get("rows") or []) for item in results.values()),
         "total_ms": _ms_since(started_at),
@@ -5860,15 +6328,16 @@ def _maps_metric_definitions():
         ("sponsors_actions", 26, "Sponsors actions", None, False, "number", False),
         ("universities", 27, "Universities", None, False, "number", False),
         ("partner_zoos", 28, "Partner zoos", None, False, "number", False),
-        ("x_tokens_gained", 29, "X-token gained", None, False, "number", False),
-        ("x_tokens_spent", 30, "X-token spent", None, False, "number", False),
-        ("x_backs", 31, "X-backs", None, False, "number", False),
-        ("money_gained", 32, "Money gained", None, False, "number", False),
-        ("money_gained_income", 33, "Money gained (income)", None, False, "number", False),
-        ("money_spent_animals_pct", 34, "Money spent (Animals)", "Animals spending as a percentage of total money spent", False, "percent", False),
-        ("money_spent_build_pct", 35, "Money spent (Build)", "Build spending as a percentage of total money spent", False, "percent", False),
-        ("money_spent_donations_pct", 36, "Money spent (Donations)", "Donations spending as a percentage of total money spent", False, "percent", False),
-        ("money_spent_range_pct", 37, "Money spent (Range)", "Range spending as a percentage of total money spent", False, "percent", False),
+        ("reputation_actions", 29, "Reputation actions", None, False, "number", False),
+        ("x_tokens_gained", 30, "X-token gained", None, False, "number", False),
+        ("x_tokens_spent", 31, "X-token spent", None, False, "number", False),
+        ("x_backs", 32, "X-backs", None, False, "number", False),
+        ("money_gained", 33, "Money gained", None, False, "number", False),
+        ("money_gained_income", 34, "Money gained (income)", None, False, "number", False),
+        ("money_spent_animals_pct", 35, "Money spent (Animals)", "Animals spending as a percentage of total money spent", False, "percent", False),
+        ("money_spent_build_pct", 36, "Money spent (Build)", "Build spending as a percentage of total money spent", False, "percent", False),
+        ("money_spent_donations_pct", 37, "Money spent (Donations)", "Donations spending as a percentage of total money spent", False, "percent", False),
+        ("money_spent_range_pct", 38, "Money spent (Range)", "Range spending as a percentage of total money spent", False, "percent", False),
         ("cards_drawn_deck", 39, "Cards drawn (deck)", None, False, "number", False),
         ("cards_drawn_range", 40, "Cards drawn (Range)", None, False, "number", False),
         ("cards_snapped", 41, "Cards snapped", None, False, "number", False),
@@ -5972,6 +6441,7 @@ def _build_maps_metrics_query(where_sql):
         AVG(SAFE_CAST(Sponsors_actions AS FLOAT64)) AS sponsors_actions,
         AVG(SAFE_CAST(University_association_tasks AS FLOAT64)) AS universities,
         AVG(SAFE_CAST(Partner_zoo_association_tasks AS FLOAT64)) AS partner_zoos,
+        AVG(SAFE_CAST(Reputation_association_tasks AS FLOAT64)) AS reputation_actions,
         AVG(SAFE_CAST(X_Tokens_gained AS FLOAT64)) AS x_tokens_gained,
         AVG(SAFE_CAST(X_Tokens_used AS FLOAT64)) AS x_tokens_spent,
         AVG(SAFE_CAST(X_Tokens_gained_instead_of_action AS FLOAT64)) AS x_backs,
@@ -6141,6 +6611,7 @@ def _players_metric_expressions():
         "sponsors_actions": "SAFE_CAST(Sponsors_actions AS FLOAT64)",
         "universities": "SAFE_CAST(University_association_tasks AS FLOAT64)",
         "partner_zoos": "SAFE_CAST(Partner_zoo_association_tasks AS FLOAT64)",
+        "reputation_actions": "SAFE_CAST(Reputation_association_tasks AS FLOAT64)",
         "x_tokens_gained": "SAFE_CAST(X_Tokens_gained AS FLOAT64)",
         "x_tokens_spent": "SAFE_CAST(X_Tokens_used AS FLOAT64)",
         "x_backs": "SAFE_CAST(X_Tokens_gained_instead_of_action AS FLOAT64)",
@@ -6199,7 +6670,7 @@ def _players_history_groups():
                 "cards_actions", "sponsors_actions",
             ],
         ),
-        ("association_bonuses", ["universities", "partner_zoos"]),
+        ("association_bonuses", ["universities", "partner_zoos", "reputation_actions"]),
         ("x_tokens", ["x_tokens_gained", "x_tokens_spent"]),
         ("small_buildings", ["kiosks", "pavilions"]),
         (
@@ -6224,8 +6695,18 @@ def _players_history_groups():
 
 
 def _players_history_metric_catalog():
+    """Return table metrics plus the graph-only, dataset-neutral Elo series."""
     groups = _players_history_groups()
-    return {
+    catalog = {
+        "elo": {
+            "key": "elo",
+            "sort_order": 0,
+            "label": "Elo",
+            "format": "number",
+            "group": "elo",
+        },
+    }
+    catalog.update({
         key: {
             "key": key,
             "sort_order": int(sort_order),
@@ -6235,10 +6716,13 @@ def _players_history_metric_catalog():
         }
         for key, sort_order, label, _tooltip, _is_default, value_format,
         _lower_is_better in _players_metric_definitions()
-    }
+    })
+    return catalog
 
 
 def _players_history_value_sql(metric_key, alias="f"):
+    if metric_key == "elo":
+        return f"SAFE_CAST({alias}.post_match_elo AS FLOAT64)"
     money_fields = _players_money_fields()
     if metric_key not in money_fields:
         return f"{alias}.{metric_key}"
@@ -6266,21 +6750,22 @@ def _players_history_cache_blob_name(
     tournament_only,
     starting_positions,
 ):
+    elo_only = len(metric_keys) == 1 and metric_keys[0] == "elo"
     scope = {
-        "schema": 3,
+        "schema": 4,
         "data_version": data_version,
-        "is_mw": int(is_mw),
+        "dataset_scope": "combined" if elo_only else int(is_mw),
         "identities": sorted(identities),
         "metrics": sorted(metric_keys),
-        "maps": sorted(selected_maps),
-        "opponent_elo_min": opponent_elo_min,
-        "opponent_elo_max": opponent_elo_max,
-        "date_from": date_from.isoformat() if date_from else None,
-        "date_to": date_to.isoformat() if date_to else None,
-        "last_x_games": last_x_games,
-        "arena_seasons": sorted(arena_seasons or []),
-        "tournament_only": bool(tournament_only),
-        "starting_positions": sorted(starting_positions or []),
+        "maps": [] if elo_only else sorted(selected_maps),
+        "opponent_elo_min": None if elo_only else opponent_elo_min,
+        "opponent_elo_max": None if elo_only else opponent_elo_max,
+        "date_from": None if elo_only else (date_from.isoformat() if date_from else None),
+        "date_to": None if elo_only else (date_to.isoformat() if date_to else None),
+        "last_x_games": 0 if elo_only else last_x_games,
+        "arena_seasons": [] if elo_only else sorted(arena_seasons or []),
+        "tournament_only": False if elo_only else bool(tournament_only),
+        "starting_positions": [] if elo_only else sorted(starting_positions or []),
     }
     digest = hashlib.sha256(
         json.dumps(scope, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -6323,12 +6808,13 @@ def _query_players_history(
         ["r.game_number", "r.game_ended_at"]
         + [f"r.{key}" for key in metric_keys]
     )
+    # Elo is intentionally exceptional: it is a standalone graph metric over
+    # all player-game rows in both datasets and all completion states. Every
+    # other history metric keeps the normal Players dataset/completion scope.
+    elo_only = len(metric_keys) == 1 and metric_keys[0] == "elo"
     where = [
         "f.identity_bucket IN UNNEST(@identity_buckets)",
         "f.player_identity IN UNNEST(@identities)",
-        "CAST(f.is_mw AS INT64) = @is_mw",
-        "f.Map IN UNNEST(@selected_maps)",
-        _completed_game_sql("f"),
     ]
     parameters = [
         bigquery.ArrayQueryParameter("identity_buckets", "INT64", [
@@ -6336,34 +6822,44 @@ def _query_players_history(
             for identity in identities
         ]),
         bigquery.ArrayQueryParameter("identities", "STRING", identities),
-        bigquery.ScalarQueryParameter("is_mw", "INT64", int(is_mw)),
-        bigquery.ArrayQueryParameter("selected_maps", "STRING", selected_maps),
-        bigquery.ScalarQueryParameter("last_x_games", "INT64", int(last_x_games or 0)),
+        bigquery.ScalarQueryParameter(
+            "last_x_games", "INT64", 0 if elo_only else int(last_x_games or 0)
+        ),
     ]
-    if opponent_elo_min is not None:
+    if not elo_only:
+        where.extend([
+            "CAST(f.is_mw AS INT64) = @is_mw",
+            "f.Map IN UNNEST(@selected_maps)",
+            _completed_game_sql("f"),
+        ])
+        parameters.extend([
+            bigquery.ScalarQueryParameter("is_mw", "INT64", int(is_mw)),
+            bigquery.ArrayQueryParameter("selected_maps", "STRING", selected_maps),
+        ])
+    if not elo_only and opponent_elo_min is not None:
         where.append("COALESCE(f.opponent_pre_match_elo, 0) >= @opponent_elo_min")
         parameters.append(bigquery.ScalarQueryParameter(
             "opponent_elo_min", "INT64", opponent_elo_min
         ))
-    if opponent_elo_max is not None:
+    if not elo_only and opponent_elo_max is not None:
         where.append("COALESCE(f.opponent_pre_match_elo, 0) <= @opponent_elo_max")
         parameters.append(bigquery.ScalarQueryParameter(
             "opponent_elo_max", "INT64", opponent_elo_max
         ))
-    if date_from:
+    if not elo_only and date_from:
         where.append("f.game_date >= @date_from")
         parameters.append(bigquery.ScalarQueryParameter("date_from", "DATE", date_from))
-    if date_to:
+    if not elo_only and date_to:
         where.append("f.game_date <= @date_to")
         parameters.append(bigquery.ScalarQueryParameter("date_to", "DATE", date_to))
-    if arena_seasons:
+    if not elo_only and arena_seasons:
         where.append("f.arena_season IN UNNEST(@arena_seasons)")
         parameters.append(bigquery.ArrayQueryParameter(
             "arena_seasons", "STRING", arena_seasons
         ))
-    if tournament_only:
+    if not elo_only and tournament_only:
         where.append("COALESCE(f.is_tournament, FALSE)")
-    if starting_positions:
+    if not elo_only and starting_positions:
         where.append("f.starting_position IN UNNEST(@starting_positions)")
         parameters.append(bigquery.ArrayQueryParameter(
             "starting_positions", "STRING", starting_positions
@@ -6434,7 +6930,7 @@ def _query_players_history(
     ORDER BY c.player_identity
     """
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(
         query,
         job_config=bigquery.QueryJobConfig(
@@ -6442,6 +6938,8 @@ def _query_players_history(
             use_query_cache=True,
         ),
         location=BIGQUERY_LOCATION,
+        ark_workload="public_history",
+        ark_component="players",
     )
     results = job.result()
     players = []
@@ -6525,6 +7023,7 @@ def _load_players_history(
         core = cached
         timing = {"cache_lookup_ms": 0}
     else:
+        _require_public_bigquery_query()
         core = _query_players_history(
             is_mw,
             sorted(set(identities)),
@@ -7899,8 +8398,6 @@ PREDICTOR_SPECIFIC_CONDITIONS = [
     ("Round 1: Project", "round_1_project", False),
     ("Round 1: Release", "round_1_release", False),
     ("Round 1: 2+ association actions", "round_1_two_association", False),
-    ("Round 1: Humphead Wrasse", "round_1_humphead", True),
-    ("Round 1/2: New Zealand Fur Seal", "round_1_2_fur_seal", False),
     ("First to 5 CP", "first_to_5", False),
     ("First to 5 CP (with exactly one university/partner zoo bonus)", "first_to_5_bonus", False),
     ("First to 8 CP", "first_to_8", False),
@@ -8061,16 +8558,6 @@ def _build_predictors_specific_query(where_sql, observations_only=False):
         ) AS round_1_project,
         (SELECT COUNT(*) FROM UNNEST(IFNULL(s.association_action_history, [])) AS action
           WHERE SAFE_CAST(action.round AS INT64) = 1) >= 2 AS round_1_two_association,
-        EXISTS(
-          SELECT 1 FROM UNNEST(IFNULL(s.played_animals, [])) AS animal
-          WHERE LOWER(TRIM(animal.animal)) = 'humphead wrasse'
-            AND SAFE_CAST(animal.round AS INT64) = 1
-        ) AS round_1_humphead,
-        EXISTS(
-          SELECT 1 FROM UNNEST(IFNULL(s.played_animals, [])) AS animal
-          WHERE LOWER(TRIM(animal.animal)) = 'new zealand fur seal'
-            AND SAFE_CAST(animal.round AS INT64) IN (1, 2)
-        ) AS round_1_2_fur_seal,
         (SELECT MIN(SAFE_CAST(history.move AS INT64))
           FROM UNNEST(IFNULL(s.cp_history, [])) AS history
           WHERE SAFE_CAST(history.cp AS INT64) >= 5) AS first_5_move,
@@ -8121,8 +8608,6 @@ def _build_predictors_specific_query(where_sql, observations_only=False):
           WHEN 'round_1_project' THEN me.round_1_project
           WHEN 'round_1_release' THEN me.has_round_1_release
           WHEN 'round_1_two_association' THEN me.round_1_two_association
-          WHEN 'round_1_humphead' THEN me.round_1_humphead
-          WHEN 'round_1_2_fur_seal' THEN me.round_1_2_fur_seal
           WHEN 'first_to_5' THEN {first_to_5}
           WHEN 'first_to_5_bonus' THEN ({first_to_5})
             AND LOWER(TRIM(COALESCE(me.chosen_5cp_bonus, ''))) IN ('1 university', '1 partner-zoo')
@@ -9351,13 +9836,13 @@ def _build_sponsor_endgames_query(where_sql, sponsor_endgames_view):
     """
 
 
-def _synergy_ci_row_key(stats_page, view, row):
-    """Return a stable, non-public key for one requested Synergy row."""
+def _component_ci_row_key(stats_page, view, row):
+    """Return a stable key for one requested standalone component row."""
     if stats_page == STATS_PAGE_MW_ACTION_CARDS:
         card_1 = str(row.get("card_1_key") or "").strip()
         card_2 = str(row.get("card_2_key") or "").strip()
         if not card_1 or not card_2:
-            raise ValueError("MW Synergy CI rows require card_1_key and card_2_key")
+            raise ValueError("MW component CI rows require card_1_key and card_2_key")
         values = [card_1, card_2]
     elif view == COMBINATIONS_VIEW_CARD_CARD:
         card_1 = str(row.get("card_1") or "").strip()
@@ -9392,22 +9877,22 @@ def _synergy_ci_row_key(stats_page, view, row):
             )
         values = [card, action_card]
     else:
-        raise ValueError("Synergy confidence intervals are unavailable for this view")
+        raise ValueError("Standalone component confidence intervals are unavailable for this view")
     return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
 
 
-def _parse_synergy_ci_rows(raw_rows, stats_page, view, limit=100):
+def _parse_component_ci_rows(raw_rows, stats_page, view, limit=100):
     if not isinstance(raw_rows, list):
-        raise ValueError("synergy_ci_rows must be an array")
+        raise ValueError("component_ci_rows must be an array")
     if len(raw_rows) > limit:
-        raise ValueError(f"synergy_ci_rows may contain at most {limit} rows")
+        raise ValueError(f"component_ci_rows may contain at most {limit} rows")
     parsed = []
     seen = set()
     for raw in raw_rows:
         if not isinstance(raw, dict):
-            raise ValueError("Each synergy_ci_rows item must be an object")
+            raise ValueError("Each component_ci_rows item must be an object")
         item = dict(raw)
-        item["row_key"] = _synergy_ci_row_key(stats_page, view, item)
+        item["row_key"] = _component_ci_row_key(stats_page, view, item)
         if item["row_key"] in seen:
             continue
         seen.add(item["row_key"])
@@ -9462,18 +9947,19 @@ def _component_ci_projection(component_aliases):
     return ",\n      ".join(fields)
 
 
-def _build_synergy_ci_query(
+def _build_component_ci_query(
     where_sql,
     stats_page,
     view,
     selected_rounds=None,
     requested_rows=None,
 ):
-    """Build a table-clustered sandwich CI query for visible Synergy rows.
+    """Build a table-clustered ordinary-mean CI query for visible components.
 
-    Fast aggregate tables continue to provide the table values. This separate
-    query reads only the requested row keys from table-level prepared sources,
-    retaining covariance between the Actual and baseline component means.
+    Fast aggregate tables continue to provide point estimates. This separate
+    query reads only the requested row keys from table-level prepared sources
+    and returns standalone component-mean intervals. Additive Synergy
+    intervals are intentionally not calculated.
     """
     selected_rounds = selected_rounds or []
     requested_rows = requested_rows or []
@@ -9504,7 +9990,7 @@ def _build_synergy_ci_query(
     elif view == COMBINATIONS_VIEW_CARD_ENDGAME:
         component_aliases = [('card', 'component_1'), ('endgame', 'component_2')]
     else:
-        raise ValueError("Synergy confidence intervals are unavailable for this view")
+        raise ValueError("Standalone component confidence intervals are unavailable for this view")
 
     # Source pruning is expressed against the parameterized request CTE rather
     # than interpolated string literals. Besides keeping the scans compact,
@@ -9555,7 +10041,7 @@ def _build_synergy_ci_query(
         JSON_VALUE(item, '$.round_name') AS round_name,
         JSON_VALUE(item, '$.endgame_name') AS endgame_name
         ,JSON_VALUE(item, '$.action_card_key') AS action_card_key
-      FROM UNNEST(JSON_QUERY_ARRAY(@synergy_ci_rows_json)) AS item
+      FROM UNNEST(JSON_QUERY_ARRAY(@component_ci_rows_json)) AS item
     )
     """
 
@@ -9746,7 +10232,7 @@ def _build_synergy_ci_query(
             """
             expected_components = 3
         else:
-            raise ValueError("Synergy confidence intervals are unavailable for this view")
+            raise ValueError("Standalone component confidence intervals are unavailable for this view")
 
     return f"""
     WITH
@@ -9769,34 +10255,6 @@ def _build_synergy_ci_query(
       FROM cluster_components
       GROUP BY row_key, component
     ),
-    valid_rows AS (
-      SELECT row_key,
-             SUM(coefficient * component_mean) AS interaction,
-             COUNT(*) AS component_count
-      FROM component_means
-      GROUP BY row_key
-      HAVING component_count = {expected_components}
-    ),
-    cluster_influences AS (
-      SELECT c.row_key, c.table_id,
-             SUM(
-               m.coefficient * (c.value_sum - c.n * m.component_mean) / m.total_n
-             ) AS influence
-      FROM cluster_components c
-      JOIN component_means m USING(row_key, component)
-      JOIN valid_rows v USING(row_key)
-      GROUP BY c.row_key, c.table_id
-    ),
-    variance AS (
-      SELECT row_key, COUNT(*) AS cluster_n,
-             IF(
-               COUNT(*) >= 2,
-               SQRT(COUNT(*) / (COUNT(*) - 1) * SUM(POW(influence, 2))),
-               CAST(NULL AS FLOAT64)
-             ) AS standard_error
-      FROM cluster_influences
-      GROUP BY row_key
-    ),
     component_stats AS (
       SELECT m.row_key, m.component, m.total_n, m.component_mean,
              COUNT(c.table_id) AS cluster_n,
@@ -9814,26 +10272,15 @@ def _build_synergy_ci_query(
     )
     SELECT
       r.row_key,
-      v.interaction,
-      variance.standard_error AS interaction_ci95_se,
-      IF(variance.cluster_n >= 2,
-         v.interaction - 1.96 * variance.standard_error, NULL) AS interaction_ci95_low,
-      IF(variance.cluster_n >= 2,
-         v.interaction + 1.96 * variance.standard_error, NULL) AS interaction_ci95_high,
-      COALESCE(variance.cluster_n, 0) AS interaction_ci95_cluster_n,
-      'table_cluster_delta' AS interaction_ci95_method,
       {_component_ci_projection(component_aliases)}
     FROM request_rows r
-    LEFT JOIN valid_rows v USING(row_key)
-    LEFT JOIN variance USING(row_key)
     LEFT JOIN component_stats cs USING(row_key)
-    GROUP BY r.row_key, v.interaction, variance.standard_error,
-             variance.cluster_n
+    GROUP BY r.row_key
     ORDER BY r.row_key
     """
 
 
-def _synergy_ci_cache_blob_name(
+def _component_ci_cache_blob_name(
     data_version,
     stats_page,
     view,
@@ -9853,7 +10300,7 @@ def _synergy_ci_cache_blob_name(
     rows,
 ):
     scope = {
-        "schema": 3,
+        "schema": 4,
         "data_version": data_version,
         "stats_page": stats_page,
         "view": view,
@@ -9875,10 +10322,10 @@ def _synergy_ci_cache_blob_name(
     digest = hashlib.sha256(
         json.dumps(scope, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:40]
-    return f"{CACHE_PREFIX}/filters/synergy-ci/{digest}.json"
+    return f"{CACHE_PREFIX}/filters/component-ci/{digest}.json"
 
 
-def _load_synergy_ci(
+def _load_component_ci(
     data_version,
     stats_page,
     view,
@@ -9900,13 +10347,13 @@ def _load_synergy_ci(
     persist_synchronously=False,
     row_limit=100,
 ):
-    parsed_rows = _parse_synergy_ci_rows(rows, stats_page, view, limit=row_limit)
+    parsed_rows = _parse_component_ci_rows(rows, stats_page, view, limit=row_limit)
     if not parsed_rows:
         return {
             "status": "ok", "data_version": data_version,
-            "data": [], "source": "synergy_ci_empty",
+            "data": [], "source": "component_ci_empty",
         }
-    blob_name = _synergy_ci_cache_blob_name(
+    blob_name = _component_ci_cache_blob_name(
         data_version, stats_page, view, is_mw, selected_maps, selected_rounds,
         player_elo_min, player_elo_max, opponent_elo_min, opponent_elo_max,
         date_from, date_to, completed_only, arena_only, tournament_only,
@@ -9914,9 +10361,10 @@ def _load_synergy_ci(
         parsed_rows,
     )
     if not force_refresh:
-        cached = _read_cache_blob(blob_name, "synergy_ci_hit")
+        cached = _read_cache_blob(blob_name, "component_ci_hit")
         if cached is not None:
             return cached
+        _require_public_bigquery_query()
 
     where_sql, parameters = _build_where_sql(
         is_mw, selected_maps, player_elo_min, player_elo_max,
@@ -9924,15 +10372,15 @@ def _load_synergy_ci(
         completed_only, arena_only=arena_only, tournament_only=tournament_only,
         starting_positions=starting_positions,
     )
-    query = _build_synergy_ci_query(
+    query = _build_component_ci_query(
         where_sql, stats_page, view, selected_rounds=selected_rounds,
         requested_rows=parsed_rows,
     )
     parameters.append(bigquery.ScalarQueryParameter(
-        "synergy_ci_rows_json", "STRING",
+        "component_ci_rows_json", "STRING",
         json.dumps(parsed_rows, ensure_ascii=False, separators=(",", ":")),
     ))
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     started_at = time.perf_counter()
     job = client.query(
         query,
@@ -9941,12 +10389,14 @@ def _load_synergy_ci(
             use_query_cache=not force_refresh,
         ),
         location=BIGQUERY_LOCATION,
+        ark_workload="maintenance_ci" if force_refresh else "public_ci",
+        ark_component=view,
     )
     result = []
     for row in job.result():
         item = dict(row.items())
         for field, value in list(item.items()):
-            if field == "interaction" or field.endswith("_ci95_low") or field.endswith("_ci95_high") or field.endswith("_ci95_se"):
+            if field.endswith("_ci95_low") or field.endswith("_ci95_high") or field.endswith("_ci95_se"):
                 item[field] = float(value) if value is not None else None
             elif field.endswith("_ci95_n") or field.endswith("_ci95_cluster_n"):
                 item[field] = int(value or 0)
@@ -9958,7 +10408,7 @@ def _load_synergy_ci(
         "combinations_view": view if stats_page == STATS_PAGE_COMBINATIONS else None,
         "mw_action_cards_view": view if stats_page == STATS_PAGE_MW_ACTION_CARDS else None,
         "data": result,
-        "source": "synergy_ci_query",
+        "source": "component_ci_query",
         "total_ms": _ms_since(started_at),
         "job_id": job.job_id,
     }
@@ -9969,12 +10419,12 @@ def _load_synergy_ci(
     _memory_cache_put(blob_name, payload)
     if force_refresh or persist_synchronously:
         if not _write_cache_blob(
-            blob_name, payload, "synergy_ci_refreshed", compresslevel=1
+            blob_name, payload, "component_ci_refreshed", compresslevel=1
         ):
-            logging.warning("Could not persist Synergy CI cache %s", blob_name)
+            logging.warning("Could not persist component CI cache %s", blob_name)
     else:
         _enqueue_cache_blob_write(
-            blob_name, payload, "synergy_ci_refreshed", compresslevel=1
+            blob_name, payload, "component_ci_refreshed", compresslevel=1
         )
     return payload
 
@@ -10893,6 +11343,7 @@ def _query_card_stats(
     combination_scope_compact=False,
     use_query_cache=True,
     query_priority=bigquery.QueryPriority.INTERACTIVE,
+    query_workload=None,
 ):
     if stats_page == STATS_PAGE_MW_ACTION_CARDS:
         if int(is_mw) != 1:
@@ -11326,7 +11777,7 @@ def _query_card_stats(
         query = _build_card_stats_query(where_sql, round_filter_active, selected_rounds)
 
     client_started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     client_ms = _ms_since(client_started_at)
     job_config = bigquery.QueryJobConfig(
         query_parameters=query_parameters,
@@ -11334,7 +11785,17 @@ def _query_card_stats(
         priority=query_priority,
     )
     submit_started_at = time.perf_counter()
-    job = client.query(query, job_config=job_config, location=BIGQUERY_LOCATION)
+    job = client.query(
+        query,
+        job_config=job_config,
+        location=BIGQUERY_LOCATION,
+        ark_workload=query_workload or (
+            "maintenance_snapshot"
+            if query_priority == bigquery.QueryPriority.BATCH
+            else "public_filter"
+        ),
+        ark_component=stats_page,
+    )
     submit_ms = _ms_since(submit_started_at)
     wait_started_at = time.perf_counter()
     results = job.result()
@@ -12246,7 +12707,7 @@ def _players_component_cache_blob_name(
         "arena_seasons": sorted(arena_seasons or []) if arena_only else [],
         "tournament_only": bool(tournament_only),
         "starting_positions": sorted(starting_positions or []),
-        "rollup_schema": 7,
+        "rollup_schema": 8,
     }
     digest = hashlib.sha256(
         json.dumps(cache_key, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -12308,7 +12769,7 @@ def _query_default_player_component(is_mw, player_identity):
     """Read one merged identity's unfiltered aggregate instead of scanning games."""
     started_at = time.perf_counter()
     client_started = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     client_ms = _ms_since(client_started)
     job = client.query(
         f"SELECT * FROM `{PREPARED_PLAYERS_DEFAULT_TABLE}` "
@@ -12320,6 +12781,8 @@ def _query_default_player_component(is_mw, player_identity):
             ),
         ]),
         location=BIGQUERY_LOCATION,
+        ark_workload="public_filter",
+        ark_component="players-default",
     )
     result = list(job.result())
     aggregate = result[0] if result else None
@@ -12364,7 +12827,7 @@ def _query_default_player_component(is_mw, player_identity):
 def _query_default_players_comparison(is_mw, players, player_identities):
     """Read up to five unfiltered merged identities in one small lookup."""
     started_at = time.perf_counter()
-    client = bigquery.Client(project=BIGQUERY_JOB_PROJECT)
+    client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
     job = client.query(
         f"SELECT * FROM `{PREPARED_PLAYERS_DEFAULT_TABLE}` "
         "WHERE is_mw = @is_mw "
@@ -12376,6 +12839,8 @@ def _query_default_players_comparison(is_mw, players, player_identities):
             ),
         ]),
         location=BIGQUERY_LOCATION,
+        ark_workload="public_filter",
+        ark_component="players-comparison",
     )
     aggregates = {row.player_identity: row for row in job.result()}
     money_fields = _players_money_fields()
@@ -13001,7 +13466,7 @@ def _combination_ranges(rows, combinations_view):
     return result
 
 
-def _synergy_ci_request_row(stats_page, view, row):
+def _component_ci_request_row(stats_page, view, row):
     if stats_page == STATS_PAGE_MW_ACTION_CARDS:
         return {
             "card_1_key": row.get("card_1_key"),
@@ -13023,10 +13488,10 @@ def _synergy_ci_request_row(stats_page, view, row):
             "card_name": row.get("card_name"),
             "action_card_key": row.get("action_card_key"),
         }
-    raise ValueError("Unsupported Synergy snapshot view")
+    raise ValueError("Unsupported component-CI snapshot view")
 
 
-def _attach_snapshot_synergy_cis(
+def _attach_snapshot_component_cis(
     rows,
     data_version,
     stats_page,
@@ -13043,10 +13508,10 @@ def _attach_snapshot_synergy_cis(
     completed_only,
     new_batch_budget=6,
 ):
-    """Attach complete default-scope Synergy CIs before atomic publication."""
+    """Attach standalone component CIs before atomic publication."""
     if not rows:
         return rows
-    requests = [_synergy_ci_request_row(stats_page, view, row) for row in rows]
+    requests = [_component_ci_request_row(stats_page, view, row) for row in rows]
     # Snapshot populations can contain many thousands of combinations. Keep
     # the existing views at the same proven size as a visible-page request:
     # large Card + Card batches have an expensive join fan-out and can prevent
@@ -13060,9 +13525,8 @@ def _attach_snapshot_synergy_cis(
         if stats_page == "combinations" and view == COMBINATIONS_VIEW_CARD_ACTION_CARD
         else 100
     )
-    new_batches = 0
     for offset in range(0, len(requests), snapshot_batch_size):
-        payload = _load_synergy_ci(
+        payload = _load_component_ci(
             data_version,
             stats_page,
             view,
@@ -13085,17 +13549,10 @@ def _attach_snapshot_synergy_cis(
             persist_synchronously=True,
             row_limit=snapshot_batch_size,
         )
-        if not payload.get("cache_status"):
-            new_batches += 1
         for item in payload.get("data") or []:
             ci_by_key[item.get("row_key")] = item
-        if (
-            new_batches >= new_batch_budget
-            and offset + snapshot_batch_size < len(requests)
-        ):
-            return None
     for row, request_row in zip(rows, requests):
-        key = _synergy_ci_row_key(stats_page, view, request_row)
+        key = _component_ci_row_key(stats_page, view, request_row)
         ci = ci_by_key.get(key) or {}
         for field, value in ci.items():
             if field == "row_key" or "_ci95_" not in field:
@@ -13122,7 +13579,7 @@ def _refresh_default_snapshot_from_prepared(
     mw_action_cards_view=MW_ACTION_CARDS_VIEW_GENERAL,
     completed_only_override=None,
     cache_blob_override=None,
-    include_synergy_cis=True,
+    include_component_cis=True,
     data_version_override=None,
 ):
     started_at = time.perf_counter()
@@ -13170,6 +13627,10 @@ def _refresh_default_snapshot_from_prepared(
         "players_players": [],
         "last_x_games": None,
         "use_query_cache": False,
+        # Snapshot publication is authenticated maintenance even when its query
+        # priority remains interactive. Keep workload classification independent
+        # from scheduling priority so it receives the maintenance byte ceiling.
+        "query_workload": "maintenance_snapshot",
     }
     expanded_rows = None
     if stats_page == STATS_PAGE_BUILD and build_view == BUILD_VIEW_HEXES:
@@ -13182,50 +13643,29 @@ def _refresh_default_snapshot_from_prepared(
     if stats_page == STATS_PAGE_COMBINATIONS:
         combination_ranges = _combination_ranges(rows, combinations_view)
         rows = [row for row in rows if int(row.get("n_played") or 0) >= COMBINATION_DEFAULT_MIN_PLAYS]
-    is_synergy_snapshot = (
+    # The main refresh passes the version it just created explicitly. Reading
+    # the mutable marker again here made one publication vulnerable to a
+    # concurrent maintenance request observing or republishing a different
+    # version between individual snapshot writes.
+    data_version = data_version_override or _read_data_version()
+    is_component_ci_snapshot = (
         stats_page == STATS_PAGE_COMBINATIONS
         or (
             stats_page == STATS_PAGE_MW_ACTION_CARDS
             and mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES
         )
     )
-    # The main refresh passes the version it just created explicitly. Reading
-    # the mutable marker again here made one publication vulnerable to a
-    # concurrent maintenance request observing or republishing a different
-    # version between individual snapshot writes.
-    data_version = data_version_override or _read_data_version()
-    if is_synergy_snapshot and include_synergy_cis:
+    if is_component_ci_snapshot and include_component_cis:
         ci_view = (
             combinations_view
             if stats_page == STATS_PAGE_COMBINATIONS
             else mw_action_cards_view
         )
-        rows = _attach_snapshot_synergy_cis(
-            rows,
-            data_version,
-            stats_page,
-            ci_view,
-            int(is_mw),
-            list(query_args[1]),
-            [],
-            query_args[6],
-            query_args[7],
-            query_args[8],
-            query_args[9],
-            query_args[10],
-            query_args[11],
-            query_args[12],
+        rows = _attach_snapshot_component_cis(
+            rows, data_version, stats_page, ci_view, int(is_mw),
+            list(query_args[1]), [], query_args[6], query_args[7], query_args[8],
+            query_args[9], query_args[10], query_args[11], query_args[12],
         )
-        if rows is None:
-            _active_refresh_snapshot_completed()
-            return {
-                "status": "staged",
-                "is_mw": int(is_mw),
-                "stats_page": stats_page,
-                "view": ci_view,
-                "cache_status": "ci_batches_checkpointed",
-                "total_ms": _ms_since(started_at),
-            }
     payload = {
         "status": "ok",
         "data_version": data_version,
@@ -13301,16 +13741,6 @@ def _refresh_default_snapshot_from_prepared(
     if combination_ranges is not None:
         payload["combination_snapshot_min_plays"] = COMBINATION_DEFAULT_MIN_PLAYS
         payload["combination_ranges"] = combination_ranges
-    if is_synergy_snapshot:
-        # Point estimates are part of the critical daily publication. Clustered
-        # intervals are a same-version enrichment and must never hold those
-        # point estimates back or be copied from an older publication.
-        ci_complete = bool(include_synergy_cis)
-        payload["synergy_ci_status"] = "complete" if ci_complete else "pending"
-        payload["synergy_ci_data_version"] = data_version if ci_complete else None
-        # Retained temporarily for older clients while the explicit status
-        # fields become the canonical contract.
-        payload["synergy_ci_complete"] = ci_complete
     if expanded_rows is not None:
         payload["expanded_data"] = expanded_rows
     cache_write_ok = (
@@ -13354,271 +13784,7 @@ def _refresh_default_snapshot_from_prepared(
     }
 
 
-def _refresh_synergy_ci_snapshots():
-    """Enrich current point snapshots with same-version clustered intervals.
-
-    Each view is promoted independently as soon as its current-version CI work
-    completes. The main daily publication never waits for this maintenance job.
-    """
-    if not CACHE_BUCKET:
-        raise RuntimeError("CACHE_BUCKET is required for Synergy CI publication")
-    started_at = time.perf_counter()
-    active_refresh = _read_refresh_lock()
-    if active_refresh:
-        # The main refresh publishes current point estimates first. CI staging
-        # must not inspect or promote the newly written data-version marker
-        # while that atomic point-estimate pack is still being assembled.
-        return {
-            "status": "running",
-            "message": "Main refresh is still publishing point estimates",
-            "retryable": True,
-            "total_ms": _ms_since(started_at),
-        }
-    data_version = _read_data_version()
-    # Stable per-version staging lets scheduler retries reuse completed
-    # snapshots and per-batch inference caches after a request deadline.
-    stage_id = hashlib.sha256(
-        f"{data_version}:synergy-ci-schema-5".encode("utf-8")
-    ).hexdigest()[:20]
-    completion_marker = (
-        f"{CACHE_PREFIX}/staging/synergy-ci/completed/{stage_id}.json"
-    )
-    completed = _read_cache_blob(completion_marker, "synergy_ci_complete_hit")
-    if isinstance(completed, dict) and completed.get("data_version") == data_version:
-        return {
-            "status": "ok",
-            "data_version": data_version,
-            "snapshots": [],
-            "default_pack": "already_published",
-            "total_ms": _ms_since(started_at),
-        }
-    specs = [
-        {
-            "stats_page": STATS_PAGE_COMBINATIONS,
-            "is_mw": dataset,
-            "view": view,
-            "canonical": _cache_blob_name(
-                dataset, STATS_PAGE_COMBINATIONS, combinations_view=view
-            ),
-        }
-        for dataset in (1, 0)
-        for view in (
-            COMBINATIONS_VIEW_CARD_CARD,
-            COMBINATIONS_VIEW_CARD_MAP,
-            COMBINATIONS_VIEW_CARD_ROUND,
-            COMBINATIONS_VIEW_CARD_ENDGAME,
-        )
-    ]
-    specs.append({
-        "stats_page": STATS_PAGE_COMBINATIONS,
-        "is_mw": 1,
-        "view": COMBINATIONS_VIEW_CARD_ACTION_CARD,
-        "canonical": _cache_blob_name(
-            1, STATS_PAGE_COMBINATIONS,
-            combinations_view=COMBINATIONS_VIEW_CARD_ACTION_CARD,
-        ),
-    })
-    specs.append({
-        "stats_page": STATS_PAGE_MW_ACTION_CARDS,
-        "is_mw": 1,
-        "view": MW_ACTION_CARDS_VIEW_SYNERGIES,
-        "canonical": _cache_blob_name(
-            1, STATS_PAGE_MW_ACTION_CARDS,
-            mw_action_cards_view=MW_ACTION_CARDS_VIEW_SYNERGIES,
-        ),
-    })
-    for spec in specs:
-        suffix = spec["canonical"][len(CACHE_PREFIX):].lstrip("/")
-        spec["stage"] = f"{CACHE_PREFIX}/staging/synergy-ci/{stage_id}/{suffix}"
-        spec["backup"] = f"{CACHE_PREFIX}/staging/synergy-ci/{stage_id}/backup/{suffix}"
-
-    def build(spec):
-        staged = _read_cache_blob(spec["stage"], "synergy_ci_stage_hit")
-        if (
-            isinstance(staged, dict)
-            and staged.get("data_version") == data_version
-            and staged.get("synergy_ci_status") == "complete"
-            and staged.get("synergy_ci_data_version") == data_version
-        ):
-            return {
-                "status": "ok",
-                "is_mw": spec["is_mw"],
-                "stats_page": spec["stats_page"],
-                "view": spec["view"],
-                "rows": len(staged.get("data") or []),
-                "cache_status": "staged_reused",
-            }
-        kwargs = {"cache_blob_override": spec["stage"]}
-        if spec["stats_page"] == STATS_PAGE_COMBINATIONS:
-            kwargs["combinations_view"] = spec["view"]
-        else:
-            kwargs["mw_action_cards_view"] = spec["view"]
-        return _refresh_default_snapshot_from_prepared(
-            spec["is_mw"], spec["stats_page"], **kwargs
-        )
-
-    def stage_is_complete(spec):
-        staged = _read_cache_blob(spec["stage"], "synergy_ci_stage_probe")
-        return (
-            isinstance(staged, dict)
-            and staged.get("data_version") == data_version
-            and staged.get("synergy_ci_status") == "complete"
-            and staged.get("synergy_ci_data_version") == data_version
-        )
-
-    missing = [spec for spec in specs if not stage_is_complete(spec)]
-    heavy = next((
-        spec for spec in missing
-        if spec["stats_page"] == STATS_PAGE_COMBINATIONS
-        and spec["is_mw"] == 1
-        and spec["view"] == COMBINATIONS_VIEW_CARD_CARD
-    ), None)
-    # Finish every smaller snapshot before giving the high-cardinality MW
-    # Card + Card population a request window of its own. Scheduler retries
-    # then resume only that snapshot from its durable 100-row CI batches.
-    build_specs = [spec for spec in missing if spec is not heavy] if len(missing) > 1 else missing
-    # New or low-cardinality products must not wait behind the older, much
-    # larger Combos populations. ThreadPoolExecutor starts queued work in list
-    # order, so keep Card + Action Card first and its related MW summary next.
-    # Every completed 100-row CI batch remains durable across later retries.
-    def stage_priority(spec):
-        if (
-            spec["stats_page"] == STATS_PAGE_COMBINATIONS
-            and spec["view"] == COMBINATIONS_VIEW_CARD_ACTION_CARD
-        ):
-            return 0
-        if spec["stats_page"] == STATS_PAGE_MW_ACTION_CARDS:
-            return 1
-        return 2
-
-    build_specs.sort(key=stage_priority)
-    executor = ThreadPoolExecutor(max_workers=min(4, max(1, len(build_specs))))
-    try:
-        futures = [executor.submit(build, spec) for spec in build_specs]
-        results = [future.result() for future in futures]
-    finally:
-        executor.shutdown(wait=True)
-    if any(item.get("status") not in ("ok", "staged") for item in results):
-        return {
-            "status": "error",
-            "data_version": data_version,
-            "snapshots": results,
-            "message": "At least one staged Synergy CI snapshot failed",
-            "total_ms": _ms_since(started_at),
-        }
-
-    # A CI job may have started just before the main refresh acquired its lock.
-    # Recheck after the potentially long staging work and before touching any
-    # canonical snapshot, so that in-flight work cannot race point publication.
-    if _read_refresh_lock():
-        return {
-            "status": "running",
-            "message": "Main refresh is still publishing point estimates",
-            "retryable": True,
-            "snapshots": results,
-            "total_ms": _ms_since(started_at),
-        }
-
-    bucket = storage.Client().bucket(CACHE_BUCKET)
-    promoted = []
-
-    def canonical_is_complete(spec):
-        payload = _read_cache_blob(spec["canonical"], "synergy_ci_canonical_probe")
-        return (
-            isinstance(payload, dict)
-            and payload.get("data_version") == data_version
-            and payload.get("synergy_ci_status") == "complete"
-            and payload.get("synergy_ci_data_version") == data_version
-        )
-
-    promotable = [
-        spec for spec in specs
-        if stage_is_complete(spec) and not canonical_is_complete(spec)
-    ]
-    try:
-        for spec in promotable:
-            canonical_blob = bucket.blob(spec["canonical"])
-            if not canonical_blob.exists():
-                raise RuntimeError(
-                    f"Cannot back up missing Synergy snapshot {spec['canonical']}"
-                )
-            bucket.copy_blob(canonical_blob, bucket, spec["backup"])
-        for spec in promotable:
-            stage_blob = bucket.blob(spec["stage"])
-            if not stage_blob.exists():
-                raise RuntimeError(
-                    f"Staged Synergy snapshot is missing: {spec['stage']}"
-                )
-            bucket.copy_blob(stage_blob, bucket, spec["canonical"])
-            staged_payload = _read_cache_blob(spec["stage"], "synergy_ci_promoted")
-            if isinstance(staged_payload, dict):
-                _memory_cache_put(spec["canonical"], staged_payload)
-            promoted.append(spec)
-        if promoted and not _write_default_snapshot_pack(data_version):
-            raise RuntimeError("Could not publish the default pack after Synergy CI promotion")
-        remaining = [spec for spec in specs if not canonical_is_complete(spec)]
-        if not remaining and not _write_cache_blob(
-            completion_marker,
-            {
-                "status": "ok",
-                "data_version": data_version,
-                "published_at": datetime.now(timezone.utc).isoformat(),
-            },
-            "synergy_ci_complete",
-        ):
-            # Publication itself is already complete. A missing marker merely
-            # causes a later maintenance call to verify/re-promote the same
-            # staged version instead of treating a healthy release as failed.
-            logging.warning("Could not publish the Synergy CI completion marker")
-    except Exception:
-        logging.exception("Synergy CI promotion failed; restoring previous snapshots")
-        for spec in promoted:
-            backup_blob = bucket.blob(spec["backup"])
-            if backup_blob.exists():
-                bucket.copy_blob(backup_blob, bucket, spec["canonical"])
-                backup_payload = _read_cache_blob(spec["backup"], "synergy_ci_restore")
-                if isinstance(backup_payload, dict):
-                    _memory_cache_put(spec["canonical"], backup_payload)
-        raise
-    else:
-        # A promoted view no longer needs its stage or backup. Incomplete views
-        # retain their durable stage so the next scheduler call resumes them.
-        for spec in promoted:
-            for name in (spec["stage"], spec["backup"]):
-                try:
-                    blob = bucket.blob(name)
-                    if blob.exists():
-                        blob.delete()
-                except Exception:
-                    logging.warning("Could not remove staging object %s", name)
-
-    remaining = [spec for spec in specs if not canonical_is_complete(spec)]
-    return {
-        "status": "staged" if remaining else "ok",
-        "data_version": data_version,
-        "snapshots": results,
-        "promoted": [
-            {
-                "stats_page": spec["stats_page"],
-                "is_mw": spec["is_mw"],
-                "view": spec["view"],
-            }
-            for spec in promoted
-        ],
-        "remaining": [
-            {
-                "stats_page": spec["stats_page"],
-                "is_mw": spec["is_mw"],
-                "view": spec["view"],
-            }
-            for spec in remaining
-        ],
-        "default_pack": "updated" if promoted else "unchanged",
-        "total_ms": _ms_since(started_at),
-    }
-
-
-def _run_daily_refresh(progress=None):
+def _run_daily_refresh(progress=None, force_rebuild=False):
     started_at = time.perf_counter()
     if progress:
         progress.report(1, "Validating source metadata")
@@ -13628,12 +13794,69 @@ def _run_daily_refresh(progress=None):
     # definition during the entire daily publication.
     arena_metadata = _load_arena_metadata(force_refresh=True, publish_manifest=False)
     merge_metadata = _load_merge_players_metadata(force_refresh=True)
+    records_source, records_source_status, records_live_error = (
+        _resolve_records_manual_source()
+    )
+    elo_source, elo_source_status, elo_live_error = (
+        _resolve_records_elo_leaderboard_source()
+    )
+    source_state = _refresh_source_state(
+        card_attributes,
+        arena_metadata,
+        merge_metadata,
+        records_source,
+        elo_source,
+    )
+    skip_decision = None if force_rebuild else _can_skip_daily_refresh(source_state)
+    if skip_decision and skip_decision["mode"] == "unchanged":
+        existing_version = skip_decision["data_version"]
+        if progress:
+            progress.report(99, "No source changes detected")
+        return {
+            "status": "ok",
+            "skipped": True,
+            "reason": "source_unchanged",
+            "data_version": existing_version,
+            "source_fingerprint": source_state["fingerprint"],
+            "total_ms": _ms_since(started_at),
+        }
+    if skip_decision and skip_decision["mode"] == "auxiliary_only":
+        existing_version = skip_decision["data_version"]
+        if progress:
+            progress.report(60, "Publishing updated external snapshots")
+        elo_snapshots = _refresh_records_elo_leaderboard_snapshots(
+            elo_source, elo_source_status, elo_live_error
+        )
+        published = (
+            all(item.get("status") == "ok" for item in elo_snapshots)
+            and _write_default_snapshot_pack(existing_version)
+        )
+        source_state_published = (
+            _write_refresh_source_state(source_state, existing_version)
+            if published
+            else False
+        )
+        return {
+            "status": "ok" if published and source_state_published else "error",
+            "refresh_scope": "external_snapshots_only",
+            "data_version": existing_version,
+            "source_fingerprint": source_state["fingerprint"],
+            "source_state": (
+                "published" if source_state_published else "not_published"
+            ),
+            "elo_leaderboard": elo_snapshots,
+            "default_pack": "ok" if published else "error",
+            "total_ms": _ms_since(started_at),
+        }
     if progress:
         progress.report(4, "Rebuilding prepared data")
     prepared = _refresh_prepared_tables(
         arena_metadata,
         merge_metadata,
         progress_callback=progress.prepared if progress else None,
+        records_source=records_source,
+        records_source_status=records_source_status,
+        records_live_error=records_live_error,
     )
     data_version = _write_data_version(prepared)
     if not data_version:
@@ -13845,7 +14068,9 @@ def _run_daily_refresh(progress=None):
         1, STATS_PAGE_MW_ACTION_CARDS,
         mw_action_cards_view=MW_ACTION_CARDS_VIEW_BY_MAP,
     )
-    elo_leaderboard_snapshots = _refresh_records_elo_leaderboard_snapshots()
+    elo_leaderboard_snapshots = _refresh_records_elo_leaderboard_snapshots(
+        elo_source, elo_source_status, elo_live_error
+    )
     records_snapshots = []
     for records_view in (
         RECORDS_VIEW_FASTEST_GAMES,
@@ -13877,10 +14102,10 @@ def _run_daily_refresh(progress=None):
         scoring_reputation_base = scoring_futures[(0, SCORING_VIEW_REPUTATION)].result()
     finally:
         scoring_executor.shutdown(wait=True)
-    # Synergy point estimates belong to the critical daily publication. Their
-    # covariance-aware CIs are enriched independently afterward, one view at a
-    # time, and only when they match this exact data version.
-    synergy_specs = [
+    # Combination point estimates and their retained standalone component CIs
+    # belong to the critical daily publication. Additive Synergy CIs are not
+    # calculated or staged.
+    combination_specs = [
         (dataset, STATS_PAGE_COMBINATIONS, view)
         for dataset in (1, 0)
         for view in (
@@ -13894,18 +14119,18 @@ def _run_daily_refresh(progress=None):
         (1, STATS_PAGE_MW_ACTION_CARDS, MW_ACTION_CARDS_VIEW_SYNERGIES),
     ]
 
-    def refresh_synergy_points(spec):
+    def refresh_combination_snapshot(spec):
         dataset, stats_page, view = spec
-        kwargs = {"include_synergy_cis": False}
+        kwargs = {"include_component_cis": True}
         if stats_page == STATS_PAGE_COMBINATIONS:
             kwargs["combinations_view"] = view
         else:
             kwargs["mw_action_cards_view"] = view
         return refresh_snapshot(dataset, stats_page, **kwargs)
 
-    with ThreadPoolExecutor(max_workers=4) as synergy_executor:
-        synergy_results = list(synergy_executor.map(refresh_synergy_points, synergy_specs))
-    synergy_by_spec = dict(zip(synergy_specs, synergy_results))
+    with ThreadPoolExecutor(max_workers=4) as combination_executor:
+        combination_results = list(combination_executor.map(refresh_combination_snapshot, combination_specs))
+    combination_by_spec = dict(zip(combination_specs, combination_results))
     (
         combinations_card_card_mw,
         combinations_card_round_mw,
@@ -13918,16 +14143,16 @@ def _run_daily_refresh(progress=None):
         combinations_card_action_card_mw,
         mw_action_cards_synergies,
     ) = (
-        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_CARD)],
-        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ROUND)],
-        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_MAP)],
-        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ENDGAME)],
-        synergy_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_CARD)],
-        synergy_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ROUND)],
-        synergy_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_MAP)],
-        synergy_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ENDGAME)],
-        synergy_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ACTION_CARD)],
-        synergy_by_spec[(1, STATS_PAGE_MW_ACTION_CARDS, MW_ACTION_CARDS_VIEW_SYNERGIES)],
+        combination_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_CARD)],
+        combination_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ROUND)],
+        combination_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_MAP)],
+        combination_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ENDGAME)],
+        combination_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_CARD)],
+        combination_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ROUND)],
+        combination_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_MAP)],
+        combination_by_spec[(0, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ENDGAME)],
+        combination_by_spec[(1, STATS_PAGE_COMBINATIONS, COMBINATIONS_VIEW_CARD_ACTION_CARD)],
+        combination_by_spec[(1, STATS_PAGE_MW_ACTION_CARDS, MW_ACTION_CARDS_VIEW_SYNERGIES)],
     )
     snapshots = [
         home_mw, home_base, mw, base, opening_hand_mw, opening_hand_base, endgames_mw, endgames_base,
@@ -13986,10 +14211,19 @@ def _run_daily_refresh(progress=None):
         and snapshots_ok
         else "error"
     )
+    source_state_published = (
+        _write_refresh_source_state(source_state, data_version)
+        if status == "ok"
+        else False
+    )
+    if status == "ok" and not source_state_published:
+        status = "error"
     return {
         "status": status,
         "total_ms": _ms_since(started_at),
         "data_version": data_version,
+        "source_fingerprint": source_state["fingerprint"],
+        "source_state": "published" if source_state_published else "not_published",
         "card_attributes": {
             "source_sha256": card_attributes.get("source_sha256"),
             "reefer_animals": len(card_attributes.get("reefer_animals", [])),
@@ -14082,7 +14316,7 @@ def _run_daily_refresh(progress=None):
     }
 
 
-def _run_tracked_daily_refresh():
+def _run_tracked_daily_refresh(force_rebuild=False):
     """Run one main refresh with a cross-instance lock and public progress."""
     global _ACTIVE_REFRESH_PROGRESS
     run_id = uuid.uuid4().hex
@@ -14098,9 +14332,12 @@ def _run_tracked_daily_refresh():
     with _REFRESH_PROGRESS_STATE_LOCK:
         _ACTIVE_REFRESH_PROGRESS = progress
     try:
-        payload = _run_daily_refresh(progress)
+        payload = _run_daily_refresh(progress, force_rebuild=force_rebuild)
         if payload.get("status") == "ok":
-            progress.complete(payload.get("data_version"))
+            if payload.get("skipped"):
+                progress.unchanged(payload.get("data_version"))
+            else:
+                progress.complete(payload.get("data_version"))
         else:
             progress.fail()
         return payload
@@ -14196,30 +14433,39 @@ def get_card_stats(request):
         or params.get("refresh_players_prepared") is True
         or params.get("daily_refresh") is True
         or params.get("refresh_default_pack") is True
-        or params.get("refresh_synergy_cis") is True
         or params.get("warm_card_card_defaults") is True
+        or params.get("force_rebuild") is True
     )
 
     if maintenance_requested and not _has_maintenance_auth(request):
         return _maintenance_auth_error(headers)
 
+    partial_refresh_requested = any(
+        params.get(key) is True
+        for key in (
+            "refresh_prepared",
+            "refresh_mw_action_cards_prepared",
+            "refresh_mw_action_cards",
+            "refresh_players_prepared",
+        )
+    )
+    if partial_refresh_requested and not PARTIAL_BIGQUERY_REFRESH_ENABLED:
+        return _json_http_response(
+            {
+                "status": "disabled",
+                "message": (
+                    "Partial prepared-data refreshes are disabled because they "
+                    "cannot publish one coherent dashboard generation"
+                ),
+            },
+            503,
+            headers,
+            request,
+        )
+
     if manual_refresh_requested:
-        try:
-            payload = _run_tracked_daily_refresh()
-            status_code = (
-                200 if payload.get("status") == "ok"
-                else 409 if payload.get("status") == "running"
-                else 500
-            )
-            return _json_http_response(payload, status_code, headers, request)
-        except Exception:
-            logging.exception("Failed to run manual daily refresh")
-            return _json_http_response(
-                {"status": "error", "message": "Refresh failed"},
-                500,
-                headers,
-                request,
-            )
+        payload, status_code = _queue_private_refresh("manual")
+        return _json_http_response(payload, status_code, headers, request)
 
     if params.get("refresh_prepared") is True:
         try:
@@ -14313,31 +14559,21 @@ def get_card_stats(request):
                 {"status": "error", "message": str(exc)}, 500, headers, request
             )
 
-    if params.get("refresh_synergy_cis") is True:
-        try:
-            payload = _refresh_synergy_ci_snapshots()
-            status_code = 200 if payload.get("status") in ("ok", "staged") else 500
-            return _json_http_response(payload, status_code, headers, request)
-        except Exception as exc:
-            logging.exception("Failed to refresh staged Synergy CI snapshots")
-            return _json_http_response(
-                {"status": "error", "message": str(exc)}, 500, headers, request
-            )
-
     if params.get("daily_refresh") is True:
-        try:
-            payload = _run_tracked_daily_refresh()
-            status_code = (
-                200 if payload.get("status") == "ok"
-                else 409 if payload.get("status") == "running"
-                else 500
-            )
-            return _json_http_response(payload, status_code, headers, request)
-        except Exception as exc:
-            logging.exception("Failed to run daily refresh")
-            return _json_http_response({"status": "error", "message": str(exc)}, 500, headers, request)
+        payload, status_code = _queue_private_refresh("scheduled")
+        return _json_http_response(payload, status_code, headers, request)
 
     if params.get("warm_card_card_defaults") is True:
+        if not CARD_CARD_WARMING_ENABLED:
+            return _json_http_response(
+                {
+                    "status": "disabled",
+                    "message": "Card + Card warming is disabled by the cost-containment policy",
+                },
+                503,
+                headers,
+                request,
+            )
         try:
             payload = _warm_card_card_default_scopes()
             status_code = (
@@ -14564,15 +14800,15 @@ def get_card_stats(request):
             and is_mw != 1
         ):
             raise ValueError("Card + Action Card is only available for Marine Worlds")
+        component_ci = bool(_parse_optional_bool(
+            params.get("component_ci"), "component_ci"
+        ))
         arena_only = bool(_parse_optional_bool(params.get("arena_only"), "arena_only"))
         tournament_only = bool(_parse_optional_bool(
             params.get("tournament_only"), "tournament_only"
         ))
         if arena_only and tournament_only:
             raise ValueError("Arena games only and Tournament games only are mutually exclusive")
-        synergy_ci = bool(_parse_optional_bool(
-            params.get("synergy_ci"), "synergy_ci"
-        ))
         players_arena_only = False
         players_arena_seasons = []
         if stats_page == STATS_PAGE_PLAYERS and players_view in (
@@ -14892,7 +15128,7 @@ def get_card_stats(request):
         arena_only = False
         tournament_only = False
 
-    if synergy_ci:
+    if component_ci:
         try:
             if stats_page == STATS_PAGE_COMBINATIONS:
                 synergy_view = combinations_view
@@ -14903,13 +15139,13 @@ def get_card_stats(request):
                 synergy_view = mw_action_cards_view
             else:
                 raise ValueError(
-                    "Synergy confidence intervals are only valid for Combinations and MW Action Cards/Synergies"
+                    "Standalone component confidence intervals are only valid for Combinations and MW Action Cards/Synergies"
                 )
-            payload = _load_synergy_ci(
+            payload = _load_component_ci(
                 _read_data_version(),
                 stats_page,
                 synergy_view,
-                params.get("synergy_ci_rows", []),
+                params.get("component_ci_rows", []),
                 is_mw,
                 selected_maps,
                 selected_rounds if round_filter_active else [],
@@ -14925,12 +15161,16 @@ def get_card_stats(request):
                 starting_positions=starting_positions,
             )
             return _json_http_response(payload, 200, headers, request)
+        except _PublicBigQueryQueryDisabled as exc:
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 503, headers, request
+            )
         except ValueError as exc:
             return _json_http_response(
                 {"status": "error", "message": str(exc)}, 400, headers, request
             )
         except Exception as exc:
-            logging.exception("Failed to query Synergy confidence intervals")
+            logging.exception("Failed to query standalone component confidence intervals")
             return _json_http_response(
                 {"status": "error", "message": str(exc)}, 500, headers, request
             )
@@ -14993,6 +15233,10 @@ def get_card_stats(request):
                 starting_positions,
             )
             return _json_http_response(payload, 200, headers, request)
+        except _PublicBigQueryQueryDisabled as exc:
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 503, headers, request
+            )
         except ValueError as exc:
             return _json_http_response(
                 {"status": "error", "message": str(exc)}, 400, headers, request
@@ -15108,7 +15352,7 @@ def get_card_stats(request):
         "arena_only": arena_only,
         "tournament_only": tournament_only,
         "starting_positions": sorted(starting_positions),
-        "rollup_schema": 8,
+        "rollup_schema": 9,
     }
     filter_cache_blob_name = None
     if (
@@ -15142,6 +15386,14 @@ def get_card_stats(request):
             if stats_page == STATS_PAGE_MW_ACTION_CARDS:
                 cached_payload["mw_action_cards_view"] = mw_action_cards_view
             return _json_http_response(cached_payload, 200, headers, request)
+
+    if not refresh_data and not debug_timing:
+        try:
+            _require_public_bigquery_query()
+        except _PublicBigQueryQueryDisabled as exc:
+            return _json_http_response(
+                {"status": "error", "message": str(exc)}, 503, headers, request
+            )
 
     try:
         query_args = (
@@ -15316,15 +15568,6 @@ def get_card_stats(request):
             "data": rows,
             "cache_status": "live",
         }
-        if (
-            stats_page == STATS_PAGE_COMBINATIONS
-            or (
-                stats_page == STATS_PAGE_MW_ACTION_CARDS
-                and mw_action_cards_view == MW_ACTION_CARDS_VIEW_SYNERGIES
-            )
-        ):
-            payload["synergy_ci_status"] = "pending"
-            payload["synergy_ci_data_version"] = None
         if stats_page == STATS_PAGE_PLAYERS:
             payload["players_players"] = players_players
             if players_view == PLAYERS_VIEW_COMPARISON:

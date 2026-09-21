@@ -1,7 +1,7 @@
 # Ark Nova Statistics Dashboard Handoff
 
 Date: 2026-06-21  
-Last updated: 2026-09-08  
+Last updated: 2026-09-21  
 Project owner: pr0paganda-panda / Panda  
 Current repository: https://github.com/emufriends/stats
 
@@ -9,9 +9,265 @@ This handoff is for a future Codex/AI session continuing the Ark Nova statistics
 
 ## Executive Summary
 
-The project is a static GitHub Pages frontend backed by one Google Cloud Function. The frontend uses a reusable shell plus lazy page modules for Home, Cards, the unlinked Card Details route, Opening Hand, Endgames, Maps, Sponsor Endgames, Combos, Actions, Predictors, Icons, MW Action Cards, Build, Conservation, Scoring, Workers, Players, Arena, Records, and the hidden Refresh page. Shared controls, snapshot loading, filters, and table behavior live in the shell; every page's population exceptions are documented below and in the executable parity contract.
+The project is a static GitHub Pages frontend backed by a public read-only DuckDB gateway, with the Cloud Function retained for maintenance and refresh control. The frontend uses a reusable shell plus lazy page modules for Home, Cards, the unlinked Card Details route, Opening Hand, Endgames, Maps, Sponsor Endgames, Combos, Actions, Predictors, Icons, MW Action Cards, Build, Conservation, Scoring, Workers, Players, Arena, Records, and the hidden Refresh page. Shared controls, snapshot loading, filters, and table behavior live in the shell; every page's population exceptions are documented below and in the executable parity contract.
 
-The current version is considered public-release-ready. Future work should happen in the `emufriends/stats` repository and its local working copies.
+The current public version is served from GitHub Pages and sends filtered reads
+to `https://duckdb-gateway-ioetmehoha-ew.a.run.app`; default views continue to
+use the immutable Cloud Storage snapshot pack. The Cloud Function remains the
+maintenance boundary for refresh status, manual refresh authentication, and
+controlled source operations; it is no longer the public analytical read path.
+The public/private cutover was completed on 2026-09-21 after gateway health,
+filtered-query, frontend publication, and live-site checks passed. Future work
+should happen in the `emufriends/stats` repository and its local working copies.
+
+### Operating budget and architecture assessment
+
+The operating budget target is USD 20 per month for the complete dashboard
+service. The [data architecture assessment](analysis/dashboard-cost-architecture-review.md)
+contains measured source/derivative sizes, source-import dry runs, identified
+refresh/cache inefficiencies, and a proposed local analytical serving workflow.
+Its [evidence file](analysis/cost-architecture-evidence.json) records the
+2026-09-15 metadata and distinguishes historical usage from estimates.
+The production backend and local working copy use the Phase 1 cost-containment
+contract. Public requests may read default snapshots and exact persistent cache
+hits, but an uncached analytical request receives a clear 503 response instead
+of starting BigQuery. Optional Synergy-CI refresh and Card + Card warming are
+disabled by default. Partial prepared-table maintenance is also disabled because
+it cannot publish a coherent complete generation. Every remaining SQL query uses a cost-controlled client
+with workload/component labels and a hard byte ceiling. Daily refresh first
+fingerprints free BigQuery metadata plus external inputs; unchanged sources do
+not rebuild or advance the successful publication time, while an Elo-sheet-only
+change republishes only that snapshot and the existing pack. Card moments are
+rebuilt before the card aggregate that consumes them.
+
+Phases 2 and 3 are complete as a private prototype and serving decision. The local-data bootstrap is at
+`analysis/phase2-local-import.py`; it does not change production serving or
+refresh schedules. One coherent private generation now contains reusable
+Cards/Players facts and focused pair and standalone-EV reads. Cards and Card +
+Card producer outputs reconcile locally, and a read-only VM smoke test confirms
+representative queries and concurrent readers. Full quadratic pair materialization
+is not part of the design because the exploratory build expanded unnecessarily.
+The first private generation is now exported and materialized locally as
+`phase2-20260915-b57235ad65db.duckdb`: 5,531,256 Full Sample rows and 436,526
+Logs rows were materialized in 146.894 seconds; the source-only DuckDB stage
+was about 848 MB. The current immutable file is approximately 4.44 GB because
+an exploratory full-pair materialization was interrupted; that expansion is
+not part of the serving design and must be removed when the next compact
+generation is built.
+The representative local MW card-play aggregation completed in 6.745 seconds.
+The narrow local serving slice contains 5,531,256 player-game rows and
+7,797,585 deduplicated normal-card play rows across 280 card/type groups. A
+focused Cards comparison matches the expected 267 post-exclusion card groups
+and local default-scope counts. The Phase 3 same-generation parity gate passes
+all 267 Cards rows and the deterministic first 1,000 Card + Card API rows with
+zero point/count mismatches. Its report is `analysis/phase3-parity-report.json`;
+it reads no BigQuery data and is not used by production snapshots.
+This generation is excluded from source control and Function deployment.
+
+The current corruption audit is documented in
+`analysis/phase2-corrupted-current-audit.md`. The authoritative 2026-09-16
+source scan found 9,021 corrupted tables (5,295 MW and 3,726 Base). The private
+2026-09-15 export found 8,988; it also had exactly 5,419 fewer two-player
+tables, so the 33-table difference is consistent with source growth. The older
+7,663 figure has no saved table-ID set and is historical context only. The
+predicate is always recomputed from the current source fingerprint and counts
+are never hard-coded.
+
+The protected maintenance backend is deployed in `europe-west1`. The recurring
+Synergy-CI, Card + Card warming, legacy main dashboard-refresh, and Base/MW
+snapshot Scheduler jobs are paused; the private DuckDB daily refresh and
+independent Elo update remain enabled. The project-level BigQuery
+`Query usage per day` quota is set to `0.1 TiB`. Default snapshot delivery has
+been verified, and an uncached filtered request is rejected before SQL. The
+controlled tracked refresh reached snapshot generation, processed
+73,304,696,183 bytes (68.2703 GiB), then stopped without publishing because a
+snapshot query was incorrectly assigned the 2 GiB public ceiling. Snapshot
+queries now explicitly use the 64 GiB maintenance ceiling. The previous atomic
+pack and successful completion timestamp remain intact. Do not restart the
+legacy full refresh within the same quota day. The Phase 2 local benchmark now
+covers filtered Cards, player history, Card + Card actuals, ordinary card CI,
+standalone component CIs, strict MW action-card eligibility, and four
+concurrent readers; see `analysis/phase2-local-benchmark-report.json` and the
+focused Card + Card report. The Phase 2 representative prototype is complete:
+the same benchmark passes on the private VM with consistent concurrent readers,
+and the local Cards producer emits all 267 rows with zero card-group or
+`n_played` mismatches against its local query contract. No production route has
+been switched. The first Phase 5 builder optimization now completes the full
+vertical slice on the 4-GiB `ark-nova-duckdb-test` VM using two threads, a
+2.8-GB DuckDB memory ceiling, and disk spilling; it completed in 344.421
+seconds without OOM. Its build and post-build read reports are
+`analysis/phase5-optimized-builder-benchmark.json` and
+`analysis/phase5-postbuild-read-benchmark.json`. This is a successful private
+builder benchmark and the basis of the production daily-refresh pipeline. The
+private `phase5_local_refresh.py` runner now adds a copy-on-write generation
+boundary around that builder: it validates the result before atomic
+activation, preserves the active pointer on failure, and has passed a private
+end-to-end build, Cards API smoke test, rollback, and reactivation test. It is
+connected to the private daily scheduler. A Cloud Run service named
+`duckdb-gateway` was added on 2026-09-18 with direct
+VPC egress and a dedicated service account. It exposes only the bounded
+read-only DuckDB API allowlist over HTTPS and successfully passed health,
+CORS, query, and unknown-path tests against the private VM. The published
+frontend now uses this gateway for filtered reads. A fresh controlled
+BigQuery source export was materialized into a new DuckDB candidate on the VM
+(5,949,676 Full Sample rows and 436,526 Logs rows). Card + Card was then
+optimized: the builder now materializes compact component and pair aggregates
+(267 and 35,511 rows) from the table-level relations, so requests no longer
+regroup 33.4 million pair rows and 4.2 million component rows. Direct in-VM
+requests take about 0.25–0.41 seconds uncached, and the staging gateway
+returns the same values. A direct reconciliation for a representative pair
+matches the table-level source sums exactly. The optimized candidate is
+private and rollback-ready; production routing now uses the gateway while the
+Cloud Function remains available for maintenance rollback. The
+read-only serving contract, atomic generation/rollback
+primitives, persistent cache, bounded private HTTP API, route capability
+inventory, sanitized audit log, and readiness checks are documented in
+`phase3-duckdb-serving.md` and implemented privately in
+`phase3_duckdb_service.py` and `phase3_api.py`.
+DuckDB is the selected local engine. All 50 private routes have executable
+local query builders: four
+representative Phase 3 routes plus Maps/Metrics, both additional Endgames
+views, Maps/Tournament H2H, both Sponsor Endgames views, all Predictors views,
+Actions/Starting Position, the four Scoring views, three other Actions views,
+two Build views, Icons, three Conservation views, two Workers views, Home,
+Opening Hand, all remaining Combos views, and all remaining Players views
+from Phase 4. No recognized route falls back to BigQuery. The immutable legacy
+default-pack oracle now passes all 43 mapped snapshot-backed public row
+contracts; it ignores only the intentionally retired additive Synergy CI fields.
+Cards and Opening Hand emit complete card-row contracts, including both EV
+columns, counts, play rate, average Elo, and ordinary CI source moments. MW
+By-map emits one wide row per action card; MW Synergies emits catalog keys,
+names, component EVs, and actual-pair moments. Conservation CP Rewards emits
+the full reward/scope/map field matrix, and Players/General emits the complete
+65-row metric matrix expected by the frontend. Ordinary standalone EV CI
+endpoints are projected from compact mean/sample-deviation/count fields at the
+private adapter boundary. Card + Action Card preserves all 20 individual
+action cards and counts the action-card baseline once per selected
+card/player-game. Arena now has a nested season-bundle producer backed by the
+6,236 imported roster rows and ID-based Full Sample joins; Records exposes all
+five public row contracts, with automatic populations local and the three
+validated moving spreadsheet exports imported into generation-local narrow
+relations. Phase 4 progress and its scope contract are documented in
+`analysis/phase4-progress.md`. The independent numerical reconciliation covers
+the remaining 49 routes, and all 49 pass direct source or moving-source checks.
+The Cards route applies the shared filter scope to its played, in-hand, and seen
+populations. The detailed report is
+`analysis/phase4-independent-reconciliation.json`; it is authoritative for
+this bounded numerical gate. The private readiness, route-contract,
+frontend-contract, legacy-contract, and decision-gate reports remain
+authoritative for the other cutover gates. The production read route now uses
+the public DuckDB gateway; the Cloud Function remains the maintenance and
+rollback boundary.
+
+### Phase 5 private serving state
+
+DuckDB is the selected serving engine. The public gateway is
+`https://duckdb-gateway-ioetmehoha-ew.a.run.app`; it exposes only the bounded
+read-only API. The serving VM is
+`ark-nova-duckdb-test` in `europe-west1-c`, using an e2-medium with 4 GiB RAM.
+The selected serving mode keeps this VM running continuously; its resident
+worker handles the daily refresh request without powering the VM off. The
+refresh function never starts the VM from a request; if it is stopped by the
+€40 safety rail, scheduled and manual refreshes fail safely until the VM is
+manually restarted.
+
+The current private generation is
+`phase5-refresh-20260921-155111-phase5`, with data version
+`phase5-source-sync-3c6031ddbc8d09dea83f-20260921092543`. It contains 6,074,924 Full Sample
+rows and 436,526 Logs rows from the controlled Full Sample/Logs
+source, compact route derivatives, current Arena/Records metadata, and a
+validated 99-file private snapshot pack and a public 89-member default pack.
+The private pack contains 96 ordinary route files
+plus Arena all-season, latest-season, and manifest assets. All files have the
+same data version; the atomic private snapshot pointer is under
+`phase2_private_data/snapshots/current.json` on the VM.
+The ordinary pack includes Card + Card for both datasets; component CI and
+player-history endpoints remain interactive-only.
+
+This generation was produced by the rollback-safe workflow in 3,988.728
+seconds (about 66 minutes 29 seconds) and retains
+`phase5-refresh-20260919-02` as its rollback parent. The VM has a 40 GiB disk;
+the completed baseline leaves about 14 GiB free. The serving and snapshot
+pointers both reference the completed generation. The VM is kept running for
+the selected always-on serving mode; its €20/€40 monthly budget rails limit
+unexpected cost growth.
+
+The established private numerical and shape gates pass for the bounded cases
+already reconciled. The first current-generation route smoke returned 41 of
+46 routes within the 120-second per-route budget because five default requests
+repeated large scans. The adapter now serves those exact default-scope routes
+from matching immutable generation-local snapshots, and the rerun passed all
+46 routes; the five optimized routes returned in 0.006–0.244 seconds. Filtered
+requests continue to use the SQL builders. Arena's private bundle contains 13
+seasons and 38,032 roster rows, and table/history entries align by numeric
+player ID. Card + Card uses refresh-time compact aggregates, and Arena history
+is built one season at a time to stay within the 4 GiB memory budget.
+
+The public/private snapshot comparison now uses the same generation: the public
+pack and private generation use
+`phase5-source-sync-3c6031ddbc8d09dea83f-20260921092543`, with schema version
+22 and 89 public members. Individual objects are published before the default
+pack pointer, which is the coherent-generation boundary.
+
+`phase5_refresh_workflow.py` is the private daily/manual workflow. Given a
+versioned controlled Parquet export, it imports source data, builds narrow
+derivatives, imports Tournament/Arena/Records moving sources, activates one
+immutable generation, builds the complete snapshot pack, atomically advances
+the private snapshot pointer, and rolls back the generation on failure. It
+does not publish GitHub, public Cloud Storage, or production API changes.
+
+The import contract is defined in the backend's `phase5-source-sync.md` and
+implemented by `phase5_source_sync.py` and `phase5_source_reconcile.py`.
+The external sources are unpartitioned and have no trustworthy change cursor.
+A maximum table ID or recent-game-date filter is therefore not a complete or
+necessarily cheaper incremental sync. Free source metadata checks skip unchanged
+families; changed Full Sample uses one canonical export with an 8 GiB hard
+query ceiling. The current measured scan is 4.62 GiB. Logs uses native
+extraction only when its own metadata changes. Per-file checksums and a final
+manifest commit protect transfer completeness, and metadata is checked again
+after export to reject a moving source. Raw-table, view and Elo-routine changes
+all invalidate the Full Sample fingerprint.
+
+The local reconciler compares complete game-table row fingerprints and replaces
+only added, corrected or deleted tables in a copy of the active database.
+It handles late historical imports and duplicate multiplicity. The workflow's
+`--incremental-source` option consumes this copy and then rebuilds derivatives
+and snapshots locally. A staging source copy must never be served before that
+build completes. The private importer is scheduled by Cloud Scheduler job
+`refresh-private-duckdb-daily` at 00:00 UTC. The scheduler queues a refresh;
+the fixed always-on VM performs the moving-source downloads, source import,
+local build, snapshot generation, and atomic activation. Arena CSVs
+and Records spreadsheet exports are refreshed on every run with last-known-good
+fallbacks. The refresh status object exposes only sanitized state/progress and
+the last successful completion. A Monitoring alert notifies
+`hlmichel.vo@gmail.com` on refresh failures. The project quota is 0.1 TiB/day
+and expensive legacy BigQuery schedules remain paused.
+
+The bounded September 21 rehearsal generated source candidate
+`sync-3c6031ddbc8d09dea83f5dee`. The Full Sample export billed 4,966,055,936
+bytes; Logs used native extraction and incurred no analysis-query bytes. An
+immediate repeat was a zero-query no-op. Local reconciliation took 793.229
+seconds, added 21,205 game tables, replaced one corrected two-row game, and
+produced 6,074,924 Full Sample rows across 3,037,462 games. Logs remained at
+436,526 rows across 218,221 games. The source was reconciled locally, all
+derivatives and the complete 99-file snapshot pack were rebuilt, validated, and
+activated. The current serving/snapshot generation is
+`phase5-refresh-20260921-155111-phase5`, and the VM is kept running for serving. The source-sync query accounts for only 4,966,055,936 billed
+bytes; reaching the project-wide daily quota in the same accounting window does
+not mean this single sync consumed the full allowance.
+
+Phase 5's private baseline and default-route performance gate are complete, and
+the coherent default pack has been promoted. The serving choice is the
+always-on e2-medium VM. Billing safety rails are configured on the project:
+the €20 monthly budget sends an email to `hlmichel.vo@gmail.com`, and the €40
+monthly budget sends the same alert while publishing to a private handler that
+stops only `ark-nova-duckdb-test`. Budget notifications are delayed estimates,
+not an instantaneous spending cap; stopping the VM does not reverse accrued
+charges or disable unrelated project services. Gateway health and filtered-read
+checks, frontend publication, and legacy-scheduler review have passed. The
+remaining Phase 5 item is a documented rollback rehearsal. BigQuery roles still
+required by controlled source export and Elo maintenance remain in place; public
+BigQuery reads and legacy analytical schedules remain disabled.
 
 ### Start here for Elo spreadsheet / leaderboard work
 
@@ -82,7 +338,7 @@ are not converted to zero and leave a table unclassified. Prepared Full Sample
 and Logs retain the flag, while Players, Cards, Opening Hand, Maps, Combos,
 Endgames, Sponsor Endgames, Actions, MW Action Cards, Icons, Predictors, Build,
 Conservation, Scoring, Workers, Arena, Records, player indexes, Tournament H2H,
-and Synergy inference derivatives exclude flagged tables at their first
+and component-CI source derivatives exclude flagged tables at their first
 analytical boundary. Home and `home_observations_prepared` deliberately retain
 them. Source BigQuery tables are read-only.
 
@@ -92,7 +348,7 @@ Do not infer statistical parity from matching labels alone. The canonical,
 machine-readable inventory is `ark-nova-function/audit_population_parity.py`;
 it records every active route/view family, source derivative, observation unit,
 completion behavior, and special eligibility. Its snapshot audit fails mixed
-data versions or old Synergy CIs attached to new point estimates.
+data versions; additive Synergy intervals are not a supported payload feature.
 
 | Family | Observation unit | Population contract |
 |---|---|---|
@@ -376,14 +632,18 @@ Owns reusable shell HTML:
 - Sidebar/overlay containers
 - `#pageMain`
 
-Recent visual state:
+Visual identity contract:
 
 - Header logo/wordmark from old design has been integrated.
-- `Nova` wordmark color is `#BAFFE0`.
+- The dashboard identity is the 1.0 deep marine-green theme. A thin decorative
+  multicolor line runs beneath the topbar and the page body has a subtle
+  ambient gradient; neither encodes data.
+- The `Nova` wordmark and navigation use the established 1.0 treatment.
 - Topbar filter button now uses an inline SVG funnel icon, not the hamburger/menu glyph.
 - Navigation has Cards, Opening Hand, Maps, Combos, Endgames, Sponsor Endgames, Actions, MW Action Cards, Icons, Predictors, Build, Conservation, Scoring, Workers, Players, Arena, and Records. Home has no rail item; the topbar logo links to it. MW Action Cards is active at `#/mw-action-cards`; all four tabs are functional.
 - Endgames uses an hourglass icon; Maps uses a small cluster of board-game-style hexes.
 - Rail icons are either complete inline `<svg>...</svg>` elements or the Build PNG mask span. Keep every inline SVG wrapper balanced when reordering nav items; paths/circles outside an opening SVG are silently discarded by the browser.
+- Each rail item presents its existing icon inside a compact rounded outline tile. Tile and active-indicator accents are stable per route group (jade, water blue, orchid, or amber); labels remain neutral, and the active tile/left blade receives a restrained matching glow.
 - Header topbar includes:
   - MW/Base switch
   - Ark Nova Statistics logo/wordmark
@@ -393,16 +653,26 @@ Recent visual state:
 
 Central stylesheet for all pages. Important conventions:
 
-- Static app uses a dark green Ark Nova themed dashboard style.
-- Dominant UI palette uses deep green surfaces, mint accents, gold Base tab, and limited pale/bright accents.
-- Navigation rail desktop width was adjusted to 112px.
+- Static app uses a dark, deep marine-green Ark Nova theme. Identity accents are
+  separate from statistical table colors: value gradients, frequency colors,
+  Elo colors, and Type badges must not be recolored with the theme.
+- Navigation icons and active indicator blades use stable route colors drawn
+  from jade, water blue, orchid, and amber. Rail labels remain neutral.
+- MW and Base retain their established ultramarine and gold switch colors.
+  Filter-sidebar labels and the Attributes chevron remain neutral rather than
+  inheriting the multicolor identity accents.
+- The exact pre-trial visual identity is stored in
+  `mockups/visual-identity-1.0.zip`, with restoration notes beside it.
+- Navigation rail desktop width is 112px; phone layouts use an 84px overlay rail with compact 58px logo tiles.
 - Main content gap was adjusted down during layout tuning.
 - Filter button was aligned with the main content right edge.
 - Filter sidebar remains a right-side overlay.
 - Every applicable Filter sidebar ends with a sticky Apply filters footer. The
-  footer has an opaque panel background, reaches the drawer's bottom edge, and
-  uses a 3px double top rule so it remains visually distinct while the filter
-  controls scroll behind it.
+  footer has an opaque panel background, stays inside the drawer viewport on
+  phones (including the safe-area inset), and uses a 3px double top rule as
+  the only separator above the action, with 16px breathing room after the last
+  filter row. There is no standalone divider between the final mode-toggle
+  section and the footer.
 - Expanded Cards and Opening Hand Attributes bars use intrinsic-width desktop flex groups with 22px gaps, explicit separators, and 20px horizontal edge padding. Strength and Size remain on one row. On mobile the same intrinsic groups retain the compact one-row layout and scroll horizontally.
 - Attribute chevron is deliberately large and uses down/up direction:
   - collapsed = down
@@ -582,11 +852,10 @@ under each card name are its standalone filtered average `elo_delta`.
 pair average, and `Synergy = Delta (Actual) - Delta (Sum)`. Elo is average
 `pre_match_elo`; Picked is the player-game observation count. Delta Actual has a
 95% mean CI. The standalone Delta values beneath both card names also have
-table-clustered 95% mean CIs. Synergy has its own covariance-aware,
-table-clustered 95% CI; it is not constructed from the displayed component
-intervals. Searches
-may project either pair member into the requested display slot without changing
-the canonical pair or its Synergy interval. MW Synergy uses the same
+table-clustered 95% mean CIs. Additive Synergy values remain point estimates
+only; no covariance-aware Synergy CI is calculated or displayed. Searches
+ may project either pair member into the requested display slot without changing
+ the canonical pair or its Synergy point estimate. MW Synergy uses the same
 orange-ochre-green, zero-centered, +/-2-clamped color scale as Combos Synergy.
 
 Synergies defaults Minimum picks to 1000 and keeps Type, both card
@@ -868,8 +1137,8 @@ Petting Zoo Animals supports only buckets 0-4 in MW and 0-3 in Base; later table
 - There are global document listeners in page modules for popups/tooltips. They have not caused data bugs, but a future cleanup could centralize or guard them.
 - CSS is large and monolithic.
 - Ordinary displayed Elo-delta means use observation-level Student's t
-  intervals. Derived Synergy statistics instead use the covariance-aware,
-  table-clustered delta method documented below.
+  intervals. Additive combination values are point estimates only; they do not
+  have confidence intervals.
 
 ## Elo Delta Confidence Intervals
 
@@ -880,19 +1149,18 @@ displayed Elo-delta statistics:
 - Opening Hand: delta kept and delta dealt
 - Endgames General: delta scored and delta dealt
 - Combos: standalone card/general deltas, delta actual (Card + Card), delta on
-  map, delta round, and every Synergy value in Card + Card, Card + Map, Card +
-  Round, Card + Endgame, and Card + Action Card
+  map, delta round, and other single-mean Elo-delta values
 - Sponsor Endgames: every valid CP/Appeal delta bucket
 - MW Action Cards: General/By-map Delta means, standalone Synergy card deltas,
-  Synergies Delta Actual, and every MW Synergy value
+  and Synergies Delta Actual
 
 User-facing table headers abbreviate Elo-delta statistics as `EV` (for example,
 `EV (played)` and `EV (in hand)`); the underlying statistic remains the source
 `elo_delta` described above.
 
 The standalone component intervals are ordinary table-clustered mean intervals
-shown when hovering the parenthetical Delta beneath a card name. The Synergy
-interval remains the covariance-aware linear-combination interval.
+shown when hovering the parenthetical Delta beneath a card name. Additive
+combination/Synergy intervals are intentionally not part of the dashboard.
 Other statistics not listed above do not have confidence intervals.
 
 Each interval is:
@@ -909,39 +1177,18 @@ gradient line whose endpoint colors are continuously interpolated from the same 
 scale as visible values, with signed lower/upper labels beneath it. The fixed line length does not encode
 interval width. Tooltips do not display the internal `n` or a low-sample warning.
 
-Synergy is a linear combination of overlapping estimated means, so combining
-the displayed component CI widths would discard covariance and is prohibited.
-The definitions are:
+Additive Synergy values are deliberately point estimates only. The dashboard
+does not calculate, request, cache, stage, or display covariance-aware
+combination intervals. This avoids presenting a complex derived interval for
+which the maintenance and query cost is disproportionate to its value.
 
-```text
-Card + Card:        Actual - Card 1 - Card 2
-Card + Map:         Map-specific - Card overall
-Card + Round:       Round-specific - Card overall
-Card + Endgame:     Actual - Card - Endgame
-Card + Action Card: Actual - Card - MW Action Card
-MW Action Synergy:  Actual - Action Card 1 - Action Card 2
-```
+Standalone component CIs remain ordinary table-clustered mean intervals. They
+use the exact component population behind the displayed parenthetical card,
+action-card, or endgame EV and are loaded from default snapshots or a small
+component-only background request for filtered visible rows. Each payload
+continues to carry `data_version`; component results are merged only into rows
+from the matching displayed request scope.
 
-For component `j` and table cluster `g`, the backend retains non-null-delta
-count `n_gj` and Delta sum `s_gj`. With unrounded component mean `mu_j`, total
-count `N_j`, and coefficient `c_j`, it calculates:
-
-```text
-u_g = sum_j c_j * (s_gj - n_gj * mu_j) / N_j
-SE = sqrt(G / (G - 1) * sum_g(u_g^2))
-CI = Synergy +/- 1.96 * SE
-```
-
-Every observation from the same `table_id`, including both players and repeated
-round occurrences, remains in one cluster. Component-null deltas are excluded
-only from that component. All component denominators and at least two table
-clusters are required. These are pointwise intervals; they are not adjusted
-for testing many rows simultaneously.
-
-The main daily refresh always publishes current Synergy point estimates in the
-atomic default pack. Each payload carries `data_version`, `synergy_ci_status`
-(`pending` or `complete`), and `synergy_ci_data_version`. A pending default or a
-filtered table requests missing intervals for at most the visible 100 rows.
 The refresh passes its newly created data version directly into every snapshot
 builder; snapshot workers never rediscover the version from mutable external
 state. Atomic pack validation rejects any BigQuery-derived member whose version
@@ -949,24 +1196,9 @@ does not match that publication. Pack assembly reloads each Cloud Storage
 object and downloads its exact generation, bypassing the public browser-cache
 lifetime that otherwise could expose the immediately preceding body. The
 data-version marker itself is `no-store` and is also read by exact generation.
-CI batches are keyed by data version, full backend filter scope, view, and
-canonical row identifiers; identical batches use module and persistent caches.
-Both backend pack validation and the frontend merge path reject an interval
-whose version differs from the displayed points. CI loading never blocks or
-reruns the main table query.
-
-The authenticated `refresh_synergy_cis` maintenance stage runs after the main
-daily refresh. It builds the ten affected views in versioned staging paths with
-synchronously persisted, bounded checkpoints. Each current-version view is
-promoted independently as soon as its intervals finish, and the pack is then
-republished safely. Other views remain current with `pending` CIs; they do not
-retain yesterday's point estimates while waiting. Promotion keeps a per-view
-backup and restores it if copying or pack publication fails. A completion
-marker makes later calls no-ops after all ten current-version views are done.
-If the main refresh lock exists, CI staging returns a retryable running state;
-it cannot promote against a point-estimate pack that is still being assembled.
-The lock is checked both before CI work and again immediately before promotion,
-covering CI requests that began shortly before the main refresh acquired it.
+Component batches are keyed by data version, full backend filter scope, view,
+and canonical row identifiers; identical batches use module and persistent
+caches. Component CI loading never blocks or reruns the main table query.
 
 The CI count is deliberately separate from visible table counts:
 
@@ -988,19 +1220,9 @@ Public payload field names use:
 <delta_field>_ci95_n
 ```
 
-Synergy rows additionally use:
-
-```text
-interaction_ci95_low
-interaction_ci95_high
-interaction_ci95_se
-interaction_ci95_cluster_n
-interaction_ci95_method = "table_cluster_delta"
-```
-
-All MW/Base default snapshots include these fields. Filtered requests recompute
-mean, sample SD, count, and interval after applying the active filters; cached
-filtered responses are keyed by that complete filter set and data version.
+Combination rows do not expose an interaction/Synergy CI. Standalone component
+CI fields use the same `<delta_field>_ci95_*` naming and are included in default
+snapshots or returned by the component-only filtered request.
 
 ### Continuous Numeric Color Scales
 
@@ -1009,8 +1231,8 @@ All numeric scales use continuous RGB interpolation; categorical badges and grap
 identity colors remain discrete.
 
 Elo Delta is zero-anchored independently for every displayed Delta statistic. Its range
-comes from that statistic's complete backend payload after Filter-bar filters and before
-pagination. Observed endpoints, displayed means, and CI endpoints are clamped to
+ comes from that statistic's complete backend payload after Filter-bar filters and before
+ pagination. Observed endpoints, displayed means, and standalone CI endpoints are clamped to
 `[-2.0, +2.0]`. Negative values interpolate from the statistic's negative minimum in
 red (`#c0432a`) through the original red/neutral/green palette to its neutral midpoint
 at zero (`#7a9e80`); positive values continue through the green half to the statistic's
@@ -1025,10 +1247,9 @@ Combo Synergy is likewise zero-anchored per Synergy column and clamped to `[-2, 
 Its negative endpoint is the existing orange (`#ff6027`), its positive endpoint the
 existing green (`#7cba43`), and zero uses their existing 50/50 blended midpoint
 (`#be8d35`). Negative and positive sides interpolate independently.
-Synergy CI endpoints use this same range and palette. If an interval crosses
-zero, its tooltip gradient passes explicitly through the neutral color at the
-proportional zero position. MW Action Cards/Synergies uses the same Synergy
-scale; its other Delta columns retain the ordinary Elo-delta palette.
+Additive Synergy values use this point-estimate palette only; there are no
+ additive Synergy CI endpoints. MW Action Cards/Synergies uses the same Synergy scale;
+its other Delta columns retain the ordinary Elo-delta palette.
 
 Color ranges are tied to the fetched backend payload, not to rows left visible by
 frontend-only filtering. Filter-bar changes (Elo range, maps, rounds, dates, completed
@@ -1209,7 +1430,7 @@ Endgames CP-focused views:
 
 Maps Metrics uses the partitioned and clustered prepared Full Sample table
 `ark-nova-stats-dashboard.dashboard_cache.full_stats_prepared`. It stores `game_date`
-and a precomputed table-level concession flag, allowing the 63 metrics to be produced
+and a precomputed table-level concession flag, allowing the 64 metrics to be produced
 by one aggregation/unpivot query instead of repeatedly scanning the raw Full Sample.
 
 Definitions:
@@ -1225,6 +1446,13 @@ Definitions:
 - `Turns` and `Rounds` are lower-is-better and sort ascending; `Turns` is the default sort.
 - Other metrics sort descending and color higher values greener.
 - `Games` counts distinct `table_id`; other rows average player-level values.
+- `Reputation actions` is the average `Reputation_association_tasks` value. It
+  appears after `Partner zoos` and before `X-token gained`, and is also part of
+  the Players association-bonus metric group.
+
+Predictors/Specific is a fixed catalog of the currently supported conditions.
+The obsolete `Round 1: Humphead Wrasse` and `Round 1/2: New Zealand Fur Seal`
+conditions are not part of that catalog or its prepared/snapshot data.
 
 ### Build page
 
@@ -1404,9 +1632,9 @@ The component CI tooltips state these populations explicitly.
 Daily maintenance builds `card_action_card_observations` by joining prepared
 card plays to `mw_action_card_player_observations` on exact table and player,
 then writes `card_action_card_daily_aggregates` with filter dimensions, played
-round sets, counts, sums, squared sums, and Elo moments. Its Synergy CI is the
-same table-clustered, covariance-aware three-component interval as Card + Card,
-using `Actual - Card - Action Card`.
+round sets, counts, sums, squared sums, and Elo moments. It publishes point
+estimates plus ordinary standalone component/Actual EV intervals; its
+additive Synergy remains a point estimate without a CI.
 
 The Actions page has exactly four equal-width tabs: Starting position,
 Upgrades, Upgrade order, and Upgrades by map. Combos uses five 20% tracks and
@@ -1427,19 +1655,9 @@ identical filter scope. Card + Endgame's endgame component uses the scored
 Endgames population. The pair-specific Actual population remains view-specific;
 Card + Action Card retains its explicitly telemetry-complete component scope.
 
-Synergy CIs remain outside this fast point-estimate path. Their background
-query reads only requested canonical rows from the existing table-level
-prepared card-play, card-pair, card/endgame, endgame-event, and MW action-card
-observation tables. This retains `table_id` covariance without inflating the
-compact daily aggregates or delaying server-paged responses.
-
-Default CI enrichment runs separately from the 01:05 UTC all-page refresh. The
-main refresh has already published every current point-estimate snapshot before
-the `refresh-synergy-confidence-intervals` Scheduler starts. That job invokes
-the staged maintenance operation repeatedly every ten minutes from 02:00
-through 08:50 UTC. Each invocation advances durable batches and promotes each
-completed current-version view independently; calls become no-ops after all ten
-views are complete. Old intervals are never combined with current points.
+Component CI enrichment is a small post-query stage. It reads only requested
+canonical rows and never calculates an additive combination interval. There is
+no Synergy-CI scheduler, staging promotion, or Synergy-CI cache contract.
 
 Ordinary Card + Card requests use the narrower
 `card_pair_scope_daily_aggregates`, which removes the played-round JSON
@@ -1449,10 +1667,11 @@ materialization is queued after the response and can never delay that first
 page. Until the background scope exists, subsequent controls may issue another
 small paged query rather than waiting for the entire population.
 
-The complete default-filter Card + Card scope is warmed for MW and Base by a
-separate authenticated maintenance operation, `warm_card_card_defaults`. The
-`warm-card-card-default-scopes` Cloud Scheduler job invokes it at 01:40 UTC,
-after the 01:05 UTC daily refresh, and its BigQuery jobs use batch priority.
+The complete default-filter Card + Card scope can be warmed for MW and Base by
+the separate authenticated `warm_card_card_defaults` operation. Phase 1 keeps
+it disabled unless `CARD_CARD_WARMING_ENABLED=true`, and the
+`warm-card-card-default-scopes` Scheduler must remain paused. When deliberately
+enabled, its BigQuery jobs use batch priority.
 The operation refuses to warm an older data version and returns a retryable
 response until the current UTC day's version is published. Scheduler retries
 therefore handle an unusually long refresh without warming stale data. This
@@ -1653,9 +1872,9 @@ partitioned by game date for date-bounded maintenance and Arena work.
 hash partitions keyed by merged identity, then clusters each partition by
 identity, dataset, map, and opponent Elo. Last X supplies the selected
 identity's bucket so BigQuery prunes to roughly one-thousandth of the table
-before applying its filters and final timestamp rank. Its 64 display metrics are
+before applying its filters and final timestamp rank. Its 65 display metrics are
 then emitted from one `UNNEST` struct array, so the selected aggregate is
-computed once rather than repeated in 64 UNION branches. Without these two
+computed once rather than repeated in 65 UNION branches. Without these two
 properties, a cold Last X request could take tens of seconds.
 `players_baseline_prepared` groups completed observations by dataset, map,
 date, opponent Elo, Arena season, Tournament state, winner/expert/master state,
@@ -1683,13 +1902,21 @@ General and Comparison also have Arena-style table/graph toggles. History is a
 separate cached request (`players_history: true` plus
 `players_history_metrics`) against the exact prepared player-game rows. It
 resolves aliases to merged identities, applies the canonical completed-game
-population and every active Players filter, applies Last X across the merged
-identity, and orders observations by UTC timestamp plus table ID. The first
-point is filtered game 100; each point is the trailing 100-game average. Null
-metric values are ignored inside that fixed 100-game frame, while an entirely
-null window creates a gap. Responses are compact columnar arrays of game
-numbers, timestamps, and rolling values and are cached by data version,
+population and every active Players filter for ordinary metrics, applies Last X
+across the merged identity, and orders observations by UTC timestamp plus table
+ID. The first point is filtered game 100; each point is the trailing 100-game
+average. Null metric values are ignored inside that fixed 100-game frame, while
+an entirely null window creates a gap. Responses are compact columnar arrays of
+game numbers, timestamps, and rolling values and are cached by data version,
 dataset, identity, filters, Last X, and requested group.
+
+The graph-only `Elo` metric is the deliberate exception. It uses
+`post_match_elo`, combines MW and Base rows, includes incomplete and conceded
+games, and ignores the sidebar filters; only the selected merged player
+identity remains in scope. It is a singleton graph group and therefore cannot
+be selected together with another history metric. Missing post-match Elo stays
+null and does not become zero. Its cache scope is dataset-neutral and excludes
+the ignored filter values.
 
 History request ownership is isolated per Players tab. Repeated renders for the
 same pending request reuse one promise, while a changed request key cancels only
@@ -1706,9 +1933,10 @@ metric activates its compatibility group, compatible unselected metrics gain a
 white dot, and other groups stay muted but selectable. Clicking a different
 group replaces the current General selection; clicking the active metric
 clears the current General selection. The
-groups are action-upgrade percentages; action counts;
-Universities/Partner zoos; X-token gained/spent; Kiosks/Pavilions; all icon
-metrics; and singleton groups for every other metric. The first selection asks
+groups are Elo; action-upgrade percentages; action counts;
+Universities/Partner zoos/Reputation actions; X-token gained/spent;
+Kiosks/Pavilions; all icon metrics; and singleton groups for every other metric.
+The first selection asks
 the backend for its complete group, so later compatible selections are local.
 Every General metric has a deterministic group-local color; legend dots and
 lines use the same resolver, and selecting or removing another metric never
@@ -1857,8 +2085,11 @@ Google Sheet `1NG3FPP70riMzhHPJ6Suz30bhJxUocFd_rKDKxn0kZbM`, worksheet
 `Masters`. The daily refresh reads country from column B, player from C, Peak
 Elo from F, and Peak Arena from H. Rows are validated, sorted by Peak Elo
 descending, truncated to the Top 100, and assigned permanent displayed ranks
-1–100. Blank Peak Arena values display as `n/a`. Country codes render through
-the dashboard's FlagCDN flag treatment with accessible country names. The
+1–100. Peak Arena may be blank or the literal `n/a` when a player has never
+played an Arena game; both are stored as missing and display as `n/a`. Once a
+peak Arena rating exists, the next valid sheet refresh replaces that value.
+Country codes render through the dashboard's FlagCDN flag treatment with
+accessible country names. The
 sheet has no MW/Base field, so the identical validated leaderboard is published
 under both dataset paths. The table is not sortable and does not query BigQuery;
 the frontend loads this shared leaderboard only once.
@@ -1987,13 +2218,14 @@ outer Arena-season group to be treated as Completed. When a page has a visible
 Completed-games-only toggle, the three controls form one consecutive stack with
 20px toggle rows, the same 12px row spacing, and no divider between them. Pages
 without that toggle use the same reserved bottom section with one divider separating it
-from the preceding filter section and one divider before Apply. A standalone
+  from the preceding filter section; the sticky footer supplies the boundary
+  before Apply. A standalone
  mode section has equal 16px clearance from its first and last toggle row to the
  adjacent separators. Existing page
  exceptions remain: Players exposes Arena Seasons in a separate section followed
  by Tournament-only because Arena is selected through season chips,
- Maps/Tournament H2H exposes neither, and Records uses its own equivalent mode
- controls. Players and Records table headers use the shared 39.1667px
+  Maps/Tournament H2H exposes neither and disables the global Filters button
+  entirely; Records uses its own equivalent mode controls. Players and Records table headers use the shared 39.1667px
 header geometry; their search inputs are constrained inside that row so search
 controls cannot change table positioning.
 

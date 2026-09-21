@@ -2,11 +2,11 @@
 // Snapshot bodies are persisted in Cache Storage without parsing during the
 // background warmup. This keeps large assets off the main thread until needed.
 
-const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
 const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
-const DEFAULT_PACK_SCHEMA_VERSION = 20;
+const DEFAULT_PACK_SCHEMA_VERSION = 22;
 const MEMORY_MAX_ENTRIES = 128;
 
 const memoryCache = new Map();
@@ -32,12 +32,12 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['maps', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/metrics/default-base.json'],
   ['maps', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/tournament_h2h/default-mw.json'],
   ['maps', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/maps/tournament_h2h/default-base.json'],
-  ['sponsor-endgames', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/cp/default-mw.json?v=20260628-1'],
-  ['sponsor-endgames', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/cp/default-base.json?v=20260628-1'],
-  ['sponsor-endgames', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/appeal/default-mw.json?v=20260628-1'],
-  ['sponsor-endgames', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/appeal/default-base.json?v=20260628-1'],
-  ['icons', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/icons/default-mw.json?v=20260704-1'],
-  ['icons', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/icons/default-base.json?v=20260704-1'],
+  ['sponsor-endgames', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/cp/default-mw.json?v=20260921-phase5-public-cutover'],
+  ['sponsor-endgames', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/cp/default-base.json?v=20260921-phase5-public-cutover'],
+  ['sponsor-endgames', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/appeal/default-mw.json?v=20260921-phase5-public-cutover'],
+  ['sponsor-endgames', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/sponsor-endgames/appeal/default-base.json?v=20260921-phase5-public-cutover'],
+  ['icons', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/icons/default-mw.json?v=20260921-phase5-public-cutover'],
+  ['icons', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/icons/default-base.json?v=20260921-phase5-public-cutover'],
   ['build', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/build/enclosures/delta/default-mw.json'],
   ['build', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/build/enclosures/delta/default-base.json'],
   ['build', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/build/enclosures/frequency/default-mw.json'],
@@ -99,15 +99,15 @@ const DEFAULT_SNAPSHOT_MANIFEST = [
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/biggest-turns/default-base.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/most-icons/default-mw.json'],
   ['records', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/records/most-icons/default-base.json'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-card/default-mw.json?v=20260629-13'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-card/default-base.json?v=20260629-13'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-map/default-mw.json?v=20260629-13'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-map/default-base.json?v=20260629-13'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-round/default-mw.json?v=20260629-13'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-round/default-base.json?v=20260629-13'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-endgame/default-mw.json?v=20260629-13'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-endgame/default-base.json?v=20260629-13'],
-  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-action-card/default-mw.json?v=20260819-1'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-card/default-mw.json?v=20260921-phase5-public-cutover'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-card/default-base.json?v=20260921-phase5-public-cutover'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-map/default-mw.json?v=20260921-phase5-public-cutover'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-map/default-base.json?v=20260921-phase5-public-cutover'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-round/default-mw.json?v=20260921-phase5-public-cutover'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-round/default-base.json?v=20260921-phase5-public-cutover'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-endgame/default-mw.json?v=20260921-phase5-public-cutover'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-endgame/default-base.json?v=20260921-phase5-public-cutover'],
+  ['combos', 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/combinations/card-action-card/default-mw.json?v=20260921-phase5-public-cutover'],
 ];
 
 function dataVersion() {

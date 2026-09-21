@@ -6,7 +6,7 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
-import { loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
 import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
@@ -19,7 +19,7 @@ export const sidebarHtml = "\u003cdiv class=\"sidebar-header\"\u003e\n      \u00
 // Config
 // API_URL points to the deployed Google Cloud Function. The frontend sends POST JSON
 // with filters; the backend queries BigQuery and returns already-aggregated card stats.
-const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
 // Daily default snapshots are static Cloud Storage JSON files, refreshed by
 // Cloud Scheduler. Default MW/Base loads use these directly; advanced Filter
 // bar requests still call API_URL because those aggregations are more specific.

@@ -161,7 +161,11 @@ async function startRefresh(password) {
     phase: 'Starting refresh',
   };
   renderStatus(optimistic);
-  void fetchStatus(false);
+  // Do not read the status asset again before the manual request has had a
+  // chance to publish its running state. That first read can return the
+  // previous successful run (100%), which briefly overwrites the optimistic
+  // running state and makes the new refresh look complete. renderStatus() has
+  // already scheduled the first authoritative poll.
   try {
     const response = await fetch(API_URL, {
       method: 'POST',

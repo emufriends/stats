@@ -132,9 +132,9 @@ export const sidebarHtml = `
     <button class="apply-btn" onclick="applyFiltersFromSidebar()">Apply filters</button>
   </div>`;
 
-const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
@@ -205,10 +205,10 @@ let serverMeta = null;
 let combinationRanges = null;
 let minimumDebounceTimer = 0;
 let serverRequestTimer = 0;
-let synergyCiTimer = 0;
-let synergyCiToken = 0;
-let synergyCiController = null;
-let synergyCiPendingKey = '';
+let componentCiTimer = 0;
+let componentCiToken = 0;
+let componentCiController = null;
+let componentCiPendingKey = '';
 let datasetBeforeActionView = null;
 
 export function mount({ dataset = 1 } = {}) {
@@ -257,13 +257,13 @@ export function unmount() {
     }
   }
   datasetBeforeActionView = null;
-  clearSynergyCiRequest();
+  clearComponentCiRequest();
   closeCombinationHeaderPopups();
   hideTooltip();
 }
 
 export function setDataset(value) {
-  clearSynergyCiRequest();
+  clearComponentCiRequest();
   isMW = Number(value) === 0 ? 0 : 1;
   selectedOne = '';
   selectedTwo = '';
@@ -323,7 +323,7 @@ function setCombinationsView(view) {
   if (!Object.hasOwn(SNAPSHOT_VIEWS, view) || view === activeView) return;
   const leavingActionCards = activeView === 'card_action_card';
   const enteringActionCards = view === 'card_action_card';
-  clearSynergyCiRequest();
+  clearComponentCiRequest();
   activeView = view;
   selectedOne = '';
   selectedTwo = '';
@@ -450,7 +450,7 @@ function serverPagedParams(params) {
 }
 
 async function applyFilters(token = mountToken) {
-  clearSynergyCiRequest();
+  clearComponentCiRequest();
   forceServerPaging = false;
   currentPage = 1;
   renderLoading();
@@ -522,7 +522,7 @@ function scheduleServerPage(preserveHead = false) {
 }
 
 async function loadServerPage(preserveHead = false) {
-  clearSynergyCiRequest();
+  clearComponentCiRequest();
   const params = getParams();
   if (!shouldUseServerPaging(params)) {
     applyFilters(++mountToken);
@@ -804,7 +804,7 @@ function renderTable(preserveHead = false) {
     ? pageRows.map(row => rowHtml(row, row.global_rank ?? '\u2014')).join('')
     : `<tr><td colspan="${isPairTableView() ? 9 : 8}"><div class="state-overlay"><div class="state-title">No combinations found</div></div></td></tr>`;
   renderPagination();
-  scheduleSynergyConfidenceIntervals(pageRows);
+  scheduleComponentConfidenceIntervals(pageRows);
 }
 
 function renderHead() {
@@ -1146,14 +1146,10 @@ function deltaTd(raw, row = null, prefix = '', range = null) {
 
 function interactionTd(row) {
   const value = Number(row?.interaction);
-  const hasCi = Object.prototype.hasOwnProperty.call(row || {}, 'interaction_ci95_method');
-  const attrs = hasCi
-    ? ` data-ci-low="${escapeAttr(row.interaction_ci95_low ?? '')}" data-ci-high="${escapeAttr(row.interaction_ci95_high ?? '')}" data-ci-n="${escapeAttr(row.interaction_ci95_cluster_n ?? 0)}" data-ci-color-scale="synergy" data-ci-color-min="${escapeAttr(interactionRange.min ?? '')}" data-ci-color-max="${escapeAttr(interactionRange.max ?? '')}"`
-    : '';
-  return `<td class="combination-interaction${hasCi ? ' delta-ci-cell' : ''}"${attrs} style="color:${interactionColor(value)}">${formatSigned(value)}</td>`;
+  return `<td class="combination-interaction" style="color:${interactionColor(value)}">${formatSigned(value)}</td>`;
 }
 
-function synergyCiDescriptor(row) {
+function componentCiDescriptor(row) {
   if (activeView === 'card_card') return { card_1: row.card_1, card_2: row.card_2 };
   if (activeView === 'card_map') return { card_name: row.card_name, map_name: row.map_name };
   if (activeView === 'card_round') return { card_name: row.card_name, round_name: row.round_name };
@@ -1161,7 +1157,7 @@ function synergyCiDescriptor(row) {
   return { card_name: row.card_name, endgame_name: row.endgame_name };
 }
 
-function synergyCiRowKey(row) {
+function componentCiRowKey(row) {
   if (activeView === 'card_card') return JSON.stringify([row.card_1, row.card_2]);
   if (activeView === 'card_map') return JSON.stringify([row.card_name, row.map_name]);
   if (activeView === 'card_round') return JSON.stringify([row.card_name, row.round_name]);
@@ -1169,49 +1165,48 @@ function synergyCiRowKey(row) {
   return JSON.stringify([row.card_name, row.endgame_name]);
 }
 
-function clearSynergyCiRequest() {
-  window.clearTimeout(synergyCiTimer);
-  synergyCiTimer = 0;
-  synergyCiToken += 1;
-  synergyCiController?.abort();
-  synergyCiController = null;
-  synergyCiPendingKey = '';
+function clearComponentCiRequest() {
+  window.clearTimeout(componentCiTimer);
+  componentCiTimer = 0;
+  componentCiToken += 1;
+  componentCiController?.abort();
+  componentCiController = null;
+  componentCiPendingKey = '';
 }
 
-function scheduleSynergyConfidenceIntervals(pageRows) {
-  window.clearTimeout(synergyCiTimer);
+function scheduleComponentConfidenceIntervals(pageRows) {
+  window.clearTimeout(componentCiTimer);
   const missing = (pageRows || []).filter(row =>
-    !Object.prototype.hasOwnProperty.call(row, 'interaction_ci95_method')
-    || !Object.prototype.hasOwnProperty.call(row, 'component_1_ci95_n')
+    !Object.prototype.hasOwnProperty.call(row, 'component_1_ci95_n')
     || !Object.prototype.hasOwnProperty.call(row, 'component_2_ci95_n')
   );
   if (!mounted || !missing.length) return;
   const scope = getParams();
-  const descriptors = missing.slice(0, 100).map(synergyCiDescriptor);
+  const descriptors = missing.slice(0, 100).map(componentCiDescriptor);
   const requestKey = JSON.stringify([currentDataVersion, scope, descriptors]);
-  if (synergyCiController && synergyCiPendingKey === requestKey) return;
-  synergyCiTimer = window.setTimeout(() => {
-    void loadSynergyConfidenceIntervals(scope, descriptors, requestKey);
+  if (componentCiController && componentCiPendingKey === requestKey) return;
+  componentCiTimer = window.setTimeout(() => {
+    void loadComponentConfidenceIntervals(scope, descriptors, requestKey);
   }, 0);
 }
 
-async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
+async function loadComponentConfidenceIntervals(scope, descriptors, requestKey) {
   if (!mounted || !descriptors.length) return;
-  if (synergyCiController && synergyCiPendingKey !== requestKey) synergyCiController.abort();
-  if (synergyCiController && synergyCiPendingKey === requestKey) return;
+  if (componentCiController && componentCiPendingKey !== requestKey) componentCiController.abort();
+  if (componentCiController && componentCiPendingKey === requestKey) return;
   const controller = new AbortController();
-  const token = ++synergyCiToken;
-  synergyCiController = controller;
-  synergyCiPendingKey = requestKey;
+  const token = ++componentCiToken;
+  componentCiController = controller;
+  componentCiPendingKey = requestKey;
   try {
     const payload = await fetchStats({
       ...scope,
-      synergy_ci: true,
-      synergy_ci_rows: descriptors,
+      component_ci: true,
+      component_ci_rows: descriptors,
     }, { signal: controller.signal, shareInFlight: false });
-    if (!mounted || controller.signal.aborted || token !== synergyCiToken) return;
+    if (!mounted || controller.signal.aborted || token !== componentCiToken) return;
     if (!currentDataVersion || String(payload.data_version || '') !== currentDataVersion) {
-      console.warn('Ignored stale Synergy confidence intervals', {
+      console.warn('Ignored stale component confidence intervals', {
         displayed: currentDataVersion,
         received: payload.data_version || null,
       });
@@ -1219,14 +1214,14 @@ async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
     }
     const ciByKey = new Map((payload.data || []).map(item => [item.row_key, item]));
     allData.forEach(row => {
-      const ci = ciByKey.get(synergyCiRowKey(row));
+      const ci = ciByKey.get(componentCiRowKey(row));
       if (!ci) return;
       Object.assign(row, ci);
     });
     renderTable(true);
   } catch (error) {
-    if (error?.name === 'AbortError' || !mounted || token !== synergyCiToken) return;
-    console.warn('Could not load Synergy confidence intervals', error);
+    if (error?.name === 'AbortError' || !mounted || token !== componentCiToken) return;
+    console.warn('Could not load component confidence intervals', error);
     const requested = new Set(descriptors.map(item => {
       if (activeView === 'card_card') return JSON.stringify([item.card_1, item.card_2]);
       if (activeView === 'card_map') return JSON.stringify([item.card_name, item.map_name]);
@@ -1235,11 +1230,7 @@ async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
       return JSON.stringify([item.card_name, item.endgame_name]);
     }));
     allData.forEach(row => {
-      if (!requested.has(synergyCiRowKey(row))) return;
-      row.interaction_ci95_low = null;
-      row.interaction_ci95_high = null;
-      row.interaction_ci95_cluster_n = 0;
-      row.interaction_ci95_method = 'unavailable';
+      if (!requested.has(componentCiRowKey(row))) return;
       row.component_1_ci95_low = null;
       row.component_1_ci95_high = null;
       row.component_1_ci95_n = 0;
@@ -1249,9 +1240,9 @@ async function loadSynergyConfidenceIntervals(scope, descriptors, requestKey) {
     });
     renderTable(true);
   } finally {
-    if (token === synergyCiToken) {
-      synergyCiController = null;
-      synergyCiPendingKey = '';
+    if (token === componentCiToken) {
+      componentCiController = null;
+      componentCiPendingKey = '';
     }
   }
 }

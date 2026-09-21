@@ -1,6 +1,6 @@
 import { deltaRangeColor, divergingRangeColor } from '../color-scales.js?v=20260711-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-5';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260908-arena-bootstrap1';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260921-phase5-public-cutover';
 import { setFilterButtonDisabled } from '../layout.js?v=20260801-2';
 import { renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
 
@@ -9,7 +9,7 @@ export const title = 'Players';
 export const navLabel = 'Players';
 
 const API_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/players';
-const API_URL = 'https://europe-west1-ark-nova-stats-dashboard.cloudfunctions.net/get-card-stats';
+const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app';
 const INDEX_URL = dataset => `${API_ROOT}/index/default-${dataset ? 'mw' : 'base'}.json`;
 const SNAPSHOT_URL = dataset => `${API_ROOT}/general/default-${dataset ? 'mw' : 'base'}.json`;
 // The manifest is updated independently of the static frontend. Keep a small
@@ -32,6 +32,7 @@ const PLAYER_GRAPH_MIN_GAMES = 250;
 // The aggregate table intentionally keeps its compact display shape. This map
 // connects those existing labels to the prepared-table keys used by history.
 const HISTORY_METRIC_KEYS = new Map([
+  ['Elo', 'elo'],
   ['Turns', 'turns'], ['Breaks triggered', 'breaks_triggered'], ['Break%', 'break_pct'],
   ['Points per turn', 'points_per_turn'], ['Points per money', 'points_per_money'],
   ['$ gained per turn', 'money_per_turn'], ['Money per turn', 'money_per_turn'],
@@ -43,7 +44,8 @@ const HISTORY_METRIC_KEYS = new Map([
   ['Animals actions', 'animals_actions'], ['Association actions', 'association_actions'],
   ['Build actions', 'build_actions'], ['Cards actions', 'cards_actions'],
   ['Sponsors actions', 'sponsors_actions'], ['Universities', 'universities'],
-  ['Partner zoos', 'partner_zoos'], ['X-token gained', 'x_tokens_gained'],
+  ['Partner zoos', 'partner_zoos'], ['Reputation actions', 'reputation_actions'],
+  ['X-token gained', 'x_tokens_gained'],
   ['X-token spent', 'x_tokens_spent'], ['X-backs', 'x_backs'],
   ['Money gained', 'money_gained'], ['$ gained', 'money_gained'],
   ['Money gained (income)', 'money_gained_income'], ['$ gained (income)', 'money_gained_income'],
@@ -68,9 +70,10 @@ const HISTORY_METRIC_KEYS = new Map([
 ]);
 const HISTORY_GROUPS = new Map();
 [
+  ['elo', ['elo']],
   ['upgrade_percentages', ['animals_pct', 'association_pct', 'build_pct', 'cards_pct', 'sponsors_pct']],
   ['action_counts', ['animals_actions', 'association_actions', 'build_actions', 'cards_actions', 'sponsors_actions']],
-  ['association_bonuses', ['universities', 'partner_zoos']],
+  ['association_bonuses', ['universities', 'partner_zoos', 'reputation_actions']],
   ['x_tokens', ['x_tokens_gained', 'x_tokens_spent']],
   ['small_buildings', ['kiosks', 'pavilions']],
   ['icons', ['bird_icons', 'herbivore_icons', 'predator_icons', 'primate_icons', 'reptile_icons', 'sea_animal_icons', 'bear_icons', 'petting_zoo_icons', 'africa_icons', 'america_icons', 'asia_icons', 'australia_icons', 'europe_icons', 'rock_icons', 'water_icons', 'science_icons']],
@@ -595,6 +598,10 @@ function graphEligibilityFromPayload(payload, targetView = view) {
   return { ok: true };
 }
 
+function historySelectionNeedsMinimum(targetView = view) {
+  return [...(historySelectedMetrics[targetView] || [])].some(metricKey => metricKey !== 'elo');
+}
+
 function currentGraphEligibility(targetView = view) {
   return graphEligibilityFromPayload(targetView === 'general'
     ? { player_game_count: playerGameCount }
@@ -655,7 +662,7 @@ async function loadData(activeToken, { proposedGraphFilters = false, recheckGrap
     if (!mounted || activeToken !== token) return;
     if (proposedGraphFilters && historyGraphView[view]) {
       const eligibility = graphEligibilityFromPayload(payload);
-      if (!eligibility.ok) {
+      if (historySelectionNeedsMinimum() && !eligibility.ok) {
         restorePlayersFilterState(committedFilters);
         statsLoading = false;
         document.querySelector('.players-history-graph-shell')?.classList.remove('players-updating');
@@ -672,7 +679,7 @@ async function loadData(activeToken, { proposedGraphFilters = false, recheckGrap
     statsLoading = false;
     if ((recheckGraphAfterLoad || historyGraphView[view]) && historyGraphView[view]) {
       const eligibility = currentGraphEligibility();
-      if (!eligibility.ok) {
+      if (historySelectionNeedsMinimum() && !eligibility.ok) {
         historyGraphView[view] = false;
         cancelHistoryRequest(view);
         syncTabs();
@@ -1160,9 +1167,9 @@ function formatValue(raw, format) {
 }
 
 function historyMetricCatalog() {
-  return rows.map((row, index) => {
+  const tableMetrics = rows.map((row, index) => {
     const key = HISTORY_METRIC_KEYS.get(String(row.metric)) || HISTORY_METRIC_KEYS.get(displayMetricName(row.metric));
-    if (!key) return null;
+    if (!key || key === 'elo') return null;
     return {
       key,
       label: displayMetricName(row.metric),
@@ -1171,6 +1178,9 @@ function historyMetricCatalog() {
       sort_order: index + 1,
     };
   }).filter(Boolean);
+  return [{
+    key: 'elo', label: 'Elo', format: 'number', group: 'elo', sort_order: 0,
+  }, ...tableMetrics];
 }
 
 function historyMetricColor(metricKey, catalog = historyMetricCatalog()) {
@@ -1272,8 +1282,13 @@ function togglePlayersHistoryGraph(event, targetView) {
     renderTable();
     return;
   }
+  const hasSelection = targetView === 'general' ? Boolean(selectedPlayer) : selectedPlayers.length >= 2;
+  if (!hasSelection) {
+    showPlayersHistoryModal(targetView === 'general' ? 'Please select a player' : 'Please select at least two players');
+    return;
+  }
   const eligibility = currentGraphEligibility(targetView);
-  if (!eligibility.ok) {
+  if (historySelectionNeedsMinimum(targetView) && !eligibility.ok) {
     showPlayersHistoryModal(eligibility.message);
     return;
   }
@@ -1292,6 +1307,12 @@ function togglePlayersHistoryMetric(metricKey) {
   const catalog = historyMetricCatalog();
   const metric = catalog.find(item => item.key === metricKey);
   if (!metric) return;
+  if (metricKey !== 'elo' && !currentGraphEligibility(view).ok) {
+    showPlayersHistoryModal(view === 'general'
+      ? 'Minimum game count: 250'
+      : 'Minimum game count for any player: 250');
+    return;
+  }
   if (view === 'comparison') {
     historySelectedMetrics.comparison = new Set([metricKey]);
     invalidateHistory('comparison');
