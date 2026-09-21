@@ -264,10 +264,12 @@ monthly budget sends the same alert while publishing to a private handler that
 stops only `ark-nova-duckdb-test`. Budget notifications are delayed estimates,
 not an instantaneous spending cap; stopping the VM does not reverse accrued
 charges or disable unrelated project services. Gateway health and filtered-read
-checks, frontend publication, and legacy-scheduler review have passed. The
-remaining Phase 5 item is a documented rollback rehearsal. BigQuery roles still
-required by controlled source export and Elo maintenance remain in place; public
-BigQuery reads and legacy analytical schedules remain disabled.
+checks, frontend publication, legacy-scheduler review, and the rollback
+rehearsal have passed. The active generation reports a valid rollback parent
+and `/readyz` returns `rollback_ready: true`; the serving pointer remains
+unchanged. BigQuery roles still required by controlled source export and Elo
+maintenance remain in place; public BigQuery reads and legacy analytical
+schedules remain disabled.
 
 ### Start here for Elo spreadsheet / leaderboard work
 
