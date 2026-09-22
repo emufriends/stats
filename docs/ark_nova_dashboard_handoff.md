@@ -1731,6 +1731,14 @@ the e2-medium VM, and a public one-map/one-starting-position request completes
 successfully through the gateway. Exact repeats use the persistent response
 cache.
 
+Dashboard filter requests normally omit `limit` because each page receives its
+complete bounded payload and performs sorting, search, thresholds, and
+pagination locally. The DuckDB adapter therefore defaults an omitted limit to
+its `MAX_LIMIT` rather than 100; explicit limits are reserved for diagnostics
+and internal consumers. Population or payload-contract changes increment the
+response-cache schema so empty or truncated responses from older serving code
+cannot be reused.
+
 ## Filter-performance architecture
 
 Interactive filters read generation-owned DuckDB observation tables rather
