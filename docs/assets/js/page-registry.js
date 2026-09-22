@@ -17,7 +17,7 @@ export const PAGES = {
     id: 'cards',
     title: 'Cards',
     navLabel: 'Cards',
-    load: () => import('./pages/cards.js?v=20260921-filter-performance'),
+    load: () => import('./pages/cards.js?v=20260922-filter-contract'),
   },
   'card-details': {
     id: 'card-details',

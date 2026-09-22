@@ -791,6 +791,13 @@ the default selection for analytical pages; Home deliberately starts with all
 backend map names, so new map-filtering pages should reuse it rather than
 define another local map list.
 
+The browser sends compact map codes (`1a`, `T1`, `A`, and so on). The DuckDB
+shared scope canonicalizes them to the Full Sample `Map` labels before building
+predicates and also accepts canonical labels from snapshot jobs. Never compare
+browser codes directly with `source_full_sample.Map`, because that yields a
+valid-looking but empty filtered population. Filtered Cards requests explicitly
+include `stats_page: "cards"`, as every filtered route names its page contract.
+
 ### MW Action Cards Page
 
 Files:

@@ -381,6 +381,7 @@ function getParams() {
   const selectedRounds = getSelectedRoundTokens();
 
   const params = {
+    stats_page: 'cards',
     is_mw: isMW,
     maps: selectedMaps,
     completed_only: document.getElementById('endGameToggle').checked ? true : null,
