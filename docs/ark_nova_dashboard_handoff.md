@@ -13,7 +13,10 @@ The project is a static GitHub Pages frontend backed by a public read-only DuckD
 
 The current public version is served from GitHub Pages and sends filtered reads
 to `https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query`; default views continue to
-use the immutable Cloud Storage snapshot pack. The Cloud Function remains the
+use the atomic Cloud Storage snapshot pack. The pack pointer is published with
+mandatory revalidation and individual snapshots use a short cache lifetime, so
+an updated object at the stable URL cannot remain pinned by an old immutable
+browser response. The Cloud Function remains the
 maintenance boundary for refresh status, manual refresh authentication, and
 controlled source operations; it is no longer the public analytical read path.
 The public/private cutover was completed on 2026-09-21 after gateway health,
@@ -167,16 +170,20 @@ read-only API. The serving VM is
 `ark-nova-duckdb-test` in `europe-west1-c`, using an e2-medium with 4 GiB RAM.
 The selected serving mode keeps this VM running continuously; its resident
 worker handles the daily refresh request without powering the VM off. The
-refresh function never starts the VM from a request; if it is stopped by the
+worker is a `Type=simple` systemd service with no startup timeout, because its
+normal state is to remain resident while waiting for the next request.
+The refresh function never starts the VM from a request; if it is stopped by the
 €40 safety rail, scheduled and manual refreshes fail safely until the VM is
 manually restarted.
 
 The current private generation is
-`phase5-refresh-20260921-155111-phase5`, with data version
+`phase5-hotfix-20260922-filter-performance-v2`, with data version
 `phase5-source-sync-3c6031ddbc8d09dea83f-20260921092543`. It contains 6,074,924 Full Sample
 rows and 436,526 Logs rows from the controlled Full Sample/Logs
-source, compact route derivatives, current Arena/Records metadata, and a
-validated 99-file private snapshot pack and a public 89-member default pack.
+source, compact route derivatives, current Arena/Records metadata, a
+table-level `completed_tables_narrow` eligibility relation, and the
+completed/non-corrupted `players_metrics_narrow` serving fact. Its rollback
+parent is `phase5-hotfix-20260921-filter-performance`.
 The private pack contains 96 ordinary route files
 plus Arena all-season, latest-season, and manifest assets. All files have the
 same data version; the atomic private snapshot pointer is under
@@ -203,10 +210,10 @@ seasons and 38,032 roster rows, and table/history entries align by numeric
 player ID. Card + Card uses refresh-time compact aggregates, and Arena history
 is built one season at a time to stay within the 4 GiB memory budget.
 
-The public/private snapshot comparison now uses the same generation: the public
-pack and private generation use
-`phase5-source-sync-3c6031ddbc8d09dea83f-20260921092543`, with schema version
-22 and 89 public members. Individual objects are published before the default
+The public/private snapshot comparison uses one data version: the public pack
+and private generation use
+`phase5-source-sync-3c6031ddbc8d09dea83f-20260921092543`, with pack schema version
+23. Individual objects are published before the default
 pack pointer, which is the coherent-generation boundary.
 
 `phase5_refresh_workflow.py` is the private daily/manual workflow. Given a
@@ -1708,17 +1715,20 @@ updating state. The compact scope artifact is stored as newline-delimited row
 arrays with low-overhead gzip; it is decoded only inside the Function and never
 sent wholesale to the browser.
 
-The practical performance target for Players is under three seconds for a
-default selection, no more than five seconds for an uncached filtered General
-or five-player Comparison request, and under 500ms for a component-cache hit.
-Warm measured requests meet the five-second limit; an infrastructure cold start
-can add roughly one second. A warmed Card + Card scope starts no BigQuery job.
-Paid minimum Function instances are not part of the architecture.
+Players default General is snapshot-backed and does not query DuckDB. Filtered
+General reads `players_metrics_narrow` and evaluates the all, winner, expert,
+and master cohorts as separate compact aggregates; combining all 65 metrics in
+one 260-state aggregate caused disk spilling and gateway timeouts. The current
+representative full 65-row filtered request takes 5.36-5.75 seconds directly on
+the e2-medium VM, and a public one-map/one-starting-position request completes
+successfully through the gateway. Exact repeats use the persistent response
+cache.
 
 ## Filter-performance architecture
 
-Interactive filters read backend-owned, daily rebuilt observation tables rather
-than repeatedly expanding Logs arrays or reconstructing opponent/card roles.
+Interactive filters read generation-owned DuckDB observation tables rather
+than querying BigQuery or repeatedly expanding Logs arrays and reconstructing
+opponent/card roles.
 Current tables include flattened endgame events, sponsor rewards, Actions
 starting-position observations, Projects/Releases counts, Specific predictor
 flags, played/in-hand/seen card moments, deduplicated project rewards, CP reward
@@ -1731,19 +1741,18 @@ completion, Arena season, and Tournament classification. This preserves the
 existing filter semantics and lets average, sample SD, CI, count, and frequency
 results be reconstructed without querying the read-only source tables.
 
-Filtered responses use three cache layers: a small per-instance LRU, versioned
-Cloud Storage filter objects, and BigQuery's query cache. Prepared tables are
-atomically replaced during daily refresh; the data version and filter schema are
-part of cache keys, so old results cannot cross a refresh. Endgames, Sponsor
-Endgames, Maps, and every other multi-view page include the selected subview in
-their cache key. Exact repeats target under 500 ms backend time.
+Filtered responses use the in-process LRU and the VM's persistent SQLite
+response cache. Immutable DuckDB generations are atomically activated; the
+generation/data version and normalized route scope are part of cache keys, so
+old results cannot cross a refresh. Endgames, Sponsor Endgames, Maps, and every
+other multi-view page include the selected subview in their cache key.
 
-Normal responses expose `Server-Timing` and `X-Request-Id`. Timings identify
-query submission, BigQuery wait, row iteration, and total Function time. The
-read-only `benchmark_filters.py` script in the Function project exercises every
-dynamic view without invoking maintenance operations. The acceptance budget is
-4.5 seconds backend/5 seconds browser for a cold filtered request and under one
-second browser time for an exact repeat.
+Normal responses expose `Server-Timing` and `X-Request-Id`. The read-only
+`benchmark_filters.py` script in the Function project exercises every dynamic
+view without invoking maintenance operations. Gateway timeouts must not be
+used as a substitute for route optimization: a public request must finish
+inside the gateway budget, and any expensive shared population property belongs
+in a refresh-time derivative.
 
 The deployed reference matrix places ordinary cold filtered views at roughly
 2.4–4.9 seconds and exact repeats at roughly 0.4–1.0 seconds. Card + Card is the
@@ -1867,33 +1876,17 @@ Arena seasons, Last X, and resolved identity. Source BigQuery tables remain
 read-only; prepared Players tables, indexes, and caches are backend-owned
 derivatives.
 
-Players has one date-partitioned player-game table, one identity-clustered
-ordering copy, and two daily weighted rollups. `players_stats_prepared` remains
-partitioned by game date for date-bounded maintenance and Arena work.
-`players_recent_prepared` contains the exact player-game rows in 1,024 stable
-hash partitions keyed by merged identity, then clusters each partition by
-identity, dataset, map, and opponent Elo. Last X supplies the selected
-identity's bucket so BigQuery prunes to roughly one-thousandth of the table
-before applying its filters and final timestamp rank. Its 65 display metrics are
-then emitted from one `UNNEST` struct array, so the selected aggregate is
-computed once rather than repeated in 65 UNION branches. Without these two
-properties, a cold Last X request could take tens of seconds.
-`players_baseline_prepared` groups completed observations by dataset, map,
-date, opponent Elo, Arena season, Tournament state, winner/expert/master state,
-and stores each metric's sum plus valid-value count.
-`players_identity_daily_rollup` stores the same moments by merged identity and
-exact account, preserving the selected-versus-associated count split. Without
-Last X, General and Comparison reconstruct all averages in one aggregation over
-these rollups; the General response is emitted from one `UNNEST` metric array
-rather than 64 separate query branches. Missing baseline and selected
-components run concurrently and are cached independently by data version,
-dataset, map/date/opponent-Elo scope, Arena seasons, Tournament state, resolved
-identity, and Last X. The empty selected-player companion is a valid zero-row
-relation, so custom baseline-only requests remain valid SQL. Default baselines
-still come from the static Players snapshot; default selected identities use
-`players_default_prepared`. General reads and writes its baseline and selected
-component objects in parallel and does not add a redundant whole-response cache
-object; an exact repeat is recomposed from those reusable components.
+Players uses `players_metrics_narrow`, rebuilt in each immutable generation
+from completed tables after excluding corrupted games. It retains the exact
+filter dimensions, `elo_delta`, and the 65 metric inputs but omits unrelated
+Full Sample columns.
+The refresh also materializes `completed_tables_narrow`; no public query may
+regroup the full source table merely to rediscover completed tables. General
+computes each cohort in its own aggregate CTE to remain inside the e2-medium's
+memory budget, then projects the stable 65-row response contract. Comparison
+and Performance by map use the same prepared population. Default General still
+comes from the static Players snapshot; selected-player history remains a
+separate bounded route.
 
 A Last X value may remain in the sidebar while no General or Comparison player
 is selected. In that state the frontend omits it from the statistics request,

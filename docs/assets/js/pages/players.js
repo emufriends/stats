@@ -1,8 +1,8 @@
 import { deltaRangeColor, divergingRangeColor } from '../color-scales.js?v=20260711-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-5';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
 import { setFilterButtonDisabled } from '../layout.js?v=20260801-2';
-import { renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
+import { isDefaultMapSelection, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'players';
 export const title = 'Players';
@@ -454,7 +454,7 @@ function isDefault(request) {
   return view === 'general' && !selectedPlayer && request.last_x_games === null
     && request.opponent_elo_min === 0 && request.opponent_elo_max === null
     && request.date_from === null && request.date_to === null
-    && selectedMaps.length === MAPS.length && !request.players_arena_only;
+    && isDefaultMapSelection(selectedMaps) && !request.players_arena_only;
 }
 
 async function loadArenaManifest() {

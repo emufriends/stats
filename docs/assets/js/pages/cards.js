@@ -1,4 +1,4 @@
-﻿export const id = 'cards';
+export const id = 'cards';
 import {
   cappedNumericRange,
   deltaRangeColor,
@@ -6,10 +6,10 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
-import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
+import { loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
-import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
+import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const title = 'Cards';
 export const navLabel = 'Cards';
@@ -414,10 +414,7 @@ function getDefaultSnapshotKey(params) {
   // Mirrors the backend's cacheable-default definition. Only these two cases
   // are safe to reuse without a fetch: default Marine Worlds and default Base.
   const selectedMaps = params.maps || [];
-  const allMapNames = VALID_MAPS.map(m => m.full);
-  const allMapsSelected =
-    selectedMaps.length === allMapNames.length &&
-    allMapNames.every(mapName => selectedMaps.includes(mapName));
+  const allMapsSelected = isDefaultMapSelection(selectedMaps);
 
   const playerMinDefault = params.player_elo_min === undefined || Number(params.player_elo_min) === 300;
   const opponentMinDefault = params.opponent_elo_min === undefined || Number(params.opponent_elo_min) === 300;

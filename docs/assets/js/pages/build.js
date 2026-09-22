@@ -13,8 +13,8 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
-import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
+import { loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'build';
 export const title = 'Build';
@@ -195,7 +195,7 @@ function isDefault(params) {
   return params.player_elo_min === 300 && params.player_elo_max === null &&
     params.opponent_elo_min === 300 && params.opponent_elo_max === null &&
     params.date_from === '2025-01-01' && params.date_to === null &&
-    (view === 'hexes' || selectedMaps.length === MAPS.length) &&
+    (view === 'hexes' || isDefaultMapSelection(selectedMaps)) &&
     params.completed_only === (view === 'hexes' ? null : (mode === 'frequency' ? true : null));
 }
 

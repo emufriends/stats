@@ -6,14 +6,14 @@ import {
   numericRange,
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260710-2';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-filter-performance';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
-import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
+import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const title = 'Sponsor Endgames';
 export const navLabel = 'Sponsor Endgames';
@@ -256,7 +256,7 @@ function isDefaultParams(params) {
     params.opponent_elo_max === null &&
     params.date_from === '2025-01-01' &&
     params.date_to === null &&
-    selectedMaps.length === VALID_MAPS.length;
+    isDefaultMapSelection(selectedMaps);
 }
 
 async function applyFilters(token = mountToken) {

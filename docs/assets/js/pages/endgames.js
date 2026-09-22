@@ -1,4 +1,4 @@
-﻿export const id = 'endgames';
+export const id = 'endgames';
 import {
   cappedNumericRange,
   deltaRangeColor,
@@ -10,8 +10,8 @@ import {
   relativeEloColor,
 } from '../color-scales.js?v=20260710-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
-import { ALL_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
+import { loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { ALL_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const title = 'Endgames';
 export const navLabel = 'Endgames';
@@ -410,10 +410,7 @@ async function applyFiltersFromSidebar() {
 function getDefaultSnapshotKey(params) {
   if (window.hasActiveGlobalModeFilter?.()) return null;
   const selectedMaps = params.maps || [];
-  const allMapNames = VALID_MAPS.map(m => m.full);
-  const allMapsSelected =
-    selectedMaps.length === allMapNames.length &&
-    allMapNames.every(mapName => selectedMaps.includes(mapName));
+  const allMapsSelected = isDefaultMapSelection(selectedMaps);
 
   const playerMinDefault = params.player_elo_min === undefined || Number(params.player_elo_min) === 300;
   const opponentMinDefault = params.opponent_elo_min === undefined || Number(params.opponent_elo_min) === 300;

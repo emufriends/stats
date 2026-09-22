@@ -10,8 +10,8 @@ import {
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
-import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'icons';
 export const title = 'Icons';
@@ -229,7 +229,7 @@ function isDefault(p) {
   return p.player_elo_min === 300 && p.player_elo_max === null &&
     p.opponent_elo_min === 300 && p.opponent_elo_max === null &&
     p.date_from === '2025-01-01' && p.date_to === null &&
-    selectedMaps.length === VALID_MAPS.length;
+    isDefaultMapSelection(selectedMaps);
 }
 
 async function applyFilters(activeToken = token) {

@@ -36,6 +36,12 @@ export const MAP_GROUPS = [
 export const ALL_MAPS = MAP_GROUPS.flatMap(([, , maps]) => maps);
 export const DEFAULT_MAPS = STANDARD_MAPS;
 
+export function isDefaultMapSelection(selectedMaps) {
+  const selected = new Set(selectedMaps || []);
+  const defaults = DEFAULT_MAPS.map(([, , full]) => full);
+  return selected.size === defaults.length && defaults.every(map => selected.has(map));
+}
+
 function mapFilterGroupHtml([id, label], selectAllAction, selectNoneAction, { showLabel = true, showHeading = true } = {}) {
   return `<div class="map-filter-subgroup" data-map-group="${id}">
     ${showHeading ? `<div class="map-filter-subgroup-heading${showLabel ? '' : ' map-filter-subgroup-actions'}">${showLabel ? `<span class="filter-label">${label}</span>` : ''}<span class="map-select-all-none">(<span class="map-toggle-link" onclick="${selectAllAction}('${id}')">all</span> / <span class="map-toggle-link" onclick="${selectNoneAction}('${id}')">none</span>)</span></div>` : ''}

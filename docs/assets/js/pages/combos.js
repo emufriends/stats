@@ -9,7 +9,7 @@ import {
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260819-3';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
-import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
+import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const title = 'Combos';
 export const navLabel = 'Combos';
@@ -134,7 +134,7 @@ export const sidebarHtml = `
 
 const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-filter-performance';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
@@ -417,7 +417,7 @@ function isDefaultParams(params) {
   return params.player_elo_min === 300 && params.player_elo_max === null
     && params.opponent_elo_min === 300 && params.opponent_elo_max === null
     && params.date_from === '2025-01-01' && params.date_to === null
-    && params.completed_only === null && selectedMaps.length === MAPS.length
+    && params.completed_only === null && isDefaultMapSelection(selectedMaps)
     && selectedRounds.size === ROUNDS.length;
 }
 

@@ -10,8 +10,8 @@ import {
 } from '../color-scales.js?v=20260812-9';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260812-9';
-import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260921-phase5-query-endpoint';
-import { ALL_MAPS, DEFAULT_MAPS, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260908-map-option-b6';
+import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'mw-action-cards';
 export const title = 'MW Action Cards';
@@ -207,7 +207,7 @@ function isDefault(request, view) {
     && request.opponent_elo_min === 300 && request.opponent_elo_max === null
     && request.date_from === '2025-01-01' && request.date_to === null
     && !request.completed_only && !request.arena_only && !request.tournament_only
-    && (view === 'by_map' || selectedMaps.length === MAPS.length);
+    && (view === 'by_map' || isDefaultMapSelection(selectedMaps));
 }
 
 async function loadView(view, token) {
