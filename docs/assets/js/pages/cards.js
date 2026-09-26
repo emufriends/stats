@@ -130,6 +130,8 @@ let apiWarmupLastAt = 0;
 const API_WARMUP_COOLDOWN_MS = 5 * 60 * 1000;
 let isPageMounted = false;
 let mountToken = 0;
+let statsRequestToken = 0;
+let statsAbortController = null;
 
 function isCurrentMount(token) {
   return isPageMounted && token === mountToken;
@@ -445,22 +447,6 @@ function closeSidebarIfOpen() {
 
 async function applyFiltersFromSidebar() {
   const activeMountToken = mountToken;
-  const params = getParams();
-  const defaultSnapshotKey = getDefaultSnapshotKey(params);
-  if (defaultSnapshotKey !== null) {
-    const cachedDefaultSnapshot = defaultSnapshotCache[defaultSnapshotKey];
-    if (!isCurrentMount(activeMountToken)) return;
-    if (cachedDefaultSnapshot) {
-      roundFilterActive = Boolean(cachedDefaultSnapshot.round_filter_active);
-      allData = cachedDefaultSnapshot.data;
-      searchQuery = normalizeSearchText(document.getElementById('searchInput').value);
-      updateCardSearchIndicator();
-      applySearch();
-    }
-    closeSidebarIfOpen();
-    return;
-  }
-
   closeSidebarIfOpen();
   await applyFilters(activeMountToken);
 }
@@ -491,11 +477,16 @@ async function applyFilters(activeMountToken = mountToken) {
   // If no Maps or no Rounds are selected, there is nothing to query: the frontend
   // renders an empty result immediately and skips the Cloud Function call entirely.
   if (!isCurrentMount(activeMountToken)) return;
+  const requestToken = ++statsRequestToken;
+  statsAbortController?.abort();
+  statsAbortController = new AbortController();
+  const requestController = statsAbortController;
   const params = getParams();
   const selectedMaps = params.maps || [];
   const selectedRounds = getSelectedRoundTokens();
 
   if (!selectedMaps.length || !selectedRounds.length) {
+    statsAbortController = null;
     roundFilterActive = selectedRounds.length < ROUND_FILTERS.length;
 
     // In round-filter mode, these columns are intentionally unavailable. If the
@@ -516,6 +507,7 @@ async function applyFilters(activeMountToken = mountToken) {
   const defaultSnapshotKey = getDefaultSnapshotKey(params);
   const cachedDefaultSnapshot = defaultSnapshotKey === null ? null : defaultSnapshotCache[defaultSnapshotKey];
   if (cachedDefaultSnapshot) {
+    statsAbortController = null;
     roundFilterActive = Boolean(cachedDefaultSnapshot.round_filter_active);
     allData = cachedDefaultSnapshot.data;
     searchQuery = normalizeSearchText(document.getElementById('searchInput').value);
@@ -537,9 +529,10 @@ async function applyFilters(activeMountToken = mountToken) {
     json = await loadStats(
       params,
       defaultSnapshotKey === null ? null : DEFAULT_SNAPSHOT_URLS[defaultSnapshotKey],
+      { signal: requestController.signal },
     );
 
-    if (!isCurrentMount(activeMountToken)) return;
+    if (!isCurrentMount(activeMountToken) || requestToken !== statsRequestToken) return;
     if (json.status !== 'ok') throw new Error(json.message || 'Unknown error');
 
     roundFilterActive = Boolean(json.round_filter_active && (params.rounds !== undefined));
@@ -564,11 +557,13 @@ async function applyFilters(activeMountToken = mountToken) {
     applySearch();
 
   } catch (err) {
+    if (err?.name === 'AbortError') return;
     if (isCurrentMount(activeMountToken) && !preserve) showError(err.message);
     else console.error('Could not update card statistics', err);
   } finally {
-    if (isCurrentMount(activeMountToken)) tableWrap?.classList.remove('stats-updating');
-    if (isCurrentMount(activeMountToken) && btn) {
+    if (statsAbortController === requestController) statsAbortController = null;
+    if (isCurrentMount(activeMountToken) && requestToken === statsRequestToken) tableWrap?.classList.remove('stats-updating');
+    if (isCurrentMount(activeMountToken) && requestToken === statsRequestToken && btn) {
       btn.disabled = false;
       btn.textContent = 'Apply filters';
     }
@@ -2021,6 +2016,9 @@ export function setDataset(value) {
 export function unmount() {
   isPageMounted = false;
   mountToken += 1;
+  statsRequestToken += 1;
+  statsAbortController?.abort();
+  statsAbortController = null;
   const searchInput = document.getElementById('searchInput');
   if (searchInput) searchInput.removeEventListener('input', onSearch);
   const panel = document.getElementById('abilitiesPanel');

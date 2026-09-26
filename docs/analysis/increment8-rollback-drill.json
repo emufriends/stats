@@ -1,0 +1,46 @@
+{
+  "after": {
+    "data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+    "generation": "phase5-refresh-9086145ea79c7db43deb5752",
+    "pack_data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+    "pack_release_version": "ce396e942482ffe8b56383835402858bf76cd1514feda84d7ca613e4d7a89fae",
+    "ready": true,
+    "rollback_ready": true
+  },
+  "before": {
+    "data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+    "generation": "phase5-refresh-9086145ea79c7db43deb5752",
+    "pack_data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+    "pack_release_version": "ce396e942482ffe8b56383835402858bf76cd1514feda84d7ca613e4d7a89fae",
+    "ready": true,
+    "rollback_ready": true
+  },
+  "checked_at": "2026-09-25T16:09:31.126335Z",
+  "original_generation": "phase5-refresh-9086145ea79c7db43deb5752",
+  "restore": {
+    "artifact_count": 102,
+    "completed_at": "2026-09-25T16:09:23.192092Z",
+    "data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+    "generation": "phase5-refresh-9086145ea79c7db43deb5752",
+    "previous_generation": "phase5-hotfix-20260922-filter-performance-v2",
+    "release_version": "ce396e942482ffe8b56383835402858bf76cd1514feda84d7ca613e4d7a89fae",
+    "status": "ok"
+  },
+  "restore_error": null,
+  "rollback": {
+    "data_version": "phase5-source-sync-3c6031ddbc8d09dea83f-20260921092543",
+    "generation": "phase5-hotfix-20260922-filter-performance-v2",
+    "operation": {
+      "generation": "phase5-refresh-9086145ea79c7db43deb5752",
+      "restored_generation": "phase5-hotfix-20260922-filter-performance-v2",
+      "status": "ok"
+    },
+    "pack_data_version": "phase5-source-sync-3c6031ddbc8d09dea83f-20260921092543",
+    "pack_release_version": null,
+    "ready": true,
+    "rollback_ready": true
+  },
+  "rollback_error": null,
+  "rollback_parent": "phase5-hotfix-20260922-filter-performance-v2",
+  "status": "pass"
+}

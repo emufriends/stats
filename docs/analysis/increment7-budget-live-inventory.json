@@ -1,0 +1,30 @@
+{
+  "checked_at": "2026-09-24",
+  "billing_account": "014268-E67FEB-36CF1F",
+  "project_number": "413312054512",
+  "budgets": [
+    {
+      "amount": 20,
+      "currency": "EUR",
+      "display_name": "Ark Nova dashboard EUR20 warning",
+      "threshold_percent": 1.0,
+      "monitoring_channel": "projects/ark-nova-stats-dashboard/notificationChannels/3499827035079413384"
+    },
+    {
+      "amount": 40,
+      "currency": "EUR",
+      "display_name": "Ark Nova dashboard EUR40 VM shutdown",
+      "threshold_percent": 1.0,
+      "monitoring_channel": "projects/ark-nova-stats-dashboard/notificationChannels/3499827035079413384",
+      "pubsub_topic": "projects/ark-nova-stats-dashboard/topics/budget-shutdown-40-eur"
+    }
+  ],
+  "hard_stop_subscription": true,
+  "subscription": "projects/ark-nova-stats-dashboard/subscriptions/budget-shutdown-40-eur-push",
+  "push_identity": "budget-shutdown@ark-nova-stats-dashboard.iam.gserviceaccount.com",
+  "push_service": "budget-shutdown",
+  "push_service_region": "europe-west1",
+  "push_service_ready": true,
+  "email_target": "hlmichel.vo@gmail.com",
+  "email_target_note": "The budget objects reference the established shared Monitoring channel; the installed CLI lacked the optional beta component needed to re-read the channel address in this audit."
+}

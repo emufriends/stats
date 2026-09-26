@@ -1,0 +1,13 @@
+{
+  "data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+  "direct_rows": 13456,
+  "generation": "phase5-refresh-9086145ea79c7db43deb5752",
+  "mismatches": [],
+  "missing": [],
+  "raw_field_tolerance": 1e-09,
+  "rounded_field_tolerance": 0.0010001,
+  "snapshot_data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+  "snapshot_rows": 13456,
+  "status": "pass",
+  "unexpected": []
+}

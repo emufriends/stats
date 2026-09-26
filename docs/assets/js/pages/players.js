@@ -414,7 +414,10 @@ function params() {
       ? Boolean(document.getElementById('playersCompletedOnly')?.checked)
       : false,
     players_arena_only: selectedArenaSeasons.length > 0,
-    players_arena_seasons: selectedArenaSeasons.length > 0 ? [...selectedArenaSeasons] : [],
+    // Omit the optional field when no Arena season is selected. The backend
+    // deliberately rejects an explicitly empty list so malformed restrictive
+    // filters cannot silently broaden into the unfiltered population.
+    players_arena_seasons: selectedArenaSeasons.length > 0 ? [...selectedArenaSeasons] : undefined,
   };
 }
 

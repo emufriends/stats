@@ -1,0 +1,79 @@
+{
+  "check_count": 10,
+  "checks": [
+    {
+      "cache_status": "private_hit",
+      "id": "component_batch/combinations/card_card",
+      "row_key": "[\"Australian Dingo\",\"Spotted Hyena Compound\"]",
+      "status": "pass"
+    },
+    {
+      "cache_status": "private_hit",
+      "id": "component_batch/combinations/card_map",
+      "row_key": "[\"Archaeologist\",\"Map 2a: Outdoor Areas\"]",
+      "status": "pass"
+    },
+    {
+      "cache_status": "private_hit",
+      "id": "component_batch/combinations/card_round",
+      "row_key": "[\"Amazon House\",\"2\"]",
+      "status": "pass"
+    },
+    {
+      "cache_status": "private_hit",
+      "id": "component_batch/combinations/card_endgame",
+      "row_key": "[\"Greater Flamingo\",\"Sponsored Zoo\"]",
+      "status": "pass"
+    },
+    {
+      "cache_status": "private_hit",
+      "id": "component_batch/combinations/card_action_card",
+      "row_key": "[\"Guineafowl Puffer\",\"Animals 2\"]",
+      "status": "pass"
+    },
+    {
+      "cache_status": "private_hit",
+      "id": "component_batch/mw_action_cards/synergies",
+      "row_key": "[\"Animals 3\",\"Sponsors 2\"]",
+      "status": "pass"
+    },
+    {
+      "id": "players_history/general",
+      "metrics": [
+        "reputation_actions",
+        "turns"
+      ],
+      "players": 1,
+      "status": "pass"
+    },
+    {
+      "id": "players_history/comparison",
+      "metrics": [
+        "score"
+      ],
+      "players": 2,
+      "status": "pass"
+    },
+    {
+      "id": "players_history/elo_combined",
+      "metrics": [
+        "elo"
+      ],
+      "players": 1,
+      "status": "pass"
+    },
+    {
+      "id": "arena_graph/artifact_bundle",
+      "latest_rows": 3694,
+      "latest_season": "S13",
+      "latest_series": 3694,
+      "season_count": 13,
+      "status": "pass"
+    }
+  ],
+  "data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+  "failed": [],
+  "generation": "phase5-refresh-9086145ea79c7db43deb5752",
+  "passed": 10,
+  "status": "pass"
+}

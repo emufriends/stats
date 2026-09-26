@@ -1,0 +1,51 @@
+{
+  "failed": 0,
+  "results": [
+    {
+      "check": "request_contract",
+      "status": "pass"
+    },
+    {
+      "check": "player_routing",
+      "status": "pass"
+    },
+    {
+      "check": "opponent_elo_contract",
+      "status": "pass"
+    },
+    {
+      "check": "cards_catalog",
+      "status": "pass"
+    },
+    {
+      "check": "opening_hand_population",
+      "status": "pass"
+    },
+    {
+      "check": "players_catalog",
+      "status": "pass"
+    },
+    {
+      "check": "card_card_dataset_scope",
+      "status": "pass"
+    },
+    {
+      "check": "mw_action_card_catalog",
+      "status": "pass"
+    },
+    {
+      "check": "build_hexes_snapshot",
+      "status": "pass"
+    },
+    {
+      "check": "actions_starting_position_catalog",
+      "status": "pass"
+    },
+    {
+      "check": "conservation_project_rewards_catalog",
+      "status": "pass"
+    }
+  ],
+  "status": "ok",
+  "total": 11
+}

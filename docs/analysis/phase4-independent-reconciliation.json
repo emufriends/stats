@@ -1,0 +1,613 @@
+{
+  "data_version": "phase5-source-sync-7efb47511584a75bd22e-20260924001145",
+  "failed_routes": [],
+  "generated_at": "2026-09-25T15:28:29.896506Z",
+  "generation": "phase5-refresh-9086145ea79c7db43deb5752",
+  "method": "Observed private route payloads were compared with direct DuckDB source aggregates. Route SQL builders were not imported by this audit.",
+  "notes": [
+    "The previously reconciled Card + Card route is intentionally excluded; this report covers the remaining 49 contracts.",
+    "Home is checked for source-population retention, including the Home-only corrupted-table exception.",
+    "Records and Arena use generation-local imported moving-source relations, with game fields independently joined from Full Sample where applicable."
+  ],
+  "passed_routes": 49,
+  "route_count": 49,
+  "routes": [
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 12,
+      "reference_returned_row_count": 12,
+      "reference_row_count": 12,
+      "route": "home/default",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "field": "delta_played",
+        "match": true,
+        "observed": 0.825,
+        "reference": 0.825
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 280,
+      "route": "cards/default",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 1,
+      "reference_returned_row_count": 1,
+      "reference_row_count": 1,
+      "route": "cards/component_ci",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 280,
+      "route": "opening_hand/default",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 17,
+      "reference_returned_row_count": 17,
+      "reference_row_count": 17,
+      "route": "endgames/general",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 17,
+      "reference_returned_row_count": 17,
+      "reference_row_count": 17,
+      "route": "endgames/cp_distribution",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 17,
+      "reference_returned_row_count": 17,
+      "reference_row_count": 17,
+      "route": "endgames/cp_by_map",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "field": "map_1a",
+        "match": true,
+        "observed": 53954.0,
+        "reference": 53954
+      },
+      "observed_row_count": 65,
+      "reference_returned_row_count": 65,
+      "reference_row_count": 65,
+      "route": "maps/metrics",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 227,
+      "route": "maps/tournament_h2h",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 31,
+      "reference_returned_row_count": 31,
+      "reference_row_count": 31,
+      "route": "sponsor_endgames/cp",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 9,
+      "reference_returned_row_count": 9,
+      "reference_row_count": 9,
+      "route": "sponsor_endgames/appeal",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 280,
+      "route": "combinations/card_map",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 2139,
+      "route": "combinations/card_round",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 4760,
+      "route": "combinations/card_endgame",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 5600,
+      "route": "combinations/card_action_card",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 30,
+      "reference_returned_row_count": 30,
+      "reference_row_count": 30,
+      "route": "predictors/general",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 16,
+      "reference_returned_row_count": 16,
+      "reference_row_count": 16,
+      "route": "predictors/icon",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 19,
+      "reference_returned_row_count": 19,
+      "reference_row_count": 19,
+      "route": "predictors/specific",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 9,
+      "reference_returned_row_count": 9,
+      "reference_row_count": 9,
+      "route": "actions/starting_position",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 11,
+      "reference_returned_row_count": 11,
+      "reference_row_count": 11,
+      "route": "actions/upgrades",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 5,
+      "reference_returned_row_count": 5,
+      "reference_row_count": 5,
+      "route": "actions/upgrade_order",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 5,
+      "reference_returned_row_count": 5,
+      "reference_row_count": 5,
+      "route": "actions/upgrades_by_map",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 10,
+      "reference_returned_row_count": 10,
+      "reference_row_count": 10,
+      "route": "build/enclosures",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 6,
+      "reference_returned_row_count": 6,
+      "reference_row_count": 6,
+      "route": "build/hexes",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 16,
+      "reference_returned_row_count": 16,
+      "reference_row_count": 16,
+      "route": "icons/default",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 16,
+      "reference_returned_row_count": 16,
+      "reference_row_count": 16,
+      "route": "conservation/projects",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 22,
+      "reference_returned_row_count": 22,
+      "reference_row_count": 22,
+      "route": "conservation/project_rewards",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 48,
+      "reference_returned_row_count": 48,
+      "reference_row_count": 48,
+      "route": "conservation/cp_rewards",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 7,
+      "reference_returned_row_count": 7,
+      "reference_row_count": 7,
+      "route": "scoring/final_score",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 9,
+      "reference_returned_row_count": 9,
+      "reference_row_count": 9,
+      "route": "scoring/appeal",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 8,
+      "reference_returned_row_count": 8,
+      "reference_row_count": 8,
+      "route": "scoring/conservation_points",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 15,
+      "reference_returned_row_count": 15,
+      "reference_row_count": 15,
+      "route": "scoring/reputation",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 4,
+      "reference_returned_row_count": 4,
+      "reference_row_count": 4,
+      "route": "workers/general",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 2,
+      "reference_returned_row_count": 2,
+      "reference_row_count": 2,
+      "route": "workers/two_cp_worker",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 65,
+      "reference_returned_row_count": 65,
+      "reference_row_count": 65,
+      "route": "players/general",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 50,
+      "reference_returned_row_count": 50,
+      "reference_row_count": 50,
+      "route": "players/comparison",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 1,
+      "reference_returned_row_count": 1,
+      "reference_row_count": 1,
+      "route": "players/performance_by_map",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 7229,
+      "route": "players/arena_top_100",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 1,
+      "reference_returned_row_count": 1,
+      "reference_row_count": 1,
+      "route": "players/history",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 38032,
+      "reference_returned_row_count": 38032,
+      "reference_row_count": 38032,
+      "route": "arena/top_100",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "field": "peak_elo",
+        "match": true,
+        "observed": 965.4,
+        "reference": 965.4
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 100,
+      "route": "records/elo_leaderboard",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 104,
+      "route": "records/fastest_games",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 5688,
+      "route": "records/highest_scores",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 35,
+      "reference_returned_row_count": 35,
+      "reference_row_count": 35,
+      "route": "records/biggest_turns",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 42511,
+      "route": "records/most_icons",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "field": "delta_picked_ci_n",
+        "match": true,
+        "observed": 9408,
+        "reference": 9408
+      },
+      "observed_row_count": 20,
+      "reference_returned_row_count": 20,
+      "reference_row_count": 20,
+      "route": "mw_action_cards/general",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 20,
+      "reference_returned_row_count": 20,
+      "reference_row_count": 20,
+      "route": "mw_action_cards/draft",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 20,
+      "reference_returned_row_count": 20,
+      "reference_row_count": 20,
+      "route": "mw_action_cards/by_map",
+      "status": "pass"
+    },
+    {
+      "method": "direct_source_aggregate",
+      "numeric_probe": {
+        "reason": "The route is validated by an independently derived catalog/event count.",
+        "status": "not_applicable"
+      },
+      "observed_row_count": 100,
+      "reference_returned_row_count": 100,
+      "reference_row_count": 250,
+      "route": "mw_action_cards/synergies",
+      "status": "pass"
+    }
+  ],
+  "status": "pass"
+}

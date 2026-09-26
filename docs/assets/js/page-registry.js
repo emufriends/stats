@@ -17,7 +17,7 @@ export const PAGES = {
     id: 'cards',
     title: 'Cards',
     navLabel: 'Cards',
-    load: () => import('./pages/cards.js?v=20260922-filter-contract'),
+    load: () => import('./pages/cards.js?v=20260926-filter-request-race'),
   },
   'card-details': {
     id: 'card-details',
@@ -29,7 +29,7 @@ export const PAGES = {
     id: 'opening-hand',
     title: 'Opening Hand',
     navLabel: 'Opening Hand',
-    load: () => import('./pages/opening-hand.js?v=20260921-filter-performance'),
+    load: () => import('./pages/opening-hand.js?v=20260926-filter-request-race'),
   },
   maps: {
     id: 'maps',
@@ -107,7 +107,7 @@ export const PAGES = {
     id: 'players',
     title: 'Players',
     navLabel: 'Players',
-    load: () => import('./pages/players.js?v=20260921-filter-performance'),
+    load: () => import('./pages/players.js?v=20260925-increment8-arena-season-contract'),
   },
   arena: {
     id: 'arena',
