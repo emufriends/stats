@@ -41,7 +41,7 @@ export const PAGES = {
     id: 'combos',
     title: 'Combos',
     navLabel: 'Combos',
-    load: () => import('./pages/combos.js?v=20260921-filter-performance'),
+    load: () => import('./pages/combos.js?v=20260927-combo-repair'),
   },
   endgames: {
     id: 'endgames',
@@ -107,7 +107,7 @@ export const PAGES = {
     id: 'players',
     title: 'Players',
     navLabel: 'Players',
-    load: () => import('./pages/players.js?v=20260925-increment8-arena-season-contract'),
+    load: () => import('./pages/players.js?v=20260927-player-search-repair'),
   },
   arena: {
     id: 'arena',

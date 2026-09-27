@@ -99,9 +99,9 @@ CARD_CARD_WARMING_ENABLED = _environment_bool(
 PARTIAL_BIGQUERY_REFRESH_ENABLED = _environment_bool(
     "PARTIAL_BIGQUERY_REFRESH_ENABLED", False
 )
-# Per-job ceilings are a second line of defence. A zero value disables the
-# respective ceiling deliberately; production should retain these defaults
-# until the local analytical serving database replaces BigQuery.
+# Per-job ceilings protect the controlled maintenance/import boundary. Public
+# analytical requests are served by DuckDB and keep BigQuery queries disabled.
+# A zero value disables the corresponding ceiling deliberately.
 PUBLIC_BIGQUERY_MAX_BYTES_BILLED = _environment_nonnegative_int(
     "PUBLIC_BIGQUERY_MAX_BYTES_BILLED", 2 * 1024 ** 3
 )
@@ -3206,11 +3206,11 @@ def _refresh_prepared_logs_table(arena_metadata=None):
 def _refresh_prepared_full_stats_table(arena_metadata=None):
     """Materialize Full Sample with canonical pre-game Elo semantics.
 
-    The source's legacy ``elo`` and ``opponent_elo`` fields represent mixed
-    rating moments and must never enter dashboard statistics. Player Elo is
+    The source ``elo`` and ``opponent_elo`` fields represent mixed rating
+    moments and are not analytical inputs. Player Elo is
     the source ``pre_match_elo``. Opponent Elo is derived from the unique
     opposing player row's ``pre_match_elo``; malformed tables deliberately
-    receive NULL rather than falling back to legacy metadata.
+    receive NULL rather than falling back to those source fields.
     """
     arena_metadata = arena_metadata or _load_arena_metadata()
     arena_season_case = _arena_season_case_sql(arena_metadata)
@@ -4269,9 +4269,8 @@ def _refresh_prepared_home_observations_table():
     """
     started_at = time.perf_counter()
     client = _CostControlledBigQueryClient(project=BIGQUERY_JOB_PROJECT)
-    # The canonical Elo migration removes FLOAT64 rating fields from the
-    # clustering specification. BigQuery cannot alter clustering through
-    # CREATE OR REPLACE, so explicitly replace this backend-owned derivative.
+    # Canonical rating fields are not clustering keys. BigQuery cannot alter
+    # clustering through CREATE OR REPLACE, so replace this backend derivative.
     client.query(
         f"DROP TABLE IF EXISTS `{PREPARED_HOME_OBSERVATIONS_TABLE}`",
         location=BIGQUERY_LOCATION,
@@ -4292,7 +4291,7 @@ def _refresh_prepared_endgame_events_table():
     """Resolve endgame ownership once per refresh, not once per request.
 
     Marine Worlds logs can store dealt cards on the opposite player row.  The
-    three event roles below preserve the old General-table semantics exactly:
+    three event roles below define the General-table semantics:
     raw dealt counts, ownership-corrected dealt Delta observations, and scored
     observations (including CP).
     """

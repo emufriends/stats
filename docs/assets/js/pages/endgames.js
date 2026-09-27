@@ -1298,7 +1298,7 @@ function showLoading(mode = 'query') {
   const title = isSavedSnapshot ? 'Preparing data...' : 'Fetching data...';
   const sub = isSavedSnapshot
     ? 'Loading the latest available endgame statistics.'
-    : 'Querying BigQuery with your current filters.';
+    : 'Calculating statistics with your current filters.';
   document.getElementById('tableBody').innerHTML = `<tr><td colspan="${columnCountForView()}">
     <div class="state-overlay">
       <div class="spinner"></div>

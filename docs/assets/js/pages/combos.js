@@ -368,6 +368,28 @@ function activePairTypes() {
   return activeView === 'card_action_card' ? CARD_ACTION_PAIR_TYPES : PAIR_TYPES;
 }
 
+function canonicalPairType(value, view = activeView) {
+  const parts = String(value || '').replace(' vs. ', ' + ').split('+')
+    .map(part => part.trim().toLowerCase());
+  if (parts.length !== 2 || parts.some(part => !part)) return String(value || '').trim();
+  const cardLabels = { animal: 'Animal', project: 'Project', sponsor: 'Sponsor' };
+  if (view === 'card_card') {
+    const order = { animal: 0, project: 1, sponsor: 2 };
+    if (parts.some(part => !Object.hasOwn(order, part))) return String(value || '').trim();
+    parts.sort((a, b) => order[a] - order[b]);
+    return parts.map(part => cardLabels[part]).join(' + ');
+  }
+  if (view === 'card_action_card') {
+    const actionLabels = {
+      animals: 'Animals', association: 'Association', build: 'Build',
+      cards: 'Cards', sponsors: 'Sponsors',
+    };
+    if (!cardLabels[parts[0]] || !actionLabels[parts[1]]) return String(value || '').trim();
+    return `${cardLabels[parts[0]]} + ${actionLabels[parts[1]]}`;
+  }
+  return String(value || '').trim();
+}
+
 function isPairTableView() {
   return ['card_card', 'card_endgame', 'card_action_card'].includes(activeView);
 }
@@ -610,7 +632,7 @@ function applyClientFilters({ preserveHead = false } = {}) {
   const minimum = minimumPlaysValue();
   assignGlobalRanks(minimum);
   const candidatesBeforeMinimum = allData.filter(row => {
-    const normalizedPairType = String(row.pair_type || '').replace(' vs. ', ' + ');
+    const normalizedPairType = canonicalPairType(row.pair_type);
     if ((activeView === 'card_card' || activeView === 'card_action_card') && !selectedTypes.has(normalizedPairType)) return false;
     if (activeView === 'card_action_card') {
       if (selectedOne && row.card_name !== selectedOne) return false;
@@ -796,7 +818,7 @@ function renderTable(preserveHead = false) {
   const totalRows = serverPaged ? Number(serverMeta?.total_rows || 0) : filteredData.length;
   const start = totalRows ? (currentPage - 1) * rowsPerPage + 1 : 0;
   const end = Math.min(currentPage * rowsPerPage, totalRows);
-  if (meta) meta.innerHTML = `<span class="meta-prefix">Showing </span><strong>${start}-${end}</strong> of <strong>${filteredData.length}</strong> <span class="combo-meta-full">combinations</span><span class="combo-meta-short">combos</span>`;
+  if (meta) meta.innerHTML = `<span class="meta-prefix">Showing </span><strong>${start}-${end}</strong> of <strong>${totalRows}</strong> <span class="combo-meta-full">combinations</span><span class="combo-meta-short">combos</span>`;
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
   const pageRows = serverPaged ? filteredData : filteredData.slice(start ? start - 1 : 0, end);

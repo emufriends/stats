@@ -17,8 +17,8 @@ export const mainHtml = "<!--\n      Main table controls.\n      Desktop/tablet:
 export const sidebarHtml = "\u003cdiv class=\"sidebar-header\"\u003e\n      \u003cspan class=\"sidebar-title\"\u003eFilters\u003c/span\u003e\n      \u003cdiv style=\"display:flex;align-items:center;gap:6px;\"\u003e\n        \u003cbutton class=\"reset-btn\" onclick=\"resetFilters()\"\u003eReset\u003c/button\u003e\n        \u003cbutton class=\"sidebar-close-btn\" onclick=\"toggleSidebar()\" title=\"Close filters\"\u003ex\u003c/button\u003e\n      \u003c/div\u003e\n    \u003c/div\u003e\n\n    \u003chr class=\"divider\" /\u003e\n\n    \u003c!-- Player ELO --\u003e\n    \u003cdiv class=\"filter-group\"\u003e\n      \u003cspan class=\"filter-label\"\u003ePlayer ELO\u003c/span\u003e\n      \u003cdiv class=\"range-row\"\u003e\n        \u003cinput class=\"range-input\" type=\"number\" id=\"playerEloMin\" placeholder=\"Min\" value=\"300\" min=\"0\" /\u003e\n        \u003cinput class=\"range-input\" type=\"number\" id=\"playerEloMax\" placeholder=\"Max\" min=\"0\" /\u003e\n      \u003c/div\u003e\n    \u003c/div\u003e\n\n    \u003c!-- Opponent ELO --\u003e\n    \u003cdiv class=\"filter-group\"\u003e\n      \u003cspan class=\"filter-label\"\u003eOpponent ELO\u003c/span\u003e\n      \u003cdiv class=\"range-row\"\u003e\n        \u003cinput class=\"range-input\" type=\"number\" id=\"opponentEloMin\" placeholder=\"Min\" value=\"300\" min=\"0\" /\u003e\n        \u003cinput class=\"range-input\" type=\"number\" id=\"opponentEloMax\" placeholder=\"Max\" min=\"0\" /\u003e\n      \u003c/div\u003e\n    \u003c/div\u003e\n\n    \u003chr class=\"divider\" /\u003e\n\n    \u003c!-- Maps --\u003e\n    \u003cdiv class=\"filter-group\"\u003e\n      \u003cdiv style=\"display:flex;align-items:baseline;gap:6px;margin-bottom:8px;\"\u003e\n        \u003cspan class=\"filter-label\" style=\"margin-bottom:0\"\u003eMaps\u003c/span\u003e\n        \u003cspan class=\"map-select-all-none\"\u003e\n          (\u003cspan class=\"map-toggle-link\" onclick=\"selectAllMaps()\"\u003eall\u003c/span\u003e / \u003cspan class=\"map-toggle-link\" onclick=\"selectNoneMaps()\"\u003enone\u003c/span\u003e)\n        \u003c/span\u003e\n      \u003c/div\u003e\n      \u003cdiv class=\"chip-grid\" id=\"mapChips\"\u003e\u003c/div\u003e\n    \u003c/div\u003e\n\n    \u003chr class=\"divider\" /\u003e\n\n    \u003c!-- Round filter\n         All six chips active = default/no round filter.\n         Selecting only some chips re-queries the backend for cards played in those rounds.\n         Selecting no chips is allowed; applyFilters() catches that locally and renders an\n         empty table without calling the backend. This mirrors Maps none behaviour. --\u003e\n    \u003cdiv class=\"filter-group\"\u003e\n      \u003cdiv style=\"display:flex;align-items:baseline;gap:6px;margin-bottom:8px;\"\u003e\n        \u003cspan class=\"filter-label\" style=\"margin-bottom:0\"\u003eRound\u003c/span\u003e\n        \u003cspan class=\"map-select-all-none\"\u003e\n          (\u003cspan class=\"map-toggle-link\" onclick=\"selectAllRounds()\"\u003eall\u003c/span\u003e / \u003cspan class=\"map-toggle-link\" onclick=\"selectNoneRounds()\"\u003enone\u003c/span\u003e)\n        \u003c/span\u003e\n      \u003c/div\u003e\n      \u003cdiv class=\"chip-grid\" id=\"roundChips\"\u003e\u003c/div\u003e\n    \u003c/div\u003e\n\n    \u003chr class=\"divider\" /\u003e\n\n    \u003c!-- Date range --\u003e\n    \u003cdiv class=\"filter-group\"\u003e\n      \u003cspan class=\"filter-label\"\u003eDate Range\u003c/span\u003e\n      \u003cinput class=\"date-input\" type=\"text\" inputmode=\"numeric\" pattern=\"\\d{4}-\\d{2}-\\d{2}\" placeholder=\"yyyy-mm-dd\" id=\"dateFrom\" value=\"2025-01-01\" /\u003e\n      \u003cinput class=\"date-input\" type=\"text\" inputmode=\"numeric\" pattern=\"\\d{4}-\\d{2}-\\d{2}\" placeholder=\"yyyy-mm-dd\" id=\"dateTo\" /\u003e\n    \u003c/div\u003e\n\n    \u003chr class=\"divider\" /\u003e\n\n    \u003c!-- Completed games only: true means no table concession --\u003e\n    \u003cdiv class=\"filter-group\"\u003e\n      \u003cdiv class=\"toggle-row\"\u003e\n        \u003cspan class=\"toggle-label\"\u003eCompleted games only\u003c/span\u003e\n        \u003clabel class=\"toggle\"\u003e\n          \u003cinput type=\"checkbox\" id=\"endGameToggle\" onchange=\"onEndGameChange()\" /\u003e\n          \u003cspan class=\"toggle-track\"\u003e\u003c/span\u003e\n        \u003c/label\u003e\n      \u003c/div\u003e\n    \u003c/div\u003e\n\n    \u003chr class=\"divider\" /\u003e\n\n    \u003cdiv class=\"filter-action-stack\"\u003e\n      \u003cbutton class=\"apply-btn\" id=\"applyBtn\" onclick=\"applyFiltersFromSidebar()\"\u003eApply filters\u003c/button\u003e\n    \u003c/div\u003e";
 
 // Config
-// API_URL points to the deployed DuckDB gateway query endpoint. The frontend sends POST JSON
-// with filters; the backend queries BigQuery and returns already-aggregated card stats.
+// API_URL is the public DuckDB gateway. Filtered requests are aggregated from
+// the active immutable local generation; public requests never query BigQuery.
 const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 // Daily default snapshots are static Cloud Storage JSON files, refreshed by
 // Cloud Scheduler. Default MW/Base loads use these directly; advanced Filter
@@ -377,7 +377,7 @@ function resetFilters() {
 function getParams() {
   // Collect backend filters here. Search text and Type chips are intentionally not sent;
   // they are applied client-side after data has loaded. The Round chips are sent because
-  // round filtering changes the BigQuery aggregation itself.
+  // Round filtering changes the backend population itself.
   const selectedMaps = [...document.querySelectorAll('#mapChips .chip.active')]
     .map(c => c.dataset.value);
   const selectedRounds = getSelectedRoundTokens();
@@ -475,7 +475,7 @@ async function applyFilters(activeMountToken = mountToken) {
   // This is the only frontend function that calls the backend API.
   // It runs on page load, MW/Base tab change, Reset, and Apply filters.
   // If no Maps or no Rounds are selected, there is nothing to query: the frontend
-  // renders an empty result immediately and skips the Cloud Function call entirely.
+  // renders an empty result immediately and skips the API call entirely.
   if (!isCurrentMount(activeMountToken)) return;
   const requestToken = ++statsRequestToken;
   statsAbortController?.abort();
@@ -1005,7 +1005,7 @@ function showLoading(mode = 'query') {
   const title = isSavedSnapshot ? 'Preparing data...' : 'Fetching data...';
   const sub = isSavedSnapshot
     ? '<div class="state-sub">Loading the latest available card statistics.</div>'
-    : '<div class="state-sub">Querying BigQuery with your current filters.</div>';
+    : '<div class="state-sub">Calculating statistics with your current filters.</div>';
   document.getElementById('tableBody').innerHTML = `<tr><td colspan="9">
     <div class="state-overlay">
       <div class="spinner"></div>
@@ -1056,7 +1056,7 @@ function fmtN(val) {
 }
 
 function titleCase(str) {
-  // Frontend display only. Do NOT send title-cased names back to backend/BigQuery,
+  // Frontend display only. Do not send title-cased names to the backend,
   // because card names in the source data are case-sensitive.
   // Also handles "(domestic) Goat" -> "(Domestic) Goat".
   const lower = new Set(['on', 'in', 'of', 'the', 'a']);

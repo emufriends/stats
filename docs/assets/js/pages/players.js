@@ -186,9 +186,6 @@ let playerIndexState = 'idle';
 let playerIndexError = '';
 let playerIndexRequest = 0;
 let suggestionsOpen = false;
-let comparisonSearchTimer = null;
-let comparisonSearchController = null;
-let comparisonSearchRequest = 0;
 let comparisonMatches = [];
 let selectedMaps = STANDARD_MAPS.map(([, full]) => full);
 let performanceMapModes = { mapPack1: 'include', mapPack2: 'include', legacy: 'exclude', beginner: 'exclude' };
@@ -992,7 +989,14 @@ function renderSuggestions(term = value(view === 'general' ? 'playersSearch' : v
   if (!suggestionsOpen || normalized.length < 3) { closeSuggestions(); return; }
   if (playerIndexState !== 'ready') return;
   if (view === 'comparison' || view === 'performance_by_map') {
-    scheduleComparisonSuggestions(String(term || '').trim());
+    // All Players views share the dataset-specific snapshot index already in
+    // memory. Keep multi-player autocomplete local as well: the statistics
+    // request remains authoritative for merged-identity validation.
+    const selected = new Set(view === 'performance_by_map' ? performancePlayers : selectedPlayers);
+    comparisonMatches = playerNames
+      .filter(name => !selected.has(name) && name.toLocaleLowerCase().includes(normalized))
+      .slice(0, 50);
+    renderSuggestionMatches(comparisonMatches);
     return;
   }
   const matches = playerNames
@@ -1010,59 +1014,7 @@ function renderSuggestionMatches(matches) {
 }
 
 function cancelComparisonSearch() {
-  if (comparisonSearchTimer !== null) clearTimeout(comparisonSearchTimer);
-  comparisonSearchTimer = null;
-  comparisonSearchController?.abort();
-  comparisonSearchController = null;
-  comparisonSearchRequest += 1;
   comparisonMatches = [];
-}
-
-function scheduleComparisonSuggestions(term) {
-  cancelComparisonSearch();
-  const normalized = String(term || '').trim();
-  if (!mounted || !['comparison', 'performance_by_map'].includes(view) || normalized.length < 3) return;
-  const requestId = ++comparisonSearchRequest;
-  const requestedDataset = isMW;
-  const requestedSlot = activeSearchSlot;
-  const requestedView = view;
-  const selectedAtRequest = (view === 'performance_by_map' ? performancePlayers : selectedPlayers).slice();
-  const host = document.getElementById('playersSuggestions');
-  if (host) {
-    host.innerHTML = '';
-    host.classList.remove('open');
-  }
-  comparisonSearchTimer = setTimeout(async () => {
-    comparisonSearchTimer = null;
-    const controller = new AbortController();
-    comparisonSearchController = controller;
-    try {
-      const payload = await fetchStats({
-        stats_page: 'players',
-        players_view: requestedView,
-        players_search: true,
-        players_search_term: normalized,
-        players_players: selectedAtRequest,
-        is_mw: requestedDataset,
-      }, { signal: controller.signal });
-      if (
-        !mounted
-        || view !== requestedView
-        || requestId !== comparisonSearchRequest
-        || requestedDataset !== isMW
-        || requestedSlot !== activeSearchSlot
-      ) return;
-      comparisonMatches = Array.isArray(payload?.players) ? payload.players : [];
-      renderSuggestionMatches(comparisonMatches);
-    } catch (error) {
-      if (error?.name !== 'AbortError' && requestId === comparisonSearchRequest) {
-        comparisonMatches = [];
-        renderSuggestionMatches([]);
-      }
-    } finally {
-      if (comparisonSearchController === controller) comparisonSearchController = null;
-    }
-  }, 180);
 }
 
 function positionSuggestions() {

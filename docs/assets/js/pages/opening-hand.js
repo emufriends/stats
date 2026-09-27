@@ -17,8 +17,8 @@ export const mainHtml = "<!--\n      Main table controls.\n      Desktop/tablet:
 export const sidebarHtml = "<div class=\"sidebar-header\">\n      <span class=\"sidebar-title\">Filters</span>\n      <div style=\"display:flex;align-items:center;gap:6px;\">\n        <button class=\"reset-btn\" onclick=\"resetFilters()\">Reset</button>\n        <button class=\"sidebar-close-btn\" onclick=\"toggleSidebar()\" title=\"Close filters\">x</button>\n      </div>\n    </div>\n\n    <hr class=\"divider\" />\n\n    <!-- Player ELO -->\n    <div class=\"filter-group\">\n      <span class=\"filter-label\">Player ELO</span>\n      <div class=\"range-row\">\n        <input class=\"range-input\" type=\"number\" id=\"playerEloMin\" placeholder=\"Min\" value=\"300\" min=\"0\" />\n        <input class=\"range-input\" type=\"number\" id=\"playerEloMax\" placeholder=\"Max\" min=\"0\" />\n      </div>\n    </div>\n\n    <!-- Opponent ELO -->\n    <div class=\"filter-group\">\n      <span class=\"filter-label\">Opponent ELO</span>\n      <div class=\"range-row\">\n        <input class=\"range-input\" type=\"number\" id=\"opponentEloMin\" placeholder=\"Min\" value=\"300\" min=\"0\" />\n        <input class=\"range-input\" type=\"number\" id=\"opponentEloMax\" placeholder=\"Max\" min=\"0\" />\n      </div>\n    </div>\n\n    <hr class=\"divider\" />\n\n    <!-- Maps -->\n    <div class=\"filter-group\">\n      <div style=\"display:flex;align-items:baseline;gap:6px;margin-bottom:8px;\">\n        <span class=\"filter-label\" style=\"margin-bottom:0\">Maps</span>\n        <span class=\"map-select-all-none\">\n          (<span class=\"map-toggle-link\" onclick=\"selectAllMaps()\">all</span> / <span class=\"map-toggle-link\" onclick=\"selectNoneMaps()\">none</span>)\n        </span>\n      </div>\n      <div class=\"chip-grid\" id=\"mapChips\"></div>\n    </div>\n\n    <hr class=\"divider\" />\n\n    <!-- Date range -->\n    <div class=\"filter-group\">\n      <span class=\"filter-label\">Date Range</span>\n      <input class=\"date-input\" type=\"text\" inputmode=\"numeric\" pattern=\"\\d{4}-\\d{2}-\\d{2}\" placeholder=\"yyyy-mm-dd\" id=\"dateFrom\" value=\"2025-01-01\" />\n      <input class=\"date-input\" type=\"text\" inputmode=\"numeric\" pattern=\"\\d{4}-\\d{2}-\\d{2}\" placeholder=\"yyyy-mm-dd\" id=\"dateTo\" />\n    </div>\n\n    <hr class=\"divider\" />\n\n    <!-- Completed games only: true means no table concession -->\n    <div class=\"filter-group\">\n      <div class=\"toggle-row\">\n        <span class=\"toggle-label\">Completed games only</span>\n        <label class=\"toggle\">\n          <input type=\"checkbox\" id=\"endGameToggle\" onchange=\"onEndGameChange()\" />\n          <span class=\"toggle-track\"></span>\n        </label>\n      </div>\n    </div>\n\n    <hr class=\"divider\" />\n\n    <div class=\"filter-action-stack\">\n      <button class=\"apply-btn\" id=\"applyBtn\" onclick=\"applyFiltersFromSidebar()\">Apply filters</button>\n    </div>";
 
 // Config
-// API_URL points to the deployed DuckDB gateway query endpoint. The frontend sends POST JSON
-// with filters; the backend queries BigQuery and returns already-aggregated card stats.
+// API_URL is the public DuckDB gateway. Filtered requests are aggregated from
+// the active immutable local generation; public requests never query BigQuery.
 const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const STATS_PAGE = 'opening_hand';
 // Daily default snapshots are static Cloud Storage JSON files, refreshed by
@@ -420,7 +420,7 @@ async function applyFilters(activeMountToken = mountToken) {
   // This is the only frontend function that calls the backend API.
   // It runs on page load, MW/Base tab change, Reset, and Apply filters.
   // If no Maps are selected, there is nothing to query: the frontend renders
-  // an empty result immediately and skips the Cloud Function call entirely.
+  // an empty result immediately and skips the API call entirely.
   if (!isCurrentMount(activeMountToken)) return;
   const requestToken = ++statsRequestToken;
   statsAbortController?.abort();
@@ -928,7 +928,7 @@ function showLoading(mode = 'query') {
   const title = isSavedSnapshot ? 'Preparing data...' : 'Fetching data...';
   const sub = isSavedSnapshot
     ? '<div class="state-sub">Loading the latest available opening hand statistics.</div>'
-    : '<div class="state-sub">Querying BigQuery with your current filters.</div>';
+    : '<div class="state-sub">Calculating statistics with your current filters.</div>';
   document.getElementById('tableBody').innerHTML = `<tr><td colspan="9">
     <div class="state-overlay">
       <div class="spinner"></div>
@@ -979,7 +979,7 @@ function fmtN(val) {
 }
 
 function titleCase(str) {
-  // Frontend display only. Do NOT send title-cased names back to backend/BigQuery,
+  // Frontend display only. Do not send title-cased names to the backend,
   // because card names in the source data are case-sensitive.
   // Also handles "(domestic) Goat" -> "(Domestic) Goat".
   const lower = new Set(['on', 'in', 'of', 'the', 'a']);
