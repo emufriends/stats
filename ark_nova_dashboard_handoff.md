@@ -84,7 +84,7 @@ The Cloud Function URL remains in `assets/js/pages/refresh.js` only for manual
 refresh/status operations. Analytical page modules use the DuckDB gateway.
 
 The serving VM is `ark-nova-duckdb-test` in `europe-west1-c`, configured as an
-always-on e2-medium with 4 GiB RAM and a 40 GiB persistent disk. The gateway is
+always-on e2-medium with 4 GiB RAM and a 60 GiB persistent disk. The gateway is
 the only public route to the private API. The VM API does not accept arbitrary
 SQL, filesystem paths, credentials, publication commands, or generation
 management requests.
@@ -108,11 +108,53 @@ selects the active generation and retains a validated rollback generation.
 Database activation and snapshot publication are coordinated so the browser
 never receives a pack whose data version disagrees with the active database.
 
-The service uses one DuckDB thread per request, admits at most two analytical
+The service uses a shared two-thread DuckDB execution pool and a shared
+1300-MB buffer-manager budget per database instance, admits at most two analytical
 executions, shares identical in-flight requests, and interrupts public work
-after 90 seconds. Responses are cached in memory and in a generation-aware
+after 90 seconds. Distinct bursts wait in a bounded ten-second admission queue
+before receiving `serving_busy`; the queue is intentionally not unbounded on
+the 4-GiB VM. Responses are cached in memory and in a generation-aware
 persistent SQLite cache. Cache keys include the generation/data version, route,
 normalized scope, and response-contract version.
+
+DuckDB thread/memory settings are global to the database instance, not
+per-request reservations; total process RSS and refresh-time system headroom
+are verified separately. The persistent refresh worker uses bounded HTTPS
+control reads with an in-memory VM identity token, retries uncertain reads
+without acknowledging pending work, and is restarted by systemd on failure.
+Only HTTP 404 establishes a missing control object. Idle polling launches no
+CLI processes; bulk transfers and publication still use the storage CLI.
+
+The builder materializes the compact `game_player_narrow` canonical fact once
+per generation. It also materializes `prepared_full_sample_narrow`, a canonical
+wide table combining imported source metrics with opponent Elo, completion,
+corruption, Arena, tournament, starting-position, and merged-player facts. This
+intentional physical copy avoids a six-million-row join on every filtered cache
+miss. Expensive route work and Logs arrays are additionally materialized into
+compact, route-specific facts.
+
+Page-specific Log Sample eligibility must remain distinct. Cards and Combos
+use their stricter two-log-row card population; Endgames, Sponsor Endgames, and
+Project Rewards use matching player logs without inheriting that restriction.
+Project Rewards' frequency denominator counts matching log rows, not all Full
+Sample observations. Compact event facts preserve event multiplicity and must
+not be joined back to repeated log rows. Numerical release checks use identical
+source versions and bypass snapshots and response caches.
+
+Cards accelerators must preserve each focal player's map, Elo, starting position,
+and other filter dimensions separately. Opponents may use different maps: an
+arbitrary table-wide map is not a valid substitute. Paired Cards facts combine
+side-specific moments only after filtering, count Played/Seen once per table,
+and retain repeated played-event weights for EV and ordinary confidence
+intervals. Refresh-expanded Combo pairs use canonical numeric card IDs and
+independent round masks for both cards; the component baseline remains its
+own eligible player-game population. Capability flags come from the generation
+manifest and fall back to canonical SQL when a derivative is absent.
+Card + Card components reuse the numeric player-side scope where paired Cards
+facts are available. They count each eligible played player-game/card once,
+including when the card appears in several selected rounds; Cards' own EV
+retains its separate repeated-play weighting.
+
 
 Default-scope snapshots are served before filtered requests. The browser keeps
 a bounded in-memory cache and a versioned Cache Storage cache. The current
@@ -146,6 +188,34 @@ successful completion timestamp unchanged. Arena, Records, and Tournament
 inputs use validated last-known-good files if a fresh download fails. Their
 status is recorded in `moving_sources/source-status.json` and the generation
 manifest.
+
+On the VM, deployed modules are loaded from the immutable
+`/home/ascri/current-app` release. `ARK_ROOT=/home/ascri` identifies persistent
+data only (`phase2_private_data`, serving pointers, and worker state); refresh
+code is never resolved from that directory.
+
+Code/schema cutovers use the backend's coordinated publisher after numerical,
+functional frontend, and recovery gates pass. The five-second latency target
+is measured separately; explicitly accepted performance exceptions remain
+documented and must not be presented as passing measurements. Performance
+optimization during rebuilding is deferred and is not a functional release
+blocker. The publisher verifies the immutable producer
+inventory and stops serving across the code/data transition. Rollback restores
+the matched code, database, and snapshot release, not just the database pointer.
+Crash recovery uses the write-ahead publication and code-cutover journals;
+failed restoration retains its journal for retry. Permission and network
+failures when checking a public object never count as proof that it is absent;
+publication records are durably synced before their associated writes.
+Snapshot producer hashes and
+player-alias assets resolve from the installed code bundle, not the data root.
+Refresh fingerprints include runtime dependencies and input contracts, while
+changes to audit-only scripts do not force a data rebuild.
+Reusing snapshot files also requires identical producer/input versions and
+verified artifact hashes; the data version alone does not establish freshness.
+
+Specific Predictor event thresholds and opening-hand features are evaluated
+within each source-log row. Duplicate player-game log keys retain the raw
+producer's observation multiplicity without pooling their event lists.
 
 The hidden `/refresh/` page is a maintenance interface, not a navigation item.
 It keeps the top bar but hides dataset, Filters, rail, and sidebar controls. A
@@ -407,6 +477,10 @@ and no Synergy interval.
 
 Tabs: `General | Icon | Specific`. They are completed, paired focal-player
 comparisons. Specific uses the configured event/timing predicate catalogue.
+Sidebar predicates apply to the focal player after pairing with the completed,
+non-corrupted opponent; a single starting-position selection must not remove
+that opponent. Specific contains 19 MW conditions and 18 Base conditions;
+`More reefers` is MW-only.
 
 ### Build
 
@@ -453,7 +527,9 @@ CSV files; player ID is the database join key and is not displayed. Player names
 link to `https://boardgamearena.com/player?id=ID`. The table defaults to 100 rows
 with pagination. Selected graph players remain at the top and keep stable colors.
 Sorting by End uses rank as the tie-breaker. Ongoing seasons may be available as
-Players filters before they have an Arena roster.
+Players filters before they have an Arena roster. The Players Arena manifest is
+metadata-driven, while Arena's all-season/latest bundles remain roster-driven;
+a metadata-only season does not displace the newest roster season in Arena.
 
 ### Records
 
