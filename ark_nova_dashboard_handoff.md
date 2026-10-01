@@ -373,6 +373,11 @@ The global visual rules include:
 
 Do not alter numerical color scales as part of general palette work.
 
+Combos pair-Type popups on phones (up to 600 px viewport width) show five
+complete 32 px option rows with 5 px gaps in a 180 px internal scroll viewport.
+All/none stays outside that viewport. Fixed positioning and the 8 px viewport
+margin remain in the page module; tablet and desktop popup sizing is unchanged.
+
 ### Shared filter order
 
 Use this order whenever the controls exist:

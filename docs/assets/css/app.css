@@ -6226,6 +6226,30 @@ body.refresh-route-active {
       overflow-y: auto;
       scrollbar-gutter: stable;
     }
+    @media (max-width: 600px) {
+      /* Five complete Type choices on phones: fixed rows prevent grid sizing
+         or flex shrinking from revealing a sixth choice. All/none sits outside
+         this scroll viewport. Desktop/tablet retain their existing geometry. */
+      .combination-type-options {
+        --type-option-height: 32px;
+        grid-template-columns: minmax(0, 1fr);
+        grid-auto-rows: var(--type-option-height);
+        height: calc(5 * var(--type-option-height) + 4 * 5px);
+        max-height: calc(5 * var(--type-option-height) + 4 * 5px);
+        flex: 0 0 auto;
+        align-content: start;
+        overflow-x: hidden;
+      }
+      .combination-type-options .chip {
+        box-sizing: border-box;
+        height: var(--type-option-height);
+        min-height: var(--type-option-height);
+        min-width: 0;
+        width: 100%;
+        margin: 0;
+        text-align: center;
+      }
+    }
     .combination-type-popup .combination-popup-actions {
       justify-content: flex-start;
       padding: 0 2px 2px;
