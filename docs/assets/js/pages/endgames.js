@@ -10,7 +10,7 @@ import {
   relativeEloColor,
 } from '../color-scales.js?v=20260710-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 import { ALL_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const title = 'Endgames';
@@ -422,7 +422,7 @@ function getDefaultSnapshotKey(params) {
     params.player_elo_max === undefined &&
     opponentMinDefault &&
     params.opponent_elo_max === undefined &&
-    (params.date_from === undefined || params.date_from === '2025-01-01') &&
+    params.date_from === '2025-01-01' &&
     params.date_to === undefined;
 
   return isDefault ? `${params.endgames_view}:${params.is_mw}` : null;

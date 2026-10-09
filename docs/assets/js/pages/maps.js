@@ -9,7 +9,7 @@ import {
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260711-1';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 import { setFilterButtonDisabled } from '../layout.js?v=20260819-4';
 
 export const title = 'Maps';
@@ -313,7 +313,7 @@ function getFilterParams() {
     player_elo_max: val('playerEloMax') ? Number(val('playerEloMax')) : null,
     opponent_elo_min: val('opponentEloMin') === '' ? 0 : Number(val('opponentEloMin')),
     opponent_elo_max: val('opponentEloMax') ? Number(val('opponentEloMax')) : null,
-    date_from: val('dateFrom') || METRICS_DEFAULT_DATE_FROM,
+    date_from: val('dateFrom') || null,
     date_to: val('dateTo') || null,
   };
 }

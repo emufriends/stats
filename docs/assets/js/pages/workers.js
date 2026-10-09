@@ -16,7 +16,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 
 export const id = 'workers';
 export const title = 'Workers';
@@ -142,7 +142,7 @@ function params() {
     player_elo_max: value('workersPlayerEloMax') === '' ? null : Number(value('workersPlayerEloMax')),
     opponent_elo_min: value('workersOpponentEloMin') === '' ? 0 : Number(value('workersOpponentEloMin')),
     opponent_elo_max: value('workersOpponentEloMax') === '' ? null : Number(value('workersOpponentEloMax')),
-    date_from: value('workersDateFrom') || '2025-01-01',
+    date_from: value('workersDateFrom') || null,
     date_to: value('workersDateTo') || null,
     completed_only: view === 'two_cp_worker' && document.getElementById('workersCompletedToggle')?.checked ? true : null,
   };

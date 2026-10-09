@@ -6,6 +6,13 @@ let pollTimer = 0;
 let passwordMemory = '';
 let statusState = null;
 let returnFocus = null;
+let mountEpoch = 0;
+let statusSequence = 0;
+let statusController = null;
+let startController = null;
+let pendingStart = null;
+let pollFailures = 0;
+let unconfirmedPreviousRun = null;
 
 export const id = 'refresh';
 export const title = 'Refresh';
@@ -65,10 +72,39 @@ function clampPercent(value) {
 
 function renderStatus(status) {
   if (!mounted || !status) return;
+  if (!['idle', 'running', 'succeeded', 'failed', 'starting', 'unconfirmed'].includes(status.state)) {
+    throw new Error('Invalid refresh state');
+  }
+  if (statusState?.state === 'unconfirmed' && status.run_id === unconfirmedPreviousRun) {
+    schedulePoll(15000);
+    return;
+  }
+  if (!pendingStart && statusState?.run_id && status.run_id && status.run_id !== statusState.run_id) {
+    const newer = Date.parse(status.started_at) > Date.parse(statusState.started_at);
+    if (!newer) { schedulePoll(2000); return; }
+  }
+  if (pendingStart && status.state !== 'starting') {
+    const matches = pendingStart.runId
+      ? status.run_id === pendingStart.runId
+      : status.run_id && status.run_id !== pendingStart.previousRun;
+    if (!matches) {
+      if (pendingStart.confirmBy && Date.now() >= pendingStart.confirmBy) {
+        unconfirmedPreviousRun = pendingStart.previousRun;
+        pendingStart = null;
+        renderStatus({ ...statusState, state: 'unconfirmed', phase: 'Start not confirmed' });
+      } else schedulePoll(2000);
+      return;
+    }
+    pendingStart = null;
+  }
+  if (statusState?.state === 'running' && status.run_id === statusState.run_id && status.state === 'running') {
+    status = { ...status, progress_percent: Math.max(clampPercent(status.progress_percent), clampPercent(statusState.progress_percent)) };
+  }
   statusState = status;
   const state = String(status.state || 'idle');
-  const running = state === 'running';
+  const running = state === 'running' || state === 'starting';
   const failed = state === 'failed';
+  const unconfirmed = state === 'unconfirmed';
   const succeeded = state === 'succeeded';
   const percent = clampPercent(status.progress_percent);
   const progress = document.getElementById('refreshProgress');
@@ -87,40 +123,48 @@ function renderStatus(status) {
   track.setAttribute('aria-valuenow', String(percent));
   fill.style.width = `${percent}%`;
   button.disabled = running;
-  button.textContent = running ? 'Refreshing…' : failed ? 'Retry' : 'Refresh';
-  message.textContent = failed
+  button.textContent = running ? 'Refreshing…' : failed || unconfirmed ? 'Retry' : 'Refresh';
+  message.textContent = unconfirmed
+    ? 'Could not confirm that the refresh started. You can retry; an existing run will be reused.'
+    : failed
     ? 'The refresh did not complete. The previous snapshots remain active.'
     : succeeded ? 'Refresh completed successfully.' : '';
   schedulePoll(running ? 2000 : 15000);
 }
 
 async function fetchStatus(useApiFallback = true) {
+  const epoch = mountEpoch;
+  const sequence = ++statusSequence;
+  statusController?.abort();
+  const controller = statusController = new AbortController();
+  const current = () => mounted && epoch === mountEpoch && sequence === statusSequence;
   try {
-    const response = await fetch(`${STATUS_URL}?t=${Date.now()}`, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Status ${response.status}`);
-    const payload = await response.json();
+    let payload;
+    try {
+      const response = await fetch(`${STATUS_URL}?t=${Date.now()}`, { cache: 'no-store', signal: controller.signal });
+      if (!response.ok) throw new Error(`Status ${response.status}`);
+      payload = await response.json();
+    } catch (error) {
+      if (!useApiFallback || controller.signal.aborted) throw error;
+      const response = await fetch(API_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_status: true }), cache: 'no-store', signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Status ${response.status}`);
+      payload = (await response.json()).refresh_status;
+    }
+    if (!current()) return false;
+    if (!payload || !['idle', 'running', 'succeeded', 'failed'].includes(payload.state)) throw new Error('Invalid refresh status');
+    pollFailures = 0;
     renderStatus(payload);
     return true;
   } catch (_) {
-    if (!useApiFallback) return false;
-  }
-  try {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_status: true }),
-      cache: 'no-store',
-    });
-    if (!response.ok) throw new Error(`Status ${response.status}`);
-    const payload = await response.json();
-    if (!payload?.refresh_status) throw new Error('Invalid refresh status payload');
-    renderStatus(payload.refresh_status);
-    return true;
-  } catch (_) {
-    if (!mounted) return false;
-    document.getElementById('refreshMessage').textContent = 'Could not load refresh status.';
-    schedulePoll(15000);
+    if (!current() || controller.signal.aborted) return false;
+    document.getElementById('refreshMessage').textContent = 'Connection interrupted. Reconnecting to refresh status…';
+    schedulePoll(Math.min(30000, 2000 * 2 ** Math.min(++pollFailures, 4)));
     return false;
+  } finally {
+    if (statusController === controller) statusController = null;
   }
 }
 
@@ -154,18 +198,24 @@ function closePasswordModal() {
 }
 
 async function startRefresh(password) {
+  if (!mounted || pendingStart) return;
+  const epoch = mountEpoch;
+  const previousRun = statusState?.run_id || null;
+  pendingStart = { previousRun, runId: null };
+  statusSequence++;
+  statusController?.abort();
+  const controller = startController = new AbortController();
+  const startTimeout = window.setTimeout(() => controller.abort(), 30000);
   const optimistic = {
     ...(statusState || {}),
-    state: 'running',
+    run_id: null,
+    state: 'starting',
     progress_percent: 0,
     phase: 'Starting refresh',
   };
   renderStatus(optimistic);
-  // Do not read the status asset again before the manual request has had a
-  // chance to publish its running state. That first read can return the
-  // previous successful run (100%), which briefly overwrites the optimistic
-  // running state and makes the new refresh look complete. renderStatus() has
-  // already scheduled the first authoritative poll.
+  // Polls may reconnect while the POST is pending, but can never accept the
+  // preceding run as completion of this request.
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -175,8 +225,11 @@ async function startRefresh(password) {
       },
       body: JSON.stringify({ manual_refresh: true }),
       cache: 'no-store',
+      signal: controller.signal,
     });
+    if (!mounted || epoch !== mountEpoch) return;
     if (response.status === 403) {
+      pendingStart = null;
       passwordMemory = '';
       renderStatus({ ...(statusState || {}), state: 'idle', phase: 'Ready' });
       openPasswordModal();
@@ -184,21 +237,24 @@ async function startRefresh(password) {
       return;
     }
     if (!response.ok && response.status !== 409) {
-      throw new Error(`Refresh ${response.status}`);
+      pendingStart = null;
+      renderStatus({ ...statusState, state: 'failed', phase: 'Could not start refresh' });
+      return;
     }
+    const acknowledgement = await response.json();
+    if (!mounted || epoch !== mountEpoch) return;
+    const runId = acknowledgement.run_id || acknowledgement.refresh_status?.run_id;
+    if (pendingStart && runId) pendingStart.runId = runId;
+    if (acknowledgement.refresh_status) renderStatus(acknowledgement.refresh_status);
   } catch (_) {
-    // The public status object is authoritative. A long request may disconnect
-    // while its Cloud Function invocation continues, so refresh status once
-    // before presenting an error.
+    if (!mounted || epoch !== mountEpoch) return;
+    if (pendingStart) pendingStart.confirmBy = Date.now() + 60000;
+    document.getElementById('refreshMessage').textContent = 'Waiting for refresh confirmation…';
+  } finally {
+    window.clearTimeout(startTimeout);
+    if (startController === controller) startController = null;
   }
-  const statusLoaded = await fetchStatus(true);
-  if (!statusLoaded && statusState?.state === 'running') {
-    renderStatus({
-      ...statusState,
-      state: 'failed',
-      phase: 'Could not confirm refresh status',
-    });
-  }
+  if (mounted && epoch === mountEpoch) await fetchStatus(true);
 }
 
 function onSubmitPassword(event) {
@@ -234,9 +290,10 @@ function onModalKeydown(event) {
 }
 
 export function mount() {
+  mountEpoch++;
   mounted = true;
   document.getElementById('refreshStartButton').addEventListener('click', () => {
-    if (statusState?.state === 'running') return;
+    if (pendingStart || statusState?.state === 'running') return;
     if (passwordMemory) void startRefresh(passwordMemory);
     else openPasswordModal();
   });
@@ -248,6 +305,14 @@ export function mount() {
 
 export function unmount() {
   mounted = false;
+  mountEpoch++;
+  statusSequence++;
+  statusController?.abort();
+  startController?.abort();
+  statusController = startController = null;
+  pendingStart = null;
+  pollFailures = 0;
+  unconfirmedPreviousRun = null;
   window.clearTimeout(pollTimer);
   pollTimer = 0;
   passwordMemory = '';

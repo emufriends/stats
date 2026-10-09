@@ -6,7 +6,7 @@ import {
   numericRange,
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260710-2';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
   formatSignedDeltaAdaptive,
@@ -243,7 +243,7 @@ function getParams() {
     player_elo_max: val('playerEloMax') ? Number(val('playerEloMax')) : null,
     opponent_elo_min: val('opponentEloMin') === '' ? 0 : Number(val('opponentEloMin')),
     opponent_elo_max: val('opponentEloMax') ? Number(val('opponentEloMax')) : null,
-    date_from: val('dateFrom') || '2025-01-01',
+    date_from: val('dateFrom') || null,
     date_to: val('dateTo') || null,
   };
 }

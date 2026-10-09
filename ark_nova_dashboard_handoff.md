@@ -9,6 +9,21 @@ URLs, private keys, service-account JSON, or raw authenticated request headers.
 
 ## Start here
 
+An independent auditor with no project history should first read
+`C:\Users\ascri\Desktop\ark-nova-function\AUDITOR_GUIDE.md`. It explains Ark Nova
+terminology, source ownership and observation grains, the three execution paths,
+the implementation/evidence map, and a safe independent audit procedure. This
+handoff supplies the detailed product contract; dated evidence does not replace
+verification of the currently installed code and data generation.
+
+The principal agent owns architecture, backend changes, new pages, integration
+and deployment. The reviewer/frontend agent focuses on independent review,
+frontend work and small obvious scoped fixes. Both use the private local notes
+folder `C:\Users\ascri\Desktop\ark-nova-function\agent-coordination`; read its
+`README.md` and unresolved notes before overlapping work. Notes supplement this
+handoff and code annotations, never replace them, and do not grant authorization
+for deployment, production pauses or other consequential actions.
+
 The system has four operational boundaries:
 
 1. The static frontend in `C:\Users\ascri\Desktop\ark-nova-stats-dashboard`.
@@ -58,20 +73,20 @@ real code problem from stale browser modules.
 Browser
   ├─ default page load ──> Cloud Storage default pack / snapshots
   ├─ filtered analytics ─> Cloud Run duckdb-gateway
-  │                         └─ authenticated request to always-on VM
-  │                            └─ private HTTP API on 127.0.0.1:8787
+  │                         └─ internal-network request to always-on VM
+  │                            └─ VM HTTP API on 0.0.0.0:8787
   │                               └─ active immutable DuckDB generation
   └─ /refresh maintenance ─> Cloud Function maintenance endpoint
 
 Daily refresh
   Cloud Scheduler at 00:00 UTC
-    └─ authenticated refresh worker on the VM
+    └─ authenticated maintenance endpoint queues private VM worker
        ├─ inspect controlled source metadata
        ├─ export changed BigQuery source families
        ├─ import changing spreadsheet/CSV sources
        ├─ build DuckDB derivatives and snapshots locally
        ├─ validate a complete candidate release
-       └─ atomically activate database and snapshot pointers
+       └─ journaled, coordinated database/snapshot activation
 ```
 
 Current public query endpoint:
@@ -84,8 +99,11 @@ The Cloud Function URL remains in `assets/js/pages/refresh.js` only for manual
 refresh/status operations. Analytical page modules use the DuckDB gateway.
 
 The serving VM is `ark-nova-duckdb-test` in `europe-west1-c`, configured as an
-always-on e2-medium with 4 GiB RAM and a 60 GiB persistent disk. The gateway is
-the only public route to the private API. The VM API does not accept arbitrary
+always-on e2-small with 2 GiB RAM and a 60 GiB persistent disk. The gateway is
+the dashboard's public route to the private API. The gateway's VM hop uses
+internal HTTP networking, not a per-request bearer-token protocol. The production
+bind address is not loopback; VPC/firewall restrictions must be verified against
+the installed deployment. CORS does not provide authentication. The VM API does not accept arbitrary
 SQL, filesystem paths, credentials, publication commands, or generation
 management requests.
 
@@ -105,15 +123,18 @@ BigQuery.
 
 The active generation is immutable and opened read-only. A small atomic pointer
 selects the active generation and retains a validated rollback generation.
-Database activation and snapshot publication are coordinated so the browser
-never receives a pack whose data version disagrees with the active database.
+Database activation and snapshot publication are coordinated with a query pause,
+pack-last writes, version validation and durable compensation journals. Individual
+pointer replacements are atomic; this is not a single distributed transaction
+across the VM and all public Storage objects. Validate both final version parity
+and failure/recovery behavior.
 
 The service uses a shared two-thread DuckDB execution pool and a shared
-1300-MB buffer-manager budget per database instance, admits at most two analytical
+800-MB buffer-manager budget per database instance, admits at most two analytical
 executions, shares identical in-flight requests, and interrupts public work
 after 90 seconds. Distinct bursts wait in a bounded ten-second admission queue
 before receiving `serving_busy`; the queue is intentionally not unbounded on
-the 4-GiB VM. Responses are cached in memory and in a generation-aware
+the 2-GiB VM. Responses are cached in memory and in a generation-aware
 persistent SQLite cache. Cache keys include the generation/data version, route,
 normalized scope, and response-contract version.
 
@@ -123,7 +144,11 @@ are verified separately. The persistent refresh worker uses bounded HTTPS
 control reads with an in-memory VM identity token, retries uncertain reads
 without acknowledging pending work, and is restarted by systemd on failure.
 Only HTTP 404 establishes a missing control object. Idle polling launches no
-CLI processes; bulk transfers and publication still use the storage CLI.
+CLI processes. Bulk source transfers use the storage CLI; the refresh publisher
+uses a persistent authenticated Storage SDK session with streaming gzip.
+Installed immutable production code does not change merely because desktop
+files change. Consult the backend refresh-efficiency acceptance report for
+measured build, publication and resource evidence.
 
 The builder materializes the compact `game_player_narrow` canonical fact once
 per generation. It also materializes `prepared_full_sample_narrow`, a canonical
@@ -157,22 +182,256 @@ retains its separate repeated-play weighting.
 
 
 Default-scope snapshots are served before filtered requests. The browser keeps
-a bounded in-memory cache and a versioned Cache Storage cache. The current
+a bounded in-memory cache and a versioned Cache Storage cache. Retained payloads
+are limited to 128 entries and a 64-MiB UTF-16 serialized-size estimate; this
+estimate is not a browser heap limit. Initialization retains pack metadata,
+not the complete parsed pack. The current
 frontend default-pack schema is defined by `DEFAULT_PACK_SCHEMA_VERSION` in
 `assets/js/snapshot-cache.js`; never duplicate that number in logic elsewhere.
+The in-memory snapshot key ignores a snapshot URL's page-version `?v=` parameter
+(`snapshotKeyUrl`), so every page finds the preloaded default-pack copy whatever `?v=`
+it requests; the download itself still uses the original URL. All modules must import
+`snapshot-cache.js` with one identical `?v=` string, otherwise the browser creates a
+second module instance with its own cache. Pack schema, pack data version and
+every member's data version must agree with the session's bootstrap version.
+Older Cache Storage packs are not relabelled as current. Validated packs pin
+subsequent artifact downloads to their immutable release prefix; stable-alias
+responses are checked before caching. Invalid/mismatched snapshots can fall
+back to the filtered service rather than displaying stale values.
+
+`assets/js/filter-state.js` captures applied Arena, Tournament and Starting
+position scope before the page's Apply or Reset handler runs. Editing controls
+without Apply does not change this committed scope. Explicit API fields take
+precedence over defaults; normalization does not read sidebar DOM. Reset clears
+shared state synchronously, then the page restores its own defaults and submits
+one request. Players restores the committed global scope when a proposed graph
+filter change fails. Follow-up requests and ordinary CIs use that applied scope.
 
 ## Refresh and publication
 
-The scheduled refresh starts at 00:00 UTC and has a three-hour operational
+The hidden Refresh page distinguishes start acknowledgement from completion.
+It correlates status by run ID, ignores the previous run while starting,
+reconnects with bounded polling backoff after transport failures and invalidates
+pending work on navigation. A late response cannot reopen its password modal.
+Passwords remain in page memory only. A status connection failure does not
+change the last successful completion time.
+If a start acknowledgement is lost, status reconciliation precedes Retry.
+After one minute without a matching run, Retry is offered without claiming that
+the server refresh failed or treating the previous successful run as this one.
+
+The editable frontend is canonical. `tools/sync-publication.py` stages declared
+runtime assets, entry points and maintained handoffs into `_publish_repo/docs`,
+or checks their content hashes without writing. It deliberately excludes private
+evidence, backend data and repository-level documentation. Staging is not a push.
+
+The scheduled refresh starts at 00:00 UTC and has a six-hour operational
 window. A source-equality check can make a refresh a no-op. BigQuery is used only
 to inspect and export controlled source families; all derivatives, analytics,
 confidence intervals, and snapshots are calculated on the VM from local data.
+
+Production resource settings come from the backend systemd units. The builder
+uses two threads and an 800-MB engine allowance; source import has a separate
+600-MB allowance. Serial offline snapshot queries use 800 MB and one thread.
+Serving shares a two-thread pool and a
+800-MB buffer budget per database instance across at most two concurrent
+analytical executions. These are engine budgets, not per-request reservations
+or total process-RSS caps. Standalone CLI defaults are not deployment settings.
+
+Live analytical HTTP requests are paused for the complete refresh. Existing
+requests drain before building starts; the API restarts into a lightweight
+status-only mode to release analytical memory. Default snapshot-backed pages,
+Arena assets, search indexes and frontend-local controls remain available.
+Filtered requests and selected-player statistics receive a clear refresh/retry
+message; no long-lived refresh queue is created. Success, failure or worker
+termination releases process-owned locks, and the API automatically restarts
+normally and resumes requests. Health/readiness/status/capabilities remain
+available. Lock files must never be deleted to unlock the pause.
+Publication recovery uses the same barrier. Compatible code updates retain exact
+producer validation and code/data rollback pairing during the next publication.
+
+The backend uses fresh serial refresh-stage processes (`--isolate-stages`,
+selected by `REFRESH_ISOLATE_STAGES`) to release allocator memory between import,
+metadata, analytical derivatives, Arena/Records preparation and snapshots. The
+coordinator retains reports rather than native preparation allocations, and
+resource reports distinguish coordinator and child peaks. Snapshot JSON is streamed, Arena history data is
+spooled by season, and pack assembly retains one decoded snapshot at a time.
+The serial snapshot builder uses a generation-scoped disk-only response cache,
+avoiding duplicate decoded histories; the live API keeps its two-level cache.
+Arena snapshots calculate roster statistics once and fill history arrays through
+bounded player-ID batches, preserving all players, graph points and ordering.
+Season spooling, bounded Arena histories, the disk-only offline cache and streamed
+pack assembly are installed behavior. Arena remains automatically refreshed.
+Fresh-stage isolation and source-builder batching are installed behavior.
+Process-level memory qualification does not establish whole-machine headroom on
+a smaller VM; the intended refresh-time interactive-query policy must be measured.
+Canonical wide-table construction, seen-card deduplication, played-round summaries,
+Cards' combined context joins, symmetric table/card moments and MW Draft ranking/selection joins use disjoint table-ID
+batches with checkpoints; these are exact memory boundaries, not statistical
+sampling. Batch configuration and qualification evidence live in the backend
+resource documentation.
+The source-import engine budget can be configured separately from the derivative
+budget. Each bounded table/card aggregate keeps both players of a game in the
+same bucket, including the ordinary CI sufficient statistics.
+Home log features use per-row list reductions instead of population-wide
+correlated element joins, retaining duplicate event counts, null handling and
+Home's unrestricted population.
+Opponent Proboscis detection uses a distinct-player per-table summary, preserving
+duplicate/null handling without a correlated join over the full population.
+Component-CI request batches deduplicate shared standalone populations before
+calculating table-level moments and map the final intervals back to all pair
+rows. Counts, filters and the public payload shape remain unchanged.
+These mechanisms preserve all payload fields, ordinary CIs and populations.
+Their presence in desktop code does not imply installation in the active bundle.
+The API and worker share a persistent 1456-MiB memory ceiling with no swap.
+The current full-fallback, snapshot, private publication/recovery and resumed
+uncached-request workload passes a 2-GiB memory qualification, reserving 400 MiB
+for OS/background working memory and 192 MiB for boot-reserved RAM. Process
+limits or unit tests alone do not establish this qualification. Production uses
+2-GiB e2-small hardware; the complete rehearsal ran under the shared ceiling on
+e2-medium, so its duration is not an e2-small timing. Actual lower-CPU refresh
+duration and future workload growth still require attention. See the backend resource
+documentation and `reports/refresh-pause-2g-qualification-20261003.md`. Some
+uncached queries exceed the five-second target; memory qualification is not a
+latency pass.
+Actual 2-GiB hardware restart, filtered requests, ordinary component CIs and
+pause/resumption pass the focused check in
+`reports/e2-small-restart-20261003.md`. That focused check does not perform a full
+refresh. Complete native workflow timing is separately recorded in
+`reports/refresh-duration-implementation-20261004.md`; neither an isolated reuse
+measurement nor a previous full-fallback timing predicts the next scheduled
+run. Use current private worker accounting to identify its actual workload,
+reuse/fallback decisions and duration.
 
 The source tables are unpartitioned and have no safe incremental cursor.
 Metadata fingerprints avoid queries when a complete source family is unchanged.
 When a family changed, the export is bounded and labelled, and local
 reconciliation replaces complete changed `table_id` populations. Late rows,
 corrections, duplicate multiplicity, and deletions are therefore preserved.
+
+Metadata-based no-op detection and complete changed-family exports are the
+supported import contract. Date or maximum-ID watermarks must not replace it
+without a trustworthy source update/deletion cursor and reconciliation proof.
+
+Unchanged source families can reuse checksum-validated local Parquet files.
+The editable builder supports conservative reuse of 22 immutable log-scoped relations:
+producer/input hashes, DuckDB version, Logs inventory/schema, complete canonical rows for all
+logged tables and fresh numeric scope keys must match. Any correction, deletion,
+eligibility change or key shift requires a rebuild. Home, Players and
+full-population MW facts remain fresh. Missing dependency metadata requires a
+full baseline build. The logged-fact producer inventory follows its actual
+local import closure, including function-local imports; shared imported modules
+remain conservatively whole-file-versioned. Snapshot/publication edits do not
+by themselves invalidate these logged facts. Private builder reports record
+the exact reuse/fallback reason.
+
+The editable quick-win candidate omits unused sponsor-endgame, project-reward
+and action-history event copies while retaining serving event facts. Independent
+component/pair references are built on demand by the backend's
+`phase5_cardcard_reconcile.py` in a disposable scratch database, with an inactive
+source attached read-only. The command checks both datasets and all pairs in
+its reported fixed scope and returns pass/fail; exact before/after public bytes
+remain a separate acceptance gate. Existing Cards pooled construction and
+serving fallbacks are retained. Qualification/deployment status is explicit in
+`reports/cards-builder-followup-20261006/README.md`.
+
+The editable backend's ordinary card-CI handler uses the complete request scope over canonical
+player/card-play facts, with table clustering, rather than validation-only
+component/pair relations. Isolated Cards-chain qualification and rollout
+boundaries are recorded in the backend's
+`reports/cards-chain-optimization-20261006/README.md`.
+
+The root and installed Cards producer retains its persisted event copy and
+builds paired-scope metadata in 65,536 globally indexed table-key batches.
+Whole-population validation precedes batching; player-side ordering, nulls and
+filter fields remain exact. This applies to fresh and reused-fact refreshes.
+No frontend behavior, statistical population, ordinary-CI formula or API fields
+change. Full-size evidence is in the backend's
+`reports/cc7-rollout-20261006/README.md`: both scopes match exactly; six CI-only
+last-bit differences are explicitly precision-qualified (identical through nine
+decimal places), not claimed byte-perfect. Other held Cards-chain candidates
+are not included in this installed release.
+
+The canonical Cards log producer includes all normalized hand keys in seen,
+supporting an opt-in shortcut for redundant hand-only core work. Main-caller
+enablement is held by the native public-output gate; the main and generic
+callers retain hand-only/null-key behavior. Complete scoped facts, downstream moments,
+fallbacks and global cross-log card-set deduplication remain intact.
+
+Private canonical Arena
+season spools are copied into all-season/latest assets in bounded UTF-8 chunks;
+JSON order, numeric formatting and every history point remain exact. Default-pack
+validation is unchanged. The installed bundle does not follow desktop edits
+automatically: qualification and rollout status are recorded in the backend's
+`reports/quick-win-qualification-20261006/README.md`. INSERT-only and canonical
+UPDATE checkpoints remain per bucket; any cadence change requires demonstrated
+benefit plus full-size numeric and memory qualification. DuckDB 1.5.5 already prunes
+unused fields in Cards pair scope, so explicit projection alone provides no
+memory improvement.
+
+Resource measurement is private diagnostics, with no behaviour or
+published-data change. `ru_maxrss` is a process-lifetime maximum and cannot say
+which step needed the memory, so each step runs in a "resource window"
+(`phase5_refresh_metrics.ResourceSampler`: a best-effort daemon thread polling
+every 0.5 s; numbers and fixed labels only, never SQL, values or player names;
+every read is guarded, so measurement cannot fail or change the measured work).
+A window reports peak process RSS, peak service and slice cgroup anon/file/current
+bytes (the counters the 1456-MiB ceiling enforces), `memory.events` deltas
+(high/max/oom/oom_kill) and peak spill bytes. Where to find it after a run:
+(1) derivatives: each entry of `statement_timings` in the generation manifest's
+`builder` report gains `peak_*` fields; (2) snapshots: the snapshot output
+directory holds `resource-profile.jsonl` (written incrementally, survives a killed
+run) and `resource-profile.json` with one record per snapshot (query/component-CI/
+write seconds, peak memory, component-CI population queries and lookups), per
+Arena season, `arena_bundle`, `player_indexes`, `home_bootstrap`, `default_pack`
+and one record per distinct component-CI population; (3) the worker exports
+`ARK_RESOURCE_TIMELINE_FILE`, so every stage process appends a memory sample about
+every 30 s to `worker/<run-id>.memory-timeline.jsonl`; snapshot start/done events
+are streamed to temporary `worker/<run-id>.workflow.stdout.log` during execution.
+The worker consumes and removes stdout/stderr logs after completion; failed-run
+log tails are retained in private diagnostics. Copy full logs while a run is
+active if needed. Persistent resource profiles, timelines and accounting files
+are the post-run evidence. These diagnostic files are
+not release artifacts and never enter the public snapshot bucket. Read
+"Private refresh measurements" in `phase5-source-sync.md` for interpretation:
+0.5-second sampling can miss short spikes; cgroup counters include shared charged
+cache; nested timings are inclusive. SQL-window memory covers execution, while
+its elapsed time also includes fetches. The timeline covers VM processes, not
+the separate controlled BigQuery exporter. On non-Linux hosts or without
+cgroup v2 the cgroup fields are null. Because `phase5_refresh_metrics.py` is part
+of the builder's import closure, deploying it changes the producer fingerprint:
+the first run afterwards is a full derivative rebuild (the intended way to obtain
+a complete profile), not a reuse night. Tests: `tests/test_resource_measurement.py`.
+Audit findings that these measurements are meant to confirm or refute are in
+`reports/backend-efficiency-audit-20261005.md`.
+
+Snapshot generation pins the current candidate and retains all ordinary
+component confidence intervals. Its private per-attempt SQLite cache computes
+standalone component intervals once per normalized scope, telemetry eligibility
+and component kind across compatible views. Only small final statistics are
+cached; observations remain in DuckDB. Telemetry-restricted card baselines
+remain separate, Actual/context intervals are unchanged, and additive Synergy
+intervals remain absent. Interactive ordinary-CI requests are unchanged.
+Cards and Opening Hand's four MW/Base default artifacts can reuse a parent only
+after all logged relations were qualified under matching population,
+engine/producer signatures and the complete artifact hash, envelope, contract
+and schema validate. A new version envelope is written only after this proof.
+Other snapshots, including all Arena statistics and histories, are regenerated
+against the current candidate. No old interval is attached to a changed
+statistical population.
+
+Refresh timing distinguishes request queue delay from actual worker runtime.
+Private reports record stage/query durations without SQL or parameters. RSS
+counters are lifetime process peaks; sampled spill bytes are not peak spill.
+The private snapshot profiler also samples current RSS per page. These samples
+include retained buffers, so fresh-process repeats are needed to attribute a
+page's own process peak. Process RSS, engine limits and cgroup memory (including
+charged file cache) are distinct, and per-page peaks must not be added together.
+Detailed worker failure reports remain on the private VM; a path named
+"diagnostics" inside the anonymous-read snapshot bucket is not private storage.
+Lossless gzip changes artifact transport only, not table values or populations.
+Storage rewrites retain rollback metadata and source-generation preconditions;
+the public pack remains the last object published. Detailed runtime and rollout
+evidence lives in the backend reports, not in this onboarding contract.
 
 A candidate release is publishable only when:
 
@@ -194,11 +453,17 @@ On the VM, deployed modules are loaded from the immutable
 data only (`phase2_private_data`, serving pointers, and worker state); refresh
 code is never resolved from that directory.
 
+VM startup metadata uses the verified backend `phase5_vm_bootstrap.sh` and the
+private immutable deployment pointer. Publication dependencies are installed
+for the `ascri` worker account. Desktop edits or an uploaded archive alone do
+not update the reboot pointer or startup metadata; those must match the
+successfully accepted paired release. No loose worker-file bootstrap is used.
+
 Code/schema cutovers use the backend's coordinated publisher after numerical,
 functional frontend, and recovery gates pass. The five-second latency target
 is measured separately; explicitly accepted performance exceptions remain
 documented and must not be presented as passing measurements. Performance
-optimization during rebuilding is deferred and is not a functional release
+optimization continues independently and is not a functional release
 blocker. The publisher verifies the immutable producer
 inventory and stops serving across the code/data transition. Rollback restores
 the matched code, database, and snapshot release, not just the database pointer.
@@ -215,7 +480,10 @@ verified artifact hashes; the data version alone does not establish freshness.
 
 Specific Predictor event thresholds and opening-hand features are evaluated
 within each source-log row. Duplicate player-game log keys retain the raw
-producer's observation multiplicity without pooling their event lists.
+producer's observation multiplicity without pooling their event lists. Routes whose
+unit is a player-game (Build Enclosures, 2-CP Worker, Upgrade Order) keep only the
+first physical log row per player-game (`SOURCE_LOGS_ONE_PER_PLAYER_GAME` in
+`phase4_local_routes.py`), so a duplicated log is not counted twice.
 
 The hidden `/refresh/` page is a maintenance interface, not a navigation item.
 It keeps the top bar but hides dataset, Filters, rail, and sidebar controls. A
@@ -237,7 +505,41 @@ data version, and the last successful completion time.
   threshold; it does not delete data and does not automatically restart the VM.
 - Budget reports are delayed estimates, not instantaneous spending caps.
 
+Production has no legacy analytical BigQuery refresh, Synergy-CI or Card+Card
+warming jobs, and no BigQuery analytical derivative tables. The empty
+`dashboard_cache` dataset remains; do not recreate its retired derivatives or
+re-enable legacy SQL refresh helpers. Keep the DuckDB midnight refresh and
+separate Elo updater active. The importer uses upstream sources, and analytical
+derivatives are built locally in DuckDB. Permanent cleanup requires an exact
+inventory, dependency checks and owner approval; preserve upstream
+sources/routines, current and rollback releases, and publication recovery
+evidence. Guarded local retention remains the normal generation/export cleanup
+mechanism.
+
+Remote object deletion is a separate approval boundary. The
+`phase5_remote_retention.py` planner does not yet protect every paired rollback
+descriptor/publication journal or fail closed on an unreadable default pack.
+Do not run its `--execute` mode until those references are protected and the
+owner approves the exact deletion list; this does not disable guarded local
+generation/source retention.
+
 ## Canonical data semantics
+
+### Players default snapshots and selected-player queries
+
+Players/General snapshots contain only the 65 metric rows for Experts, Masters,
+Winners and All; the individual-player column is empty. Snapshot generation
+reads the exact prepared cohort summaries and uses an explicitly empty
+selected-player branch, rather than scanning all game facts again. The
+cohort projection uses a single join and metric catalog; the default query does
+not bind individual-player facts or identity metadata. Missing
+cohorts preserve metric rows with null values and zero counts. Default-scope
+player lookups reuse these cohorts; restrictive filters aggregate their own
+matching population. Last X affects the selected identity, not the cohorts.
+Comparison and Performance by map have empty initial snapshots. Individual
+player statistics and graph histories are VM queries calculated on demand,
+not daily per-player snapshots. Autocomplete snapshots contain player names
+only. Arena's separate roster/history bundles are a different contract.
 
 ### Elo
 
@@ -249,11 +551,14 @@ to another source field.
 Visible table headers call Elo delta **EV**. Stable API field names may still
 contain `delta` for compatibility. Player graph Elo is the one special metric
 that uses `post_match_elo`: it combines MW and Base, includes all statuses, and
-ignores sidebar filters for the selected merged player identity.
+ignores sidebar filters for the selected merged player identity. Null Elo and
+corrupted tables remain excluded.
 
 ### Completion
 
-A completed game is non-conceded and has a triggered endgame. Pages with a hard
+A completed table has exactly two rows and distinct players, no nonzero
+`concede`, and true `end_game_triggered` on both rows. This table-wide rule is
+evaluated before focal-player filters. Pages with a hard
 completed population show `Completed games only` checked, disabled, and locked.
 Pages with optional completion keep an editable control. Views where completion
 is not a coherent filter omit the control.
@@ -303,6 +608,18 @@ hover tooltip. This includes parenthetical card/action-card component values in
 Combos and MW Action Cards/Synergies. Component intervals use the exact active
 population of the displayed component.
 
+Ordinary route intervals use the mean, sample deviation and non-null observation
+count, with a Student-t critical value for small samples. Standalone Combo/MW
+component intervals use a table-clustered standard error and mean ± 1.96 SE,
+requiring at least two clusters. These are single-mean intervals, not an interval
+for their sum or difference. The executable definitions are
+`project_ordinary_ci_fields` in `phase3_duckdb_service.py` and
+`component_ci_sql` in `phase4_combo_mw_contracts.py`; the auditor guide explains
+the differing grains and scope/version checks. `cards/component_ci`
+(`_ordinary_ci_sql`) applies every Cards filter in the request (Elo, maps, rounds,
+dates, starting positions, completed/arena/tournament) to distinct player-game plays,
+clustered by table; it has no hard-coded default scope.
+
 Synergy is a point estimate only. Additive/covariance-aware Synergy confidence
 intervals are not part of the frontend, API, snapshots, derivatives, tests, or
 documentation contract.
@@ -317,7 +634,7 @@ dataset behavior, and eligibility. The summary below is for orientation.
 | Family | Observation unit and population |
 |---|---|
 | Home | Table/player moments; all configured maps; completion optional; sole corrupted-game exception. |
-| Cards | Card-play observations from Full Sample; configured card catalogue; summary projects excluded. |
+| Cards | Eligible played Logs events joined to canonical Full Sample; repeated-play EV weighting, distinct-table Played/Seen counts; configured card catalogue and summary-project exclusions. |
 | Opening Hand | Dealt/kept opening-card observations from Logs; never substituted with general draws or plays. |
 | Maps / Metrics | Completed focal player-games; maps are table columns, not a sidebar filter. |
 | Maps / Tournament H2H | Valid two-player tournament tables; no Filter sidebar. |
@@ -390,6 +707,10 @@ Starting position → Arena seasons → Completed/Arena/Tournament toggles
 The three final game-mode toggles remain one consecutive group. The filter body
 scrolls independently; Apply filters remains visible on phone layouts. Reset
 restores the page's documented defaults and re-enables linked Elo ranges.
+
+The Date-from box starts at the page default (2025-01-01; Maps uses 2026-01-13). A blank
+box means all time: pages send `date_from: null`, and a default-snapshot shortcut is used
+only when the value equals the page default exactly.
 
 ### Dataset behavior
 
@@ -535,6 +856,10 @@ Sorting by End uses rank as the tie-breaker. Ongoing seasons may be available as
 Players filters before they have an Arena roster. The Players Arena manifest is
 metadata-driven, while Arena's all-season/latest bundles remain roster-driven;
 a metadata-only season does not displace the newest roster season in Arena.
+The offline builder computes roster statistics once, fills complete histories in
+bounded player-ID batches, and spools one season at a time. All-season and latest
+compatibility assets preserve every player and rating point. Arena remains in the
+automatic refresh; memory optimization does not make past seasons manual-only.
 
 ### Records
 
@@ -543,7 +868,17 @@ Icons`. Records combines MW and Base. Elo Leaderboard is spreadsheet-owned,
 loads once, has no Filter sidebar, and accepts `n/a` as a valid Peak Arena value
 until a peak exists. Fastest Games and Biggest Turns retain their spreadsheet
 contracts; other game-derived rows are enriched from the local database and
-follow the corruption rule.
+follow the corruption rule. A Biggest Turns row's map is the Full Sample's map when
+the row matches a game there; otherwise it is the sheet's short map code translated to
+the full map name. `players/arena_top_100` is a compatibility alias returning the Arena
+roster (season, rank, player, player_id, end), filtered only by `arena_season`.
+
+Scripts that change the live serving state outside the journaled publication workflow
+(`phase5_activate_optimized_generation.py`, `phase5_promote_candidate.py`,
+`phase5_publish_snapshot_pointer.py`) refuse to run unless
+`ARK_ALLOW_UNCOORDINATED_PUBLICATION=yes` is set (`phase5_uncoordinated_guard.py`). The
+request options `refresh_data`, `debug` and `refresh_default_pack` are retired (HTTP 410).
+Unknown request fields are ignored; only a route's `request_fields` affect its result.
 
 ## External and moving sources
 
@@ -606,3 +941,16 @@ README when the system interpreter cannot import the bundled DuckDB extension.
 - Whenever behavior changes, update the working handoff and both publishable
   copies: `_publish_repo/ark_nova_dashboard_handoff.md` and
   `_publish_repo/docs/ark_nova_dashboard_handoff.md`.
+
+## Pending design exploration: zoo-themed redesign (October 2026)
+
+The user finds the current theme too monochrome green, dark and cold and asked for a warm, lively, zoo/nature look that
+stays serious and keeps the EV color gradients prominent. Six mockups live in `mockups/zoo-redesign/` (open `index.html`).
+Round 1 was rejected by the user (too childish, serif type, low-contrast tables); round 2 is in `mockups/zoo-redesign-2/` (open `index.html`), built from
+their feedback: keep the signpost nav with arrow signs, number chips, square-cornered buttons, colored dots on the header; avoid serif fonts (except maybe the logo),
+Inter, glows, gradients, big rounding and an "AI-made" look; every page needs subpage tabs. Feedback details are in `mockups/zoo-redesign-2/README.md`.
+Status: **awaiting the user's choice; nothing in `assets/` was changed and nothing was pushed.**
+Constraints for whoever implements the chosen direction: keep the locked numeric color scales (`assets/js/color-scales.js`);
+light themes need a "pill" rendering of value cells because those colors are tuned for dark backgrounds; the mockups cover
+desktop only, so phone layouts (<= 600 px) still need designing; follow the restoration-archive pattern in `mockups/` before
+replacing the current theme; deploy only with explicit authorization.

@@ -13,7 +13,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'actions';
@@ -153,7 +153,7 @@ function params() {
     player_elo_max: v('playerEloMax') === '' ? null : Number(v('playerEloMax')),
     opponent_elo_min: v('opponentEloMin') === '' ? 0 : Number(v('opponentEloMin')),
     opponent_elo_max: v('opponentEloMax') === '' ? null : Number(v('opponentEloMax')),
-    date_from: v('dateFrom') || '2025-01-01', date_to: v('dateTo') || null,
+    date_from: v('dateFrom') || null, date_to: v('dateTo') || null,
     completed_only: mode === 'frequency' && view !== 'starting_position' ? true : null,
   };
 }

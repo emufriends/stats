@@ -1,4 +1,5 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20261001-functional-release';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20261009-audit-repair';
+import { captureGlobalFilters, resetGlobalFilters, getAppliedGlobalFilters } from './filter-state.js?v=20261009-audit-repair';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor, synergyRangeColor } from './color-scales.js?v=20260812-9';
 import { getRoutePageId, isRefreshPath, onRouteChange } from './router.js?v=20260819-1';
 import {
@@ -6,7 +7,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20260921-filter-performance';
+} from './snapshot-cache.js?v=20261009-audit-repair';
 import {
   closeSidebarIfOpen,
   renderShell,
@@ -21,19 +22,14 @@ import {
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .apply-btn')) return;
   document.querySelectorAll('#sidebar .date-input[type="text"]').forEach(normalizeIsoDateInput);
+  captureGlobalFilters();
 }, true);
 
 document.addEventListener('click', event => {
   if (!event.target.closest('#sidebar .reset-btn')) return;
-  window.setTimeout(() => {
-    const arena = document.getElementById('globalArenaOnly');
-    const tournament = document.getElementById('globalTournamentOnly');
-    if (arena) arena.checked = false;
-    if (tournament) tournament.checked = false;
-    window.resetGlobalStartingPositions?.();
-    activeEloRangeLinkController?.reset();
-  }, 0);
-});
+  // Capture phase precedes every page's inline Reset handler and its request.
+  resetGlobalFilters(document, () => activeEloRangeLinkController?.reset());
+}, true);
 
 function prioritizeNavigationSnapshot(event) {
   const link = event.target.closest?.('.side-nav-link[data-page-id]');
@@ -647,11 +643,10 @@ window.setGlobalTournamentOnly = value => {
   }
 };
 
-window.hasActiveGlobalModeFilter = () => Boolean(
-  document.getElementById('globalArenaOnly')?.checked
-  || document.getElementById('globalTournamentOnly')?.checked
-  || window.getGlobalStartingPositions?.().length === 1
-);
+window.hasActiveGlobalModeFilter = () => {
+  const scope = getAppliedGlobalFilters();
+  return scope.arena_only || scope.tournament_only || scope.starting_positions.length === 1;
+};
 
 // Home owns a tiny synchronous bootstrap. All other defaults begin warming as
 // soon as the shell module loads, without delaying Home's first paint.
@@ -691,6 +686,7 @@ async function renderCurrentRoute() {
     enhanceIsoDateInputs();
     installGlobalModeFilters(activePageId);
     installGlobalFpaFilter(activePageId);
+    captureGlobalFilters();
     installEloRangeLinking();
     const initialCompletedMode = INITIAL_COMPLETED_FILTER_MODES[activePageId];
       if (initialCompletedMode) window.setCompletedFilterMode(initialCompletedMode);

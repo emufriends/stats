@@ -13,7 +13,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'conservation';
@@ -169,7 +169,7 @@ function params() {
     player_elo_max: value('playerEloMax') === '' ? null : Number(value('playerEloMax')),
     opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
     opponent_elo_max: value('opponentEloMax') === '' ? null : Number(value('opponentEloMax')),
-    date_from: value('dateFrom') || '2025-01-01', date_to: value('dateTo') || null,
+    date_from: value('dateFrom') || null, date_to: value('dateTo') || null,
     completed_only: view === 'projects' ? null : (document.getElementById('conservationCompletedToggle')?.checked ? true : null),
   };
 }

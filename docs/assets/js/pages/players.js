@@ -1,6 +1,7 @@
 import { deltaRangeColor, divergingRangeColor } from '../color-scales.js?v=20260711-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-5';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { getAppliedGlobalFilters, restoreGlobalFilters } from '../filter-state.js?v=20261009-audit-repair';
 import { setFilterButtonDisabled } from '../layout.js?v=20260801-2';
 import { isDefaultMapSelection, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
@@ -429,6 +430,7 @@ function capturePlayersFilterState() {
     arenaSeasons: [...selectedArenaSeasons],
     tournamentOnly: Boolean(document.getElementById('globalTournamentOnly')?.checked),
     completedOnly: Boolean(document.getElementById('playersCompletedOnly')?.checked),
+    globalScope: getAppliedGlobalFilters(),
   };
 }
 
@@ -443,6 +445,7 @@ function restorePlayersFilterState(state) {
   selectedMaps = [...state.maps];
   selectedArenaSeasons = [...state.arenaSeasons];
   window.setGlobalTournamentOnly?.(state.tournamentOnly);
+  if (state.globalScope) restoreGlobalFilters(state.globalScope);
   const completed = document.getElementById('playersCompletedOnly');
   if (completed) completed.checked = Boolean(state.completedOnly);
   renderMapChips();
@@ -1310,7 +1313,7 @@ function historyRequestMetrics() {
 function playersHistoryRequest(metricKeys) {
   return {
     ...params(),
-    tournament_only: Boolean(document.getElementById('globalTournamentOnly')?.checked),
+    tournament_only: getAppliedGlobalFilters().tournament_only,
     players_history: true,
     players_history_metrics: metricKeys,
   };

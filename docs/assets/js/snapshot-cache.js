@@ -1,6 +1,6 @@
-// Foreground-first cache for public dashboard snapshots and filtered responses.
-// Snapshot bodies are persisted in Cache Storage without parsing during the
-// background warmup. This keeps large assets off the main thread until needed.
+// Public snapshots are validated before persistence. Default-pack members are
+// decoded once and seeded into a size-bounded cache under their actual version.
+import { normalizeGlobalFilters } from './filter-state.js?v=20261009-audit-repair';
 
 const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';
@@ -8,11 +8,14 @@ const DEFAULT_PACK_CACHE_PREFIX = 'arkNovaDefaultPack:';
 const DEFAULT_PACK_URL = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/bootstrap/default-pack.json';
 const DEFAULT_PACK_SCHEMA_VERSION = 23;
 const MEMORY_MAX_ENTRIES = 128;
+const MEMORY_MAX_BYTES = 64 * 1024 * 1024;
+const memorySizes = new Map();
+let memoryBytes = 0;
+let currentRelease = null;
 
 const memoryCache = new Map();
 const inFlight = new Map();
 const activeFilteredControllers = new Map();
-let foregroundActivity = 0;
 let cacheCleanupStarted = false;
 let defaultPackInit = null;
 let currentPackReady = false;
@@ -132,6 +135,17 @@ function versionedUrl(url) {
   return `${url}${separator}ark_data_version=${encodeURIComponent(version)}`;
 }
 
+// Memory-cache key for a snapshot URL. Pages append their own page-version
+// query (?v=...) to snapshot URLs, but the preloaded default pack is seeded under
+// the manifest's URL. Dropping only the `v` parameter from the KEY (the download
+// still uses the original URL) lets every page hit the preloaded copy no matter
+// which ?v= string it asks with. Keep this in sync with seedDefaultPack/peekSnapshot.
+function snapshotKeyUrl(url) {
+  const [path, query = ''] = String(url).split('?');
+  const kept = query.split('&').filter(part => part && part.split('=')[0] !== 'v');
+  return versionedUrl(kept.length ? `${path}?${kept.join('&')}` : path);
+}
+
 function snapshotCacheName() {
   return `${SNAPSHOT_CACHE_PREFIX}${dataVersion().replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 }
@@ -141,9 +155,20 @@ function cacheKey(kind, value) {
 }
 
 function memoryPut(key, payload) {
+  const size = JSON.stringify(payload).length * 2;
+  memoryBytes -= memorySizes.get(key) || 0;
+  memorySizes.delete(key);
   memoryCache.delete(key);
+  if (size > MEMORY_MAX_BYTES) return;
   memoryCache.set(key, payload);
-  while (memoryCache.size > MEMORY_MAX_ENTRIES) memoryCache.delete(memoryCache.keys().next().value);
+  memorySizes.set(key, size);
+  memoryBytes += size;
+  while (memoryCache.size > MEMORY_MAX_ENTRIES || memoryBytes > MEMORY_MAX_BYTES) {
+    const oldest = memoryCache.keys().next().value;
+    memoryBytes -= memorySizes.get(oldest) || 0;
+    memorySizes.delete(oldest);
+    memoryCache.delete(oldest);
+  }
 }
 
 async function snapshotStorage() {
@@ -164,23 +189,31 @@ async function cleanOldSnapshotCaches() {
 }
 
 async function snapshotLoader(url) {
-  const requestUrl = versionedUrl(url);
+  const expected = dataVersion();
+  const path = snapshotBlobPath(url);
+  const pinned = currentRelease && path.startsWith('card-stats/')
+    ? `https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats/releases/${currentRelease}/${path.slice('card-stats/'.length)}`
+    : url;
+  const requestUrl = versionedUrl(pinned);
   const cache = await snapshotStorage();
   if (cache) {
     const cached = await cache.match(requestUrl);
-    if (cached) return cached.json();
+    if (cached) {
+      try {
+        const payload = await cached.json();
+        if (validSnapshot(payload, expected)) return payload;
+      } catch { /* Discard malformed persistent entries. */ }
+      try { await cache.delete(requestUrl); } catch { /* Persistence is best-effort. */ }
+    }
   }
 
   const response = await fetch(requestUrl, { cache: 'default' });
   if (!response.ok) throw new Error(`Snapshot request failed (${response.status})`);
-  if (cache) void cache.put(requestUrl, response.clone()).catch(() => {});
-  return response.json();
-}
-
-async function runForeground(loader) {
-  foregroundActivity += 1;
-  try { return await loader(); }
-  finally { foregroundActivity -= 1; }
+  const copy = response.clone();
+  const payload = await response.json();
+  if (!validSnapshot(payload, expected)) throw new Error('Snapshot data version does not match this dashboard session');
+  if (cache) void cache.put(requestUrl, copy).catch(() => {});
+  return payload;
 }
 
 async function loadCached(key, loader, { shareInFlight = true } = {}) {
@@ -202,33 +235,22 @@ async function loadCached(key, loader, { shareInFlight = true } = {}) {
 }
 
 export function loadSnapshot(url) {
-  const requestUrl = versionedUrl(url);
-  return runForeground(() => loadCached(cacheKey('snapshot', requestUrl), () => snapshotLoader(url)));
+  return loadCached(cacheKey('snapshot', snapshotKeyUrl(url)), () => snapshotLoader(url));
 }
 
 export function peekSnapshot(url) {
-  const key = cacheKey('snapshot', versionedUrl(url));
+  const key = cacheKey('snapshot', snapshotKeyUrl(url));
   return memoryCache.get(key) || null;
 }
 
 function withGlobalModeFilters(params) {
-  const normalized = { ...params };
-  if (normalized.stats_page !== 'records') {
-    const arena = document.getElementById('globalArenaOnly');
-    const tournament = document.getElementById('globalTournamentOnly');
-    normalized.arena_only = Boolean(arena?.checked);
-    normalized.tournament_only = Boolean(tournament?.checked);
-  }
-  const startingPositions = window.getGlobalStartingPositions?.() || [];
-  if (startingPositions.length === 1) normalized.starting_positions = startingPositions;
-  else delete normalized.starting_positions;
-  return normalized;
+  return normalizeGlobalFilters(params);
 }
 
 export function fetchStats(params, { signal, shareInFlight = true } = {}) {
   const normalized = withGlobalModeFilters(params);
   const key = cacheKey('filtered', normalized);
-  if (shareInFlight && inFlight.has(key)) return runForeground(() => inFlight.get(key));
+  if (shareInFlight && inFlight.has(key)) return inFlight.get(key);
 
   const group = String(normalized.stats_page || 'dashboard');
   let managedController = null;
@@ -239,7 +261,7 @@ export function fetchStats(params, { signal, shareInFlight = true } = {}) {
     signal = managedController.signal;
   }
 
-  const request = runForeground(() => loadCached(key, async () => {
+  const request = loadCached(key, async () => {
     const response = await fetch(API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -251,7 +273,7 @@ export function fetchStats(params, { signal, shareInFlight = true } = {}) {
       throw new Error(payload.message || `API request failed (${response.status})`);
     }
     return payload;
-  }, { shareInFlight }));
+  }, { shareInFlight });
   return request.finally(() => {
     if (managedController && activeFilteredControllers.get(group) === managedController) {
       activeFilteredControllers.delete(group);
@@ -278,18 +300,27 @@ function snapshotBlobPath(url) {
   } catch { return ''; }
 }
 
+function validSnapshot(payload, expected = dataVersion()) {
+  return Boolean(payload && typeof payload === 'object' && !Array.isArray(payload)
+    && payload.data_version && (expected === 'unknown' || payload.data_version === expected));
+}
+
 function compatibleDefaultPack(payload) {
-  return Boolean(payload && Number(payload.schema_version) === DEFAULT_PACK_SCHEMA_VERSION && typeof payload.snapshots === 'object');
+  if (!validSnapshot(payload) || Number(payload.schema_version) !== DEFAULT_PACK_SCHEMA_VERSION
+      || !payload.snapshots || typeof payload.snapshots !== 'object' || Array.isArray(payload.snapshots)) return false;
+  return Object.values(payload.snapshots).every(snapshot => validSnapshot(snapshot, payload.data_version));
 }
 
 function seedDefaultPack(payload) {
   if (!compatibleDefaultPack(payload)) return false;
+  if (dataVersion() === 'unknown') window.__ARK_NOVA_DATA_VERSION__ = payload.data_version;
+  currentRelease = /^[a-zA-Z0-9._-]+$/.test(payload.release_version || '') ? payload.release_version : null;
   const byPath = new Map(DEFAULT_SNAPSHOT_MANIFEST.map(([, url]) => [snapshotBlobPath(url), url]));
   let seeded = 0;
   Object.entries(payload.snapshots).forEach(([path, snapshot]) => {
     const url = byPath.get(path);
     if (!url || !snapshot) return;
-    memoryPut(cacheKey('snapshot', versionedUrl(url)), snapshot);
+    memoryPut(cacheKey('snapshot', snapshotKeyUrl(url)), snapshot);
     seeded += 1;
   });
   return seeded > 0;
@@ -309,13 +340,13 @@ async function cachedPackFrom(cacheName) {
 async function hydrateNewestCachedPack() {
   if (!('caches' in window)) return null;
   try {
-    const names = (await caches.keys())
-      .filter(name => name.startsWith(DEFAULT_PACK_CACHE_PREFIX))
-      .sort()
-      .reverse();
+    const names = [packCacheName()];
     for (const name of names) {
       const payload = await cachedPackFrom(name);
-      if (!currentPackReady && seedDefaultPack(payload)) return { name, payload };
+      if (!currentPackReady && seedDefaultPack(payload)) {
+        currentPackReady = true;
+        return { name, payload };
+      }
       if (currentPackReady) return null;
     }
   } catch { /* The daily pack is an optimization, never a hard dependency. */ }
@@ -331,34 +362,28 @@ async function installCurrentPack() {
     try {
       const cache = await caches.open(cacheName);
       response = await cache.match(requestUrl);
-      if (!response) {
-        const fetched = await fetch(requestUrl, { cache: 'default', priority: 'low' });
-        if (!fetched.ok) throw new Error(`Default pack request failed (${fetched.status})`);
-        await cache.put(requestUrl, fetched.clone());
-        response = fetched;
-      }
     } catch { response = null; }
   }
   if (!response) {
     response = await fetch(requestUrl, { cache: 'default', priority: 'low' });
     if (!response.ok) throw new Error(`Default pack request failed (${response.status})`);
   }
+  let copy = response.clone();
   let payload = await response.json();
   if (!compatibleDefaultPack(payload)) {
     // A Cache Storage entry can outlive a frontend schema bump. Replace it
     // immediately instead of repeatedly failing and falling back forever.
     const fetched = await fetch(requestUrl, { cache: 'reload', priority: 'low' });
     if (!fetched.ok) throw new Error(`Default pack refresh failed (${fetched.status})`);
-    if ('caches' in window) {
-      try {
-        const cache = await caches.open(cacheName);
-        await cache.put(requestUrl, fetched.clone());
-      } catch { /* A fresh in-memory pack is still useful without persistence. */ }
-    }
+    copy = fetched.clone();
     payload = await fetched.json();
   }
   if (!seedDefaultPack(payload)) throw new Error('Default pack has no recognized snapshots');
   currentPackReady = true;
+  if ('caches' in window) {
+    try { await (await caches.open(packCacheName())).put(requestUrl, copy); }
+    catch { /* Validated memory entries remain usable without persistence. */ }
+  }
 
   if ('caches' in window) {
     try {
@@ -371,20 +396,16 @@ async function installCurrentPack() {
     } catch { /* Cache cleanup is best-effort. */ }
   }
   cleanOldSnapshotCaches();
-  return payload;
+  return { data_version: payload.data_version, release_version: payload.release_version };
 }
 
 export function initializeDefaultSnapshots() {
   if (defaultPackInit) return defaultPackInit;
-  const current = installCurrentPack();
   defaultPackInit = (async () => {
     const cached = await hydrateNewestCachedPack();
-    if (cached) {
-      void current.catch(() => {});
-      return cached.payload;
-    }
-    return current;
-  })();
+    if (cached) return { data_version: cached.payload.data_version, release_version: cached.payload.release_version };
+    return installCurrentPack();
+  })().catch(error => { defaultPackInit = null; throw error; });
   return defaultPackInit;
 }
 
@@ -405,7 +426,7 @@ export function prioritizeSnapshotGroup(group) {
   // Arena owns a small latest-season bootstrap plus a deliberately separate
   // all-season history bundle, so hovering or focusing that nav item must
   // still warm its assets after the universal default pack is ready.
-  if (currentPackReady && group !== 'players') return;
+  if (currentPackReady && group !== 'arena') return;
   const urls = DEFAULT_SNAPSHOT_MANIFEST.filter(([itemGroup]) => itemGroup === group).map(([, url]) => url);
   urls.forEach(url => { void loadSnapshot(url).catch(() => {}); });
 }

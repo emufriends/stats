@@ -134,7 +134,7 @@ export const sidebarHtml = `
 
 const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',
@@ -424,7 +424,7 @@ function getParams() {
     player_elo_max: value('playerEloMax') ? Number(value('playerEloMax')) : null,
     opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
     opponent_elo_max: value('opponentEloMax') ? Number(value('opponentEloMax')) : null,
-    date_from: value('dateFrom') || '2025-01-01',
+    date_from: value('dateFrom') || null,
     date_to: value('dateTo') || null,
     completed_only: document.getElementById('endGameToggle')?.checked ? true : null,
   };

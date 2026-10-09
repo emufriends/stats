@@ -10,7 +10,7 @@ import {
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'icons';
@@ -220,7 +220,7 @@ function params() {
     player_elo_max: value('playerEloMax') ? Number(value('playerEloMax')) : null,
     opponent_elo_min: value('opponentEloMin') === '' ? 0 : Number(value('opponentEloMin')),
     opponent_elo_max: value('opponentEloMax') ? Number(value('opponentEloMax')) : null,
-    date_from: value('dateFrom') || '2025-01-01',
+    date_from: value('dateFrom') || null,
     date_to: value('dateTo') || null,
   };
 }

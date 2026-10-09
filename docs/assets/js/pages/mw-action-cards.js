@@ -10,7 +10,8 @@ import {
 } from '../color-scales.js?v=20260812-9';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260812-9';
-import { fetchStats, loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { fetchStats, loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { getAppliedGlobalFilters } from '../filter-state.js?v=20261009-audit-repair';
 import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'mw-action-cards';
@@ -197,8 +198,8 @@ function params(view = canonicalView()) {
     opponent_elo_max: opponentMax === '' ? null : Number(opponentMax),
     date_from: value('dateFrom') || null, date_to: value('dateTo') || null,
     completed_only: Boolean(document.getElementById('completedToggle')?.checked),
-    arena_only: Boolean(document.getElementById('globalArenaOnly')?.checked),
-    tournament_only: Boolean(document.getElementById('globalTournamentOnly')?.checked),
+    arena_only: getAppliedGlobalFilters().arena_only,
+    tournament_only: getAppliedGlobalFilters().tournament_only,
   };
 }
 

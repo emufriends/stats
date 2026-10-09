@@ -6,7 +6,7 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
-import { loadStats } from '../snapshot-cache.js?v=20260921-filter-performance';
+import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
 import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
@@ -429,7 +429,7 @@ function getDefaultSnapshotKey(params) {
     params.player_elo_max === undefined &&
     opponentMinDefault &&
     params.opponent_elo_max === undefined &&
-    (params.date_from === undefined || params.date_from === '2025-01-01') &&
+    params.date_from === '2025-01-01' &&
     params.date_to === undefined &&
     params.completed_only === null &&
     params.rounds === undefined;

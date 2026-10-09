@@ -1,10 +1,11 @@
 // Minimal router for a static GitHub Pages app.
 //
 // Routes look like #/cards or #/opening-hand. Unknown routes intentionally fall
-// back to DEFAULT_PAGE_ID instead of showing a 404, because GitHub Pages serves
-// the same index.html for the whole dashboard.
+// back to DEFAULT_PAGE_ID inside the loaded app. Normal pages use hashes and
+// share index.html; this does not imply a host-side fallback for arbitrary paths.
 export function getRoutePageId(pages, defaultPageId) {
-  // The private maintenance UI is the sole path-based route. A real
+  // The unlinked maintenance UI is the sole path-based route. Hiding its route
+  // is not authentication; refresh authorization is enforced by the backend. A real
   // refresh/index.html entry keeps direct /refresh navigation compatible with
   // GitHub Pages without exposing the page in the dashboard navigation.
   if (isRefreshPath() && pages.refresh) return 'refresh';
