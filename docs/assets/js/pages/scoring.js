@@ -13,7 +13,7 @@ import {
   isInsufficientObservationCount,
   mapTooltipLabel,
 } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
 
 export const id = 'scoring';
 export const title = 'Scoring';

@@ -10,7 +10,7 @@ import {
   relativeEloColor,
 } from '../color-scales.js?v=20260710-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
 import { ALL_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const title = 'Endgames';
@@ -342,7 +342,8 @@ function resetFilters() {
   document.getElementById('opponentEloMax').value = '';
   document.getElementById('dateFrom').value = '2025-01-01';
   document.getElementById('dateTo').value = '';
-  document.querySelectorAll('#mapChips .chip').forEach(c => c.classList.add('active'));
+  // Reset uses the same Standard-only population as initial mounting.
+  buildMapChips();
   const searchInput = document.getElementById('searchInput');
   if (searchInput) searchInput.value = '';
   searchQuery = '';

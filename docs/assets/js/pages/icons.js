@@ -10,7 +10,7 @@ import {
   formatSignedDeltaAdaptive,
   isInsufficientObservationCount,
 } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
 import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'icons';

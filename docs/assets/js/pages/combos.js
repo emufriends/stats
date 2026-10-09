@@ -134,7 +134,7 @@ export const sidebarHtml = `
 
 const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_ROOT = 'https://storage.googleapis.com/ark-nova-stats-dashboard-cache/card-stats';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
 const CARD_ALIASES_URL = 'cards_altnames.csv';
 const SNAPSHOT_VIEWS = {
   card_card: 'card-card',

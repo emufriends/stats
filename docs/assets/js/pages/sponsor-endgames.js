@@ -6,7 +6,7 @@ import {
   numericRange,
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260710-2';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
 import {
   INSUFFICIENT_DATA_TOOLTIP,
   formatSignedDeltaAdaptive,

@@ -10,8 +10,8 @@ import {
 } from '../color-scales.js?v=20260812-9';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260812-9';
 import { setTopbarDatasetLock } from '../layout.js?v=20260812-9';
-import { fetchStats, loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
-import { getAppliedGlobalFilters } from '../filter-state.js?v=20261009-audit-repair';
+import { fetchStats, loadStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
+import { getAppliedGlobalFilters } from '../filter-state.js?v=20261009-audit-repair2';
 import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
 export const id = 'mw-action-cards';

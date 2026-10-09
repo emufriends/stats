@@ -6,7 +6,7 @@ import {
   playrateColor,
   relativeEloColor,
 } from '../color-scales.js?v=20260707-1';
-import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { loadStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
 import { formatSignedDeltaAdaptive } from '../table-cells.js?v=20260712-4';
 import { cardDetailsHref } from '../card-catalog.js?v=20260908-card-details1';
 import { ALL_MAPS, DEFAULT_MAPS, isDefaultMapSelection, mapGroupNames, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
@@ -308,7 +308,8 @@ function resetFilters() {
   document.getElementById('dateTo').value = '';
   document.getElementById('endGameToggle').checked = false;
 
-  document.querySelectorAll('#mapChips .chip').forEach(c => c.classList.add('active'));
+  // Reset uses the same Standard-only population as initial mounting.
+  buildMapChips();
   const minPlayedInput = document.getElementById('minPlayedInput');
   if (minPlayedInput) minPlayedInput.value = '1000';
   minPlayedThreshold = 1000;

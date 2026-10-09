@@ -1,4 +1,4 @@
-import { fetchStats, loadSnapshot } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { fetchStats, loadSnapshot } from '../snapshot-cache.js?v=20261009-audit-repair2';
 import { setFilterButtonDisabled, setTopbarDatasetLock } from '../layout.js?v=20260801-2';
 
 export const id = 'arena';

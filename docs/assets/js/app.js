@@ -1,5 +1,5 @@
-import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20261009-audit-repair';
-import { captureGlobalFilters, resetGlobalFilters, getAppliedGlobalFilters } from './filter-state.js?v=20261009-audit-repair';
+import { DEFAULT_PAGE_ID, PAGES } from './page-registry.js?v=20261009-audit-repair2';
+import { captureGlobalFilters, resetGlobalFilters, getAppliedGlobalFilters } from './filter-state.js?v=20261009-audit-repair2';
 import { deltaColor, deltaRangeColor, orangeGreenRangeColor, synergyRangeColor } from './color-scales.js?v=20260812-9';
 import { getRoutePageId, isRefreshPath, onRouteChange } from './router.js?v=20260819-1';
 import {
@@ -7,7 +7,7 @@ import {
   preloadDefaultSnapshots,
   prioritizeSnapshotGroup,
   waitForDefaultSnapshotWarmup,
-} from './snapshot-cache.js?v=20261009-audit-repair';
+} from './snapshot-cache.js?v=20261009-audit-repair2';
 import {
   closeSidebarIfOpen,
   renderShell,

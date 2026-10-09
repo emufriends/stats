@@ -9,7 +9,7 @@ import {
   orangeGreenRangeColor,
 } from '../color-scales.js?v=20260711-1';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-4';
-import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair';
+import { loadSnapshot, fetchStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
 import { setFilterButtonDisabled } from '../layout.js?v=20260819-4';
 
 export const title = 'Maps';

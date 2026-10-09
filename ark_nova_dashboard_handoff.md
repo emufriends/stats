@@ -206,6 +206,9 @@ precedence over defaults; normalization does not read sidebar DOM. Reset clears
 shared state synchronously, then the page restores its own defaults and submits
 one request. Players restores the committed global scope when a proposed graph
 filter change fails. Follow-up requests and ordinary CIs use that applied scope.
+Map Reset reuses each page's initial selection: Standard-only except Home's
+all-map default. Cards, Opening Hand and Endgames rebuild their grouped chips
+from those defaults rather than activating every map chip.
 
 ## Refresh and publication
 

@@ -1,6 +1,6 @@
 // Public snapshots are validated before persistence. Default-pack members are
 // decoded once and seeded into a size-bounded cache under their actual version.
-import { normalizeGlobalFilters } from './filter-state.js?v=20261009-audit-repair';
+import { normalizeGlobalFilters } from './filter-state.js?v=20261009-audit-repair2';
 
 const API_URL = 'https://duckdb-gateway-ioetmehoha-ew.a.run.app/v1/query';
 const SNAPSHOT_CACHE_PREFIX = 'arkNovaSnapshotCache:';

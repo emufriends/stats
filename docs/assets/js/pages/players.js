@@ -1,7 +1,7 @@
 import { deltaRangeColor, divergingRangeColor } from '../color-scales.js?v=20260711-2';
 import { formatSignedDeltaAdaptive, mapTooltipLabel } from '../table-cells.js?v=20260712-5';
-import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20261009-audit-repair';
-import { getAppliedGlobalFilters, restoreGlobalFilters } from '../filter-state.js?v=20261009-audit-repair';
+import { fetchStats, loadSnapshot, loadStats } from '../snapshot-cache.js?v=20261009-audit-repair2';
+import { getAppliedGlobalFilters, restoreGlobalFilters } from '../filter-state.js?v=20261009-audit-repair2';
 import { setFilterButtonDisabled } from '../layout.js?v=20260801-2';
 import { isDefaultMapSelection, renderMapFilterChips } from '../map-catalog.js?v=20260921-filter-performance';
 
