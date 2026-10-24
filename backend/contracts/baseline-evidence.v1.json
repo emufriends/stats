@@ -1,0 +1,14 @@
+{
+  "evidence_version": "2026-09-22.1",
+  "legacy_frontend_revision": "9cfe7cb",
+  "legacy_snapshot_pack": {
+    "path": "phase2_private_data/reference_snapshots/legacy-default-pack-20260914.json",
+    "data_version": "2026-09-14T01:16:09.085507+00:00",
+    "sha256": "FA9FDB77B03239E00102D3DFBF4F1F11540BBD9E34190DEEE09918E6702D18BB"
+  },
+  "real_sample": {
+    "path": "tests/fixtures/migration-contract-real-sample.v1.json",
+    "source_generation": "phase2-20260915-b57235ad65db",
+    "extractor": "tests/extract_contract_real_sample.py"
+  }
+}

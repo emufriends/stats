@@ -1,0 +1,25 @@
+# Operator data and local runtime artifacts never belong in this public repo.
+**/phase2_private_data/
+**/phase3_private_serving/
+**/agent-coordination/
+**/release-source/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.venv/
+**/node_modules/
+**/.test-temp*/
+**/.duckdb-spill/
+**/*.duckdb
+**/*.duckdb.wal
+**/*.parquet
+**/*.sqlite
+**/*.sqlite3
+**/.env
+**/.env.*
+**/*service-account*.json
+**/*credentials*.json
+**/*.pem
+**/*.key
+**/*.zip
+**/*.tar.gz

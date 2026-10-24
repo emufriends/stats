@@ -1,0 +1,21 @@
+# Private data, generations, serving pointers and caches never enter Git.
+phase2_private_data/
+phase3_private_serving/
+
+# Regenerable Python/test scratch files.
+__pycache__/
+*.pyc
+*.pyo
+/.test-temp*/
+/.codex-test-temp/
+/.duckdb-spill/
+/tmp????????/
+/.increment2-*.duckdb*
+/.increment2-*.json
+
+# Downloaded diagnostic payloads are not release inputs.
+/tmp_current_default_pack.json
+/phase5-current-public-pack.bin
+/phase5-public-default-mw.json
+/phase5_retry_request*.json
+/phase5_timeout_status.json

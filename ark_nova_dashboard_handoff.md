@@ -67,6 +67,21 @@ The local preview server normally serves the frontend at
 `http://127.0.0.1:8767/`. A `?fresh=...` query or `Ctrl+F5` helps distinguish a
 real code problem from stale browser modules.
 
+The public repository's `backend/` now mirrors the maintained review source,
+tests, route contracts and runbooks, rather than only a small maintenance
+Function subset. Start with `backend/PUBLICATION_STATE.md` and
+`backend/AUDITOR_GUIDE.md` for independent review. Private databases, source
+exports, raw qualification evidence, operator notes and installed releases are
+not published. Editable numerical/EFF-08 work is not thereby qualified or
+deployed; never deploy the review tree wholesale.
+
+As of October 24, the daily dashboard refresh is intentionally paused until the
+owner explicitly authorizes updates again. The maintenance Function revision is
+`get-card-stats-00205-tax`, with bounded exact-metadata export retries and private
+diagnostics; this code-only repair did not run a refresh. The VM still uses
+`deploy-114e8d834a97b90f8640` and the October 13 serving generation. Repository
+CSV/source publication is not a VM deployment, cache update or data refresh.
+
 ## Production topology
 
 ```text
@@ -223,9 +238,12 @@ After one minute without a matching run, Retry is offered without claiming that
 the server refresh failed or treating the previous successful run as this one.
 
 The editable frontend is canonical. `tools/sync-publication.py` stages declared
-runtime assets, entry points and maintained handoffs into `_publish_repo/docs`,
-or checks their content hashes without writing. It deliberately excludes private
-evidence, backend data and repository-level documentation. Staging is not a push.
+runtime assets, public catalogs/Arena inputs, tests, handoffs and audit/source
+text into the publication checkout, or checks hashes without writing. It
+excludes private generated datasets. `tools/sync-backend-publication.py` validates
+the merge CSV and mirrors the maintained backend review source with explicit
+private-data exclusions. Neither tool pushes Git, deploys backend components,
+updates live caches/generations, or resumes the paused scheduler.
 
 The scheduled refresh starts at 00:00 UTC and has a six-hour operational
 window. A source-equality check can make a refresh a no-op. BigQuery is used only
@@ -259,7 +277,13 @@ coordinator retains reports rather than native preparation allocations, and
 resource reports distinguish coordinator and child peaks. Snapshot JSON is streamed, Arena history data is
 spooled by season, and pack assembly retains one decoded snapshot at a time.
 The serial snapshot builder uses a generation-scoped disk-only response cache,
-avoiding duplicate decoded histories; the live API keeps its two-level cache.
+avoiding duplicate decoded histories. The live API's separate two-level cache
+retains immutable UTF-8 JSON within a 32-MiB total and 8-MiB per-entry budget;
+larger responses remain available through SQLite, and every hit returns a
+caller-owned decoded object. These budgets bound retained payloads, not total
+API memory. Most Icons snapshots use one complete ordered query per dataset
+and 1,024-row cursor batches into a JSON spool; live Records pagination and all
+snapshot rows, field values and ordering remain unchanged.
 Arena snapshots calculate roster statistics once and fill history arrays through
 bounded player-ID batches, preserving all players, graph points and ordering.
 Season spooling, bounded Arena histories, the disk-only offline cache and streamed
@@ -360,12 +384,20 @@ enablement is held by the native public-output gate; the main and generic
 callers retain hand-only/null-key behavior. Complete scoped facts, downstream moments,
 fallbacks and global cross-log card-set deduplication remain intact.
 
-Private canonical Arena
-season spools are copied into all-season/latest assets in bounded UTF-8 chunks;
-JSON order, numeric formatting and every history point remain exact. Default-pack
-validation is unchanged. The installed bundle does not follow desktop edits
-automatically: qualification and rollout status are recorded in the backend's
-`reports/quick-win-qualification-20261006/README.md`. INSERT-only and canonical
+Installed Arena envelope assembly copies writer-owned canonical private season
+objects in bounded 1-MiB UTF-8 chunks, preserving JSON key order, numeric
+formatting, escaping and every history point. Private spool boundary checks
+reject incomplete objects; full artifact and default-pack validation stay on
+independent paths. Roster/history calculations and upload compression retain
+their existing behavior. The backend's qualified deployment is
+`deploy-114e8d834a97b90f8640`; reviewed release source and deployment evidence
+are in the backend's `reports/eff09-canonical-20261013/`. The refresh worker
+uses 16 canonical UPDATE batches, retaining every checkpoint and unchanged SQL;
+the standalone builder default remains 32. Full-size qualification matches all
+prepared values and measures this stage about 16% faster with about 30.6 MiB
+less anonymous working memory; this is not a whole-refresh peak measurement.
+Arena exact-output/memory evidence remains in
+`reports/eff11-arena-assembly-20261012/README.md`. INSERT-only and canonical
 UPDATE checkpoints remain per bucket; any cadence change requires demonstrated
 benefit plus full-size numeric and memory qualification. DuckDB 1.5.5 already prunes
 unused fields in Cards pair scope, so explicit projection alone provides no
@@ -392,8 +424,12 @@ every 30 s to `worker/<run-id>.memory-timeline.jsonl`; snapshot start/done event
 are streamed to temporary `worker/<run-id>.workflow.stdout.log` during execution.
 The worker consumes and removes stdout/stderr logs after completion; failed-run
 log tails are retained in private diagnostics. Copy full logs while a run is
-active if needed. Persistent resource profiles, timelines and accounting files
-are the post-run evidence. These diagnostic files are
+active if needed. Failed runs also retain completed worker and workflow stage
+timings in private accounting. Before ordinary failure cleanup removes a
+candidate snapshot tree, its bounded resource-profile journal is copied to
+`worker/<run-id>.snapshot-resource-profile.jsonl`; the private workflow report
+lists the retained measurement path. A hard process kill can leave only the
+incremental journal and memory timeline until recovery. These diagnostic files are
 not release artifacts and never enter the public snapshot bucket. Read
 "Private refresh measurements" in `phase5-source-sync.md` for interpretation:
 0.5-second sampling can miss short spikes; cgroup counters include shared charged
@@ -417,7 +453,9 @@ intervals remain absent. Interactive ordinary-CI requests are unchanged.
 Cards and Opening Hand's four MW/Base default artifacts can reuse a parent only
 after all logged relations were qualified under matching population,
 engine/producer signatures and the complete artifact hash, envelope, contract
-and schema validate. A new version envelope is written only after this proof.
+and schema validate. Qualified payloads are written into a fresh candidate
+directory; failed qualification falls back to the ordinary calculation. A new
+version envelope is written only after this proof.
 Other snapshots, including all Arena statistics and histories, are regenerated
 against the current candidate. No old interval is attached to a changed
 statistical population.

@@ -1,0 +1,6 @@
+title: Phase 5 DuckDB VM starter
+description: Start the fixed private DuckDB VM for dashboard refreshes and on-demand filtered requests.
+stage: GA
+includedPermissions:
+- compute.instances.get
+- compute.instances.start

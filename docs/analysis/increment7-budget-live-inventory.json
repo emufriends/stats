@@ -25,6 +25,6 @@
   "push_service": "budget-shutdown",
   "push_service_region": "europe-west1",
   "push_service_ready": true,
-  "email_target": "hlmichel.vo@gmail.com",
+  "email_target": "[notification contact omitted]",
   "email_target_note": "The budget objects reference the established shared Monitoring channel; the installed CLI lacked the optional beta component needed to re-read the channel address in this audit."
 }

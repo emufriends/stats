@@ -1,3 +1,18 @@
+"""Maintenance Cloud Function and compatibility/reference SQL helpers.
+
+The browser's analytical endpoint is cloudrun-duckdb-gateway -> phase3_api,
+not this module's BigQuery query builders. Production daily/manual maintenance
+queues the private DuckDB worker; public BigQuery and partial legacy refreshes
+are disabled by configuration and fail-closed guards. The controlled source
+export lives in phase5_source_sync; the separate peak updater has its own entry
+point. Retained SQL is useful for pinned numerical references, not permission
+to re-enable analytical scans or publish a partial snapshot generation.
+
+For current runtime boundaries and independent audit evidence, start with
+AUDITOR_GUIDE.md, then contracts/dashboard-routes.v1.json. Do not infer the
+deployed serving architecture from the presence of BigQuery imports here.
+"""
+
 import functions_framework
 import csv
 import copy
@@ -90,6 +105,9 @@ VALID_ROUNDS = {"1", "2", "3", "4", "5", "6+"}
 
 CACHE_BUCKET = os.environ.get("CACHE_BUCKET")
 CACHE_PREFIX = os.environ.get("CACHE_PREFIX", "card-stats")
+# Production has no dashboard_cache analytical tables. The legacy query and
+# partial-rebuild switches below must remain false; controlled upstream imports
+# and private DuckDB refresh dispatch do not depend on those retired tables.
 PUBLIC_BIGQUERY_QUERIES_ENABLED = _environment_bool(
     "PUBLIC_BIGQUERY_QUERIES_ENABLED", False
 )
@@ -489,7 +507,10 @@ REFRESH_PAGE_PASSWORD = os.environ.get("REFRESH_PAGE_PASSWORD")
 REFRESH_STATUS_BLOB = f"{CACHE_PREFIX}/refresh/status.json"
 REFRESH_LOCK_BLOB = f"{CACHE_PREFIX}/refresh/lock.json"
 REFRESH_SOURCE_STATE_BLOB = f"{CACHE_PREFIX}/refresh/source-state.json"
-REFRESH_LOCK_MAX_AGE = timedelta(minutes=90)
+# The coordinated DuckDB build/publication window is six hours. Keep a
+# one-hour recovery margin so a legitimate long run cannot be mistaken for a
+# stale lock and overlapped by another manual/scheduled refresh.
+REFRESH_LOCK_MAX_AGE = timedelta(hours=7)
 PRIVATE_REFRESH_REQUEST_BLOB = os.environ.get(
     "PRIVATE_REFRESH_REQUEST_BLOB", f"{CACHE_PREFIX}/refresh/private-request.json"
 )
@@ -1491,94 +1512,21 @@ def _private_refresh_instance_running():
 
 
 def _prepare_private_source_export():
-    """Export changed BigQuery source families into the controlled import bucket.
-
-    This runs under the backend function identity, which already has the source
-    project access.  The VM receives only Parquet objects and a small manifest;
-    it never needs BigQuery credentials or a broad project role.
-    """
+    """Export a strictly consistent source generation without activating data."""
     import phase5_source_sync as source_sync
+    from phase5_source_export import prepare_source_export
 
-    bucket = storage.Client().bucket(PRIVATE_SOURCE_BUCKET)
-    previous_blob = bucket.blob(PRIVATE_SOURCE_MANIFEST_BLOB)
-    previous = None
-    if previous_blob.exists():
-        try:
-            previous_blob.reload()
-            previous = json.loads(previous_blob.download_as_text(encoding="utf-8"))
-        except Exception:
-            logging.exception("Ignoring invalid private source manifest")
-
-    client = source_sync.cloud_client()
-    metadata = source_sync.read_metadata(client)
-    fingerprints = source_sync.fingerprints(metadata)
-    if previous and previous.get("source_fingerprints") == fingerprints:
-        return {"status": "unchanged", "generation": previous.get("generation")}
-
-    # The source-sync helper deliberately caps a single canonical export at
-    # 8 GiB.  This is independent of the larger account-level daily quota.
-    cap = min(MAINTENANCE_BIGQUERY_MAX_BYTES_BILLED, 8 * 1024 ** 3)
-    plan = source_sync.make_plan(client, metadata, previous, cap)
-    # Include a short attempt suffix so a failed BigQuery EXPORT DATA job never
-    # collides with the next retry's non-overwriting destination prefix.
-    generation = (
-        "sync-" + source_sync.digest(fingerprints)[:20] + "-"
-        + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return prepare_source_export(
+        source_sync=source_sync,
+        bucket=storage.Client().bucket(PRIVATE_SOURCE_BUCKET),
+        client=source_sync.cloud_client(),
+        query_config=bigquery.QueryJobConfig,
+        extract_config=bigquery.ExtractJobConfig,
+        prefix=PRIVATE_SOURCE_PREFIX,
+        maintenance_budget=MAINTENANCE_BIGQUERY_MAX_BYTES_BILLED,
+        per_export_cap=min(MAINTENANCE_BIGQUERY_MAX_BYTES_BILLED, 8 * 1024 ** 3),
+        now=_utc_now_iso,
     )
-    prefix = f"{PRIVATE_SOURCE_PREFIX}/{generation}"
-    full_uri = f"gs://{PRIVATE_SOURCE_BUCKET}/{prefix}/full_sample-*.parquet"
-    logs_uri = f"gs://{PRIVATE_SOURCE_BUCKET}/{prefix}/logs-*.parquet"
-    full_sql = (
-        f"EXPORT DATA OPTIONS(uri='{full_uri}', format='PARQUET', overwrite=false) "
-        f"AS {source_sync.FULL_SQL}"
-    )
-    full_job = client.query(
-        full_sql,
-        location="US",
-        job_id=f"ark_private_source_{generation}_full",
-        job_retry=None,
-        job_config=bigquery.QueryJobConfig(
-            maximum_bytes_billed=cap,
-            use_query_cache=False,
-            labels={"ark_workload": "source_sync", "ark_component": "full_sample"},
-        ),
-    )
-    full_job.result()
-    logs_job = client.extract_table(
-        source_sync.LOGS,
-        logs_uri,
-        location="US",
-        job_id=f"ark_private_source_{generation}_logs",
-        job_config=bigquery.ExtractJobConfig(destination_format="PARQUET"),
-    )
-    logs_job.result()
-    if source_sync.fingerprints(source_sync.read_metadata(client)) != fingerprints:
-        raise RuntimeError("source changed during private export; retrying is required")
-
-    manifest = {
-        "status": "ok",
-        "mode": "controlled_export",
-        "generation": generation,
-        "created_at": _utc_now_iso(),
-        "source_fingerprints": fingerprints,
-        "source_metadata": metadata,
-        "export": {
-            "full_sample_uri": full_uri,
-            "logs_uri": logs_uri,
-        },
-        "estimated_query_bytes": plan.get("estimated_query_bytes", 0),
-    }
-    manifest_blob = bucket.blob(f"{prefix}/manifest.json")
-    manifest_blob.upload_from_string(
-        json.dumps(manifest, separators=(",", ":")),
-        content_type="application/json; charset=utf-8",
-    )
-    previous_blob.upload_from_string(
-        json.dumps(manifest, separators=(",", ":")),
-        content_type="application/json; charset=utf-8",
-        if_generation_match=previous_blob.generation if previous is not None else 0,
-    )
-    return {"status": "ok", "generation": generation, "estimated_query_bytes": plan.get("estimated_query_bytes", 0)}
 
 
 def _queue_private_refresh(mode):
@@ -2458,7 +2406,7 @@ def _resolve_records_elo_leaderboard_source():
 
 
 def _refresh_records_elo_leaderboard_snapshots(
-    source=None, source_status=None, live_error=None
+    source=None, source_status=None, live_error=None, refresh_run_id=None
 ):
     """Refresh the dataset-neutral Masters Top 100 snapshots atomically by view.
 
@@ -2466,6 +2414,11 @@ def _refresh_records_elo_leaderboard_snapshots(
     therefore publish the same validated rows so changing the global dataset
     cannot make the leaderboard disappear.
     """
+    active_refresh = _read_refresh_lock()
+    if active_refresh and active_refresh.get("run_id") != refresh_run_id:
+        raise RuntimeError(
+            "Elo Leaderboard publication is deferred while a dashboard release is active"
+        )
     if source is None:
         source, source_status, live_error = _resolve_records_elo_leaderboard_source()
     if source_status == "live":
@@ -2854,9 +2807,20 @@ def _validate_snapshot_pack_member(blob_name, snapshot, data_version):
         )
 
 
-def _write_default_snapshot_pack(data_version):
+def _write_default_snapshot_pack(data_version, refresh_run_id=None):
     """Publish all current default payloads as one atomically cached daily asset."""
     if not CACHE_BUCKET or not data_version:
+        return False
+    active_refresh = _read_refresh_lock()
+    if active_refresh and active_refresh.get("run_id") != refresh_run_id:
+        # The DuckDB release publisher owns both stable snapshot aliases and
+        # the pack while this lock exists. In particular, the independently
+        # refreshed sheet-backed Elo leaderboard must not republish an older
+        # pack over a release that is being activated.
+        logging.warning(
+            "Default-pack publication deferred while refresh %s owns the release lock",
+            active_refresh.get("run_id"),
+        )
         return False
     try:
         bucket = storage.Client().bucket(CACHE_BUCKET)
@@ -14438,6 +14402,17 @@ def get_card_stats(request):
 
     if maintenance_requested and not _has_maintenance_auth(request):
         return _maintenance_auth_error(headers)
+
+    # Retired legacy switches: the journaled VM refresh replaced them, and
+    # refresh_default_pack would write an outdated (schema 22) default pack over the
+    # live one. Rejected explicitly instead of being silently honoured.
+    retired = [key for key in ("refresh_data", "debug", "refresh_default_pack") if params.get(key) is True]
+    if retired:
+        return _json_http_response({
+            "status": "error",
+            "message": "retired request option(s): " + ", ".join(retired)
+            + "; use the scheduled/manual refresh workflow instead",
+        }, 410, headers, request)
 
     partial_refresh_requested = any(
         params.get(key) is True

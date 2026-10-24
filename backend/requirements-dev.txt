@@ -1,0 +1,3 @@
+-r requirements.txt
+# Native engine version used by the retained backend qualification evidence.
+duckdb==1.5.5

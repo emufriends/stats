@@ -1,0 +1,28 @@
+{
+  "fixture_version": "2026-09-22.1",
+  "source_generation": "phase2-20260915-b57235ad65db",
+  "source_database_manifest": "phase2_private_data/generations/phase4-precutover-records-20260917.manifest.json",
+  "selection": "first two eligible completed MW Map 1a tables with exactly two Full Sample and two Logs rows",
+  "table_ids": [600957643, 600971287],
+  "games": [
+    {"table_id":600957643,"player":"JDansp","pre_match_elo":626.04,"raw_opponent_elo":430.3699999999999,"canonical_opponent_pre_match_elo":435.3699999999999,"elo_delta":5.0,"starting_position":"Second player","game_result":1,"end_game_triggered":true,"concede":0,"game_ended_at":"2024-12-12T20:30:26"},
+    {"table_id":600957643,"player":"Jilderinho","pre_match_elo":435.3699999999999,"raw_opponent_elo":631.04,"canonical_opponent_pre_match_elo":626.04,"elo_delta":-5.0,"starting_position":"First player","game_result":2,"end_game_triggered":true,"concede":0,"game_ended_at":"2024-12-12T20:30:26"},
+    {"table_id":600971287,"player":"duckmammal","pre_match_elo":434.89,"raw_opponent_elo":316.45000000000005,"canonical_opponent_pre_match_elo":323.35,"elo_delta":6.9,"starting_position":"First player","game_result":1,"end_game_triggered":true,"concede":0,"game_ended_at":"2024-12-12T21:37:44"},
+    {"table_id":600971287,"player":"palmtreeflo","pre_match_elo":323.35,"raw_opponent_elo":441.78999999999996,"canonical_opponent_pre_match_elo":434.89,"elo_delta":-6.9,"starting_position":"Second player","game_result":2,"end_game_triggered":true,"concede":0,"game_ended_at":"2024-12-12T21:37:44"}
+  ],
+  "logs": [
+    {"table_id":600957643,"player":"JDansp","opening_cards":["Mountain Tapir","Red-shanked Douc","Sheep","Sumatran Tiger","Amazon House","American Bison","Tambaqui","Alpine Ibex"],"opening_keep":["Sumatran Tiger","Alpine Ibex","Mountain Tapir","Amazon House"],"played_cards":[{"card":"Orange Clownfish","type":"animal","round":1},{"card":"Amazon House","type":"sponsor","round":6},{"card":"Sea Animals","type":"project","round":2},{"card":"Habitat Diversity","type":"project","round":4}],"endgame_scores":[{"cp":4,"endgame":"Favorite Zoo"}]},
+    {"table_id":600957643,"player":"Jilderinho","opening_cards":["New Zealand Fur Seal","Zoo School","Snowy Owl","Excavation Site","Expert On Australia","Spokesperson","Veterinarian","Southern Blue-ringed Octopus"],"opening_keep":["Spokesperson","Veterinarian","Excavation Site","Zoo School"],"played_cards":[{"card":"Excavation Site","type":"sponsor","round":1},{"card":"Humphead Wrasse","type":"animal","round":5},{"card":"Habitat Diversity","type":"project","round":4},{"card":"Sea Animals","type":"project","round":5}],"endgame_scores":[{"cp":1,"endgame":"Large Animal Zoo"}]},
+    {"table_id":600971287,"player":"duckmammal","opening_cards":["Zoo School","Mediterranean Rainbow Wrasse","Horsfield's Tarsier","Donkey","Greater Flamingo","Barbary Macaque","Predator Management Plan","Sun Bear"],"opening_keep":["Sun Bear","Predator Management Plan","Greater Flamingo","Zoo School"],"played_cards":[{"card":"Greater Flamingo","type":"animal","round":2},{"card":"Sun Bear","type":"animal","round":6},{"card":"Zoo School","type":"sponsor","round":2},{"card":"Species Diversity","type":"project","round":4}],"endgame_scores":[{"cp":3,"endgame":"Diverse species Zoo"},{"cp":3,"endgame":"Specialized Habitat Zoo"}]},
+    {"table_id":600971287,"player":"palmtreeflo","opening_cards":["Long-billed Vulture","Caracal","Bird breeding program","Raccoon","Baboon Rock","Red-shanked Douc","Scarlet Macaw","Franchise Business"],"opening_keep":["Scarlet Macaw","Raccoon","Bird breeding program","Caracal"],"played_cards":[{"card":"Raccoon","type":"animal","round":2},{"card":"Technology Institute","type":"sponsor","round":5},{"card":"Species Diversity","type":"project","round":2},{"card":"Birds","type":"project","round":6}],"endgame_scores":[{"cp":2,"endgame":"Favorite Zoo"}]}
+  ],
+  "expected_invariants": {
+    "row_count": 4,
+    "table_count": 2,
+    "players_per_table": 2,
+    "opening_cards_per_player": 8,
+    "opening_keep_per_player": 4,
+    "raw_opponent_elo_must_not_equal_canonical_for_all_rows": true,
+    "excluded_summary_projects_seen_in_logs": ["Birds","Habitat Diversity","Sea Animals","Species Diversity"]
+  }
+}

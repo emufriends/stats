@@ -1,0 +1,35 @@
+{
+  "fixture_version": "2026-09-22.1",
+  "purpose": "Small adversarial raw-source fixture for independent contract oracles. Expected values are defined here, not imported from migrated builders.",
+  "games": [
+    {"table_id":1001,"player":"Alpha","is_mw":1,"map":"Map 1a: Observation Tower","pre_match_elo":700,"raw_opponent_elo":999,"elo_delta":2.0,"starting_position":"First player","completed":true,"corrupted":false},
+    {"table_id":1001,"player":"Beta","is_mw":1,"map":"Map 1a: Observation Tower","pre_match_elo":300,"raw_opponent_elo":111,"elo_delta":-2.0,"starting_position":"Second player","completed":true,"corrupted":false},
+    {"table_id":1002,"player":"Alpha","is_mw":1,"map":"Map 1a: Observation Tower","pre_match_elo":710,"raw_opponent_elo":950,"elo_delta":-4.0,"starting_position":"Second player","completed":true,"corrupted":false},
+    {"table_id":1002,"player":"Gamma","is_mw":1,"map":"Map 1a: Observation Tower","pre_match_elo":500,"raw_opponent_elo":222,"elo_delta":4.0,"starting_position":"First player","completed":true,"corrupted":false},
+    {"table_id":1003,"player":"Quitter","is_mw":0,"map":"Map 2a: Outdoor Areas","pre_match_elo":400,"raw_opponent_elo":401,"elo_delta":-8.0,"starting_position":"First player","completed":false,"corrupted":true},
+    {"table_id":1003,"player":"Continuer","is_mw":0,"map":"Map 2a: Outdoor Areas","pre_match_elo":401,"raw_opponent_elo":400,"elo_delta":8.0,"starting_position":"Second player","completed":false,"corrupted":true}
+  ],
+  "card_events": [
+    {"table_id":1001,"player":"Alpha","card":"Test Animal","type":"animal","round":1,"event_order":1},
+    {"table_id":1001,"player":"Alpha","card":"Test Animal","type":"animal","round":2,"event_order":2},
+    {"table_id":1002,"player":"Alpha","card":"Test Animal","type":"animal","round":1,"event_order":1},
+    {"table_id":1001,"player":"Alpha","card":"Africa","type":"project","round":1,"event_order":3}
+  ],
+  "opening_hands": [
+    {"table_id":1001,"player":"Alpha","dealt":["Test Animal","Other Card"],"kept":["Test Animal"]},
+    {"table_id":1002,"player":"Alpha","dealt":["Test Animal","Other Card"],"kept":[]}
+  ],
+  "expected": {
+    "canonical_opponent_elo": {"1001/Alpha":300,"1001/Beta":700,"1002/Alpha":500,"1002/Gamma":710,"1003/Quitter":401,"1003/Continuer":400},
+    "test_animal_play_event_ev":0.0,
+    "test_animal_unique_player_game_count":2,
+    "test_animal_round_1_ev":-1.0,
+    "test_animal_round_2_ev":2.0,
+    "test_animal_opening_dealt_ev":-1.0,
+    "test_animal_opening_kept_ev":2.0,
+    "test_animal_opening_keep_rate_pct":50.0,
+    "excluded_card":"Africa",
+    "non_home_visible_table_ids":[1001,1002],
+    "home_visible_table_ids":[1001,1002,1003]
+  }
+}

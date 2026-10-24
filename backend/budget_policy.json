@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "billing_currency": "EUR",
+  "warning_budget_amount": 20.0,
+  "hard_stop_budget_amount": 40.0,
+  "planning_reference_currency": "USD",
+  "planning_note": "The earlier $20/$40 wording was a planning shorthand. Google bills this account in EUR, so the enforceable alerts are EUR 20 and EUR 40 and are not exchange-rate pegged.",
+  "warning_delivery": "Configured privately in Cloud Billing; not included in public review source",
+  "hard_stop_action": "Stop ark-nova-duckdb-test in europe-west1-c",
+  "automatic_restart": false
+}

@@ -1,0 +1,27 @@
+[Unit]
+Description=Ark Nova private DuckDB API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=ark-analytics.slice
+User=ascri
+WorkingDirectory=/home/ascri/current-app
+Environment=PYTHONUNBUFFERED=1
+Environment=PHASE3_MAX_CONCURRENT_QUERIES=2
+Environment=PHASE3_SHARED_REQUEST_WAIT_SECONDS=95
+Environment=PHASE3_QUERY_SLOT_WAIT_SECONDS=10
+Environment=DUCKDB_SERVING_THREADS=2
+# Leave native/Python/cache headroom inside the shared 1456-MiB ceiling.
+Environment=DUCKDB_SERVING_MEMORY_LIMIT=800MB
+Environment=DUCKDB_QUERY_TIMEOUT_SECONDS=90
+Environment=PHASE5_QUERY_PAUSE_LOCK=/home/ascri/phase2_private_data/analytical-refresh.lock
+ExecStart=/usr/bin/python3 /home/ascri/current-app/phase3_api.py --generations-dir /home/ascri/phase2_private_data/generations --pointer /home/ascri/phase3_private_serving/current.json --cache /home/ascri/phase3_private_serving/phase5-cache.sqlite3 --audit /home/ascri/phase3_private_serving/phase5-audit.jsonl --host 0.0.0.0 --port 8787
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

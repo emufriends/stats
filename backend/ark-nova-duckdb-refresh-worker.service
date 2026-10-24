@@ -1,0 +1,48 @@
+[Unit]
+Description=Ark Nova private DuckDB refresh worker
+After=network-online.target ark-nova-duckdb-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=ark-analytics.slice
+User=ascri
+WorkingDirectory=/home/ascri/current-app
+Environment=PYTHONUNBUFFERED=1
+Environment=ARK_ROOT=/home/ascri
+Environment=REFRESH_BUCKET=ark-nova-stats-dashboard-cache
+Environment=REFRESH_PREFIX=card-stats
+Environment=SOURCE_BUCKET=ark-nova-stats-phase2-import-413312054512
+Environment=VM_ZONE=europe-west1-c
+Environment=VM_NAME=ark-nova-duckdb-test
+Environment=REFRESH_MEMORY_LIMIT=800MB
+# Each bounded canonical update is checkpointed. This refresh-only
+# setting reduces repeated passes without changing canonical values.
+Environment=DUCKDB_CANONICAL_UPDATE_BATCHES=16
+Environment=REFRESH_SOURCE_MEMORY_LIMIT=600MB
+Environment=REFRESH_ISOLATE_STAGES=true
+Environment=REFRESH_PAUSE_ANALYTICS=true
+Environment=PHASE5_QUERY_PAUSE_LOCK=/home/ascri/phase2_private_data/analytical-refresh.lock
+# Recreate the import from complete, checksum-validated local Parquet inputs.
+# Avoid cloning the much larger analytical database before rebuilding it.
+# Source sync, late corrections, duplicate multiplicity and deletions are unchanged.
+Environment=PHASE5_INCREMENTAL_SOURCE=false
+Environment=DUCKDB_SNAPSHOT_MEMORY_LIMIT=800MB
+Environment=DUCKDB_SNAPSHOT_THREADS=1
+# Offline publication warm-up shares the reduced refresh budget; this does
+# not change the independent live API engine setting.
+Environment=DUCKDB_SERVING_MEMORY_LIMIT=800MB
+Environment=DUCKDB_WORKER_KEEP_ALIVE=true
+Nice=19
+CPUWeight=20
+IOWeight=20
+ExecStart=/usr/bin/python3 /home/ascri/current-app/phase5_refresh_worker.py
+TimeoutStartSec=21600
+Restart=on-failure
+RestartSec=15
+# Kill refresh descendants before process-owned pause locks are released on
+# a service stop/restart; no orphaned builder may overlap resumed queries.
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

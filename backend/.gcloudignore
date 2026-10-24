@@ -1,0 +1,19 @@
+# Only source/configuration belongs in maintenance-function deployments.
+phase2_private_data/
+phase3_private_serving/
+reports/
+agent-coordination/
+__pycache__/
+*.pyc
+*.pyo
+.test-temp*/
+.codex-test-temp/
+.duckdb-spill/
+tmp????????/
+.increment2-*.duckdb*
+.increment2-*.json
+tmp_current_default_pack.json
+phase5-current-public-pack.bin
+phase5-public-default-mw.json
+phase5_retry_request*.json
+phase5_timeout_status.json
